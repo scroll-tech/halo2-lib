@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use halo2_pairing::bigint::{MultChip, MultConfig};
+use crate::mult::{MultChip, MultConfig};
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Layouter, SimpleFloorPlanner},
@@ -13,8 +13,8 @@ struct FunctionConfig<F: FieldExt> {
     selector: Selector,
     a: Column<Advice>,
     b: Column<Advice>,
-    out: Column<Advice>,
-    ab: MultConfig,
+    c: Column<Advice>,
+    mult: MultConfig,
     _marker: PhantomData<F>,
 }
 
@@ -32,13 +32,14 @@ impl<F: FieldExt> FunctionChip<F> {
         let selector = meta.selector();
         let a = meta.advice_column();
         let b = meta.advice_column();
+        let c = meta.advice_column();
         let out = meta.advice_column();
 
         let ab = MultChip::configure(
             meta,
             |meta| meta.query_selector(selector),
-            |meta| meta.query_advice(a, Rotation::cur()),
-            |meta| meta.query_advice(b, Rotation::cur()),
+            |meta| meta.query_advice(a, Rotation::cur()) + meta.query_advice(b, Rotation::cur()),
+            |meta| meta.query_advice(c, Rotation::cur()),
             out,
         );
 
@@ -46,8 +47,8 @@ impl<F: FieldExt> FunctionChip<F> {
             selector,
             a,
             b,
-            out,
-            ab,
+            c,
+            mult: ab,
             _marker: PhantomData,
         }
     }

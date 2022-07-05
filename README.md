@@ -14,16 +14,14 @@ Compile the repo
 cargo +nightly build
 ```
 
-Run examples
+Run main
 
 ```
-cargo +nightly test -- --nocapture test_example1
-cargo +nightly test -- --nocapture test_example2
+cargo +nightly test -- --nocapture test_dev
 ```
 
 Plot the circuit layout
 
 ```
-cargo +nightly test --all-features -- --nocapture plot_example1
-cargo +nightly test --all-features -- --nocapture plot_example2
+cargo +nightly test --all-features -- --nocapture plot_dev
 ```

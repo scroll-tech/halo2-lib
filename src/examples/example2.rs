@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use halo2_pairing::bigint::{MultChip, MultConfig};
+use crate::mult::{MultChip, MultConfig};
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Layouter, SimpleFloorPlanner},
@@ -12,7 +12,6 @@ use halo2_proofs::{
 struct FunctionConfig<F: FieldExt> {
     selector: Selector,
     a: Column<Advice>,
-    out: Column<Advice>,
     ab: MultConfig,
     _marker: PhantomData<F>,
 }
@@ -43,7 +42,6 @@ impl<F: FieldExt> FunctionChip<F> {
         FunctionConfig {
             selector,
             a,
-            out,
             ab,
             _marker: PhantomData,
         }
