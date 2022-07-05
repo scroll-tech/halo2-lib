@@ -8,24 +8,24 @@ use halo2_proofs::{
 };
 
 #[derive(Debug, Clone)]
-struct BigIntMultNoCarryConfig<F: FieldExt, const K: usize> {
+struct FpConfig<F: FieldExt, const K: usize> {
     s_mul: Selector,
     a: Column<Advice>,
     _marker: PhantomData<F>,
 }
 
 #[derive(Debug, Clone)]
-struct BigIntMultNoCarryChip<F: FieldExt, const K: usize> {
-    config: BigIntMultNoCarryConfig<F, K>,
+struct FpChip<F: FieldExt, const K: usize> {
+    config: FpConfig<F, K>,
 }
 
-impl<F: FieldExt, const K: usize> BigIntMultNoCarryChip<F, K> {
-    pub fn construct(config: BigIntMultNoCarryConfig<F, { K }>) -> Self {
+impl<F: FieldExt, const K: usize> FpChip<F, K> {
+    pub fn construct(config: FpConfig<F, { K }>) -> Self {
         Self { config }
     }
 
     pub fn configure(meta: &mut ConstraintSystem<F>)
-		     -> BigIntMultNoCarryConfig<F, K> {
+		     -> FpConfig<F, K> {
         let s_mul = meta.selector();
         let a = meta.advice_column();
 	meta.enable_equality(a);
@@ -66,7 +66,7 @@ impl<F: FieldExt, const K: usize> BigIntMultNoCarryChip<F, K> {
 	    });
 	}
 	
-        BigIntMultNoCarryConfig {
+        FpConfig {
             s_mul,
             a,
             _marker: PhantomData,
@@ -100,7 +100,7 @@ impl<F: FieldExt, const K: usize> BigIntMultNoCarryChip<F, K> {
 		  b: Vec<AssignedCell<F, F>>)
 		  -> Result<(), Error> {
         layouter.assign_region(
-            || "BigIntMultNoCarry",
+            || "Fp",
             |mut region| {
                 self.config.s_mul.enable(&mut region, 0)?;
 		for idx in 0..K {
@@ -136,7 +136,7 @@ struct TestCircuit<F: Field, const K: usize> {
 }
 
 impl<F: FieldExt, const K: usize> Circuit<F> for TestCircuit<F, { K }> {
-    type Config = BigIntMultNoCarryConfig<F, K>;
+    type Config = FpConfig<F, K>;
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
@@ -144,11 +144,11 @@ impl<F: FieldExt, const K: usize> Circuit<F> for TestCircuit<F, { K }> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        BigIntMultNoCarryChip::configure(meta)
+        FpChip::configure(meta)
     }
 
     fn synthesize(&self, config: Self::Config, mut layouter: impl Layouter<F>) -> Result<(), Error> {
-	let chip = BigIntMultNoCarryChip::construct(config);
+	let chip = FpChip::construct(config);
 	let (a_assigned, b_assigned) = chip.assign_inputs(layouter.namespace(|| "inputs"), self.a_vals.as_slice(), self.b_vals.as_slice())?;
         chip.assign(layouter.namespace(||"actual circuit"), a_assigned, b_assigned)?;
         Ok(())
@@ -160,11 +160,11 @@ mod tests {
     use halo2_proofs::{dev::MockProver, pairing::bn256::Fr as Fn};
 
     #[test]
-    fn test_bigintmult1() {
+    fn test_fp() {
         let k = 6;
-        let circuit = TestCircuit::<Fn, 5> {
-            a_vals: vec![Fn::from(1), Fn::from(3), Fn::from(0), Fn::from(0), Fn::from(0)],
-            b_vals: vec![Fn::from(1), Fn::from(4), Fn::from(0), Fn::from(0), Fn::from(0)],
+        let circuit = TestCircuit::<Fn, 4> {
+            a_vals: vec![Fn::from(1), Fn::from(3), Fn::from(0), Fn::from(0)],
+            b_vals: vec![Fn::from(1), Fn::from(4), Fn::from(0), Fn::from(0)],
         };
 
         let prover = MockProver::run(k, &circuit, vec![]).unwrap();
@@ -174,16 +174,16 @@ mod tests {
 
     #[cfg(feature = "dev-graph")]
     #[test]
-    fn plot_bigintmult1() {
+    fn plot_fp() {
         use plotters::prelude::*;
 
-        let root = BitMapBackend::new("bigintmult1.png", (1024, 1024)).into_drawing_area();
+        let root = BitMapBackend::new("fp.png", (1024, 1024)).into_drawing_area();
         root.fill(&WHITE).unwrap();
-        let root = root.titled("BigIntMult1", ("sans-serif", 60)).unwrap();
+        let root = root.titled("FpTest", ("sans-serif", 60)).unwrap();
 
-        let circuit = TestCircuit::<Fn, 5> {
-            a_vals: vec![Fn::from(1), Fn::from(1), Fn::from(0), Fn::from(0), Fn::from(0)],
-            b_vals: vec![Fn::from(1), Fn::from(2), Fn::from(0), Fn::from(0), Fn::from(0)],
+        let circuit = TestCircuit::<Fn, 4> {
+            a_vals: vec![Fn::from(1), Fn::from(1), Fn::from(0), Fn::from(0)],
+            b_vals: vec![Fn::from(1), Fn::from(2), Fn::from(0), Fn::from(0)],
         };
         halo2_proofs::dev::CircuitLayout::default()
             .render(6, &circuit, &root)
