@@ -17,11 +17,11 @@ cargo +nightly build
 Run main
 
 ```
-cargo +nightly test -- --nocapture test_dev
+cargo +nightly test -- --nocapture test_gates
 ```
 
 Plot the circuit layout
 
 ```
-cargo +nightly test --all-features -- --nocapture plot_dev
+cargo +nightly test --all-features -- --nocapture plot_gates
 ```
