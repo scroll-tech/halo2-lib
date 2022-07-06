@@ -63,24 +63,24 @@ pub fn assign<F: FieldExt>(
 		range.qap_config.value,
 		offset,
 		running_pow.clone())?;
-	    let limb_cell = region.assign_advice_from_constant(
+	    region.constrain_constant(const_cell.cell(), running_pow.clone())?;
+	    let limb_cell = region.assign_advice(
 		|| format!("limb {}", idx),
 		range.qap_config.value,
 		offset + 1,
-		F::from(out_limbs[idx]))?;
-	    let out_cell = region.assign_advice_from_constant(
+		|| Ok(F::from(out_limbs[idx])))?;
+	    let out_cell = region.assign_advice(
 		|| format!("running sum {}", idx),
 		range.qap_config.value,
 		offset + 2,
-		running_sum.clone())?;
+		|| Ok(running_sum.clone()))?;
 
-	    region.constrain_constant(const_cell.cell(), running_pow.clone())?;
-	    range.qap_config.q_enable.enable(&mut region, offset - 1);
+	    range.qap_config.q_enable.enable(&mut region, offset - 1)?;
 	    
 	    offset = offset + 3;
 	    out_assignments.push(limb_cell);
 	    if idx == k - 1 {
-		region.constrain_equal(a.cell(), out_cell.cell());
+		region.constrain_equal(a.cell(), out_cell.cell())?;
 	    }
 	}
 	Ok(())

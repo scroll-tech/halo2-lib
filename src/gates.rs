@@ -191,7 +191,7 @@ pub(crate) mod tests {
 		    region.assign_advice_from_constant(|| "input", config.qap_config.value, 0, self.input)
 		})?;
 	    {
-		config.load_lookup_table(&mut layouter);
+		config.load_lookup_table(&mut layouter)?;
 	    }
 	    {
 		config.range_check(

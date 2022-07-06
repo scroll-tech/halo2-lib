@@ -6,6 +6,7 @@ use crate::gates::qap_gate;
 pub mod add_no_carry;
 pub mod decompose;
 pub mod mul_no_carry;
+pub mod check_carry_to_zero;
 
 pub trait PolynomialInstructions<F: FieldExt> {
     type Polynomial;
