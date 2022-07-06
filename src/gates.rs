@@ -1,4 +1,5 @@
 pub mod qap_gate;
+pub mod range;
 
 #[cfg(test)]
 pub(crate) mod tests {

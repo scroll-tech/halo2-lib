@@ -1,5 +1,8 @@
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
 use num_bigint::BigUint;
+
+use crate::gates::qap_gate;
+
 pub mod mul_no_carry;
 pub mod decompose;
 
@@ -14,25 +17,31 @@ pub trait PolynomialInstructions<F: FieldExt> {
     ) -> Result<Self::Polynomial, Error>;
 }
 
-pub trait BigIntInstructions<F: FieldExt>: PolynomialInstructions<F> {}
+pub trait BigIntInstructions<F: FieldExt>: PolynomialInstructions<F> {
+    fn decompose(
+	&self,
+	layouter: &mut impl Layouter<F>,
+	a: &AssignedCell<F, F>
+    ) -> Result<Self::BigInt, Error>;
+}
 
 #[derive(Clone, Debug)]
 pub struct OverflowInteger<F: FieldExt> {
     limbs: Vec<AssignedCell<F, F>>,
     max_limb_size: BigUint,
-    limb_base: BigUint,
+    limb_bits: usize,
 }
 
 impl<F: FieldExt> OverflowInteger<F> {
     pub fn construct(
 	limbs: Vec<AssignedCell<F, F>>,
 	max_limb_size: BigUint,
-	limb_base: BigUint
+	limb_bits: usize
     ) -> Self {
         Self {
             limbs,
             max_limb_size,
-	    limb_base
+	    limb_bits
         }
     }
 }
