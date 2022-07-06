@@ -12,7 +12,7 @@ pub(crate) mod tests {
         poly::Rotation,
     };
 
-    use super::qap_gate;
+    use super::{qap_gate, range};
 
     #[derive(Debug, Clone)]
     struct MyConfig<F: FieldExt> {
@@ -138,4 +138,94 @@ pub(crate) mod tests {
             .render(5, &circuit, &root)
             .unwrap();
     }
+
+    
+    #[derive(Default)]
+    struct RangeTestCircuit<F> {
+	range_bits: usize,
+	input: F,
+    }
+
+    impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
+        type Config = range::RangeConfig<F>;
+        type FloorPlanner = SimpleFloorPlanner;
+
+        fn without_witnesses(&self) -> Self {
+            Self::default()
+        }
+
+        fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+	    let q_lookup = meta.complex_selector();
+	    let lookup = meta.lookup_table_column();
+	    let value = meta.advice_column();
+	    let fixed = meta.fixed_column();
+	    meta.enable_constant(fixed);
+	    
+	    let qap_config = qap_gate::Config::configure(
+		meta,
+		value,
+	    );
+            range::RangeConfig::configure(
+		meta,
+		q_lookup,
+		lookup,
+		3,
+		qap_config,
+	    )
+        }
+
+        fn synthesize(
+            &self,
+            config: Self::Config,
+            mut layouter: impl Layouter<F>,
+        ) -> Result<(), Error> {
+	    let input = layouter.assign_region(
+		|| "inputs",
+		|mut region| {
+		    region.assign_advice_from_constant(|| "input", config.qap_config.value, 0, self.input)
+		})?;
+	    {
+		config.load_lookup_table(&mut layouter);
+	    }
+	    {
+		config.range_check(
+		    &mut layouter,
+		    &input,
+		    self.range_bits)
+	    }
+        }
+    }
+    
+    #[test]
+    fn test_range() {
+        let k = 10;
+        let circuit = RangeTestCircuit::<Fn> {
+	    range_bits: 9,
+	    input: Fn::from(100)
+        };
+
+        let prover = MockProver::run(k, &circuit, vec![]).unwrap();
+        //prover.assert_satisfied();
+        assert_eq!(prover.verify(), Ok(()));
+    }
+
+    #[cfg(feature = "dev-graph")]
+    #[test]
+    fn plot_range() {
+        use plotters::prelude::*;
+
+        let root = BitMapBackend::new("layout.png", (1024, 1024)).into_drawing_area();
+        root.fill(&WHITE).unwrap();
+        let root = root.titled("Gates Layout", ("sans-serif", 60)).unwrap();
+
+        let circuit = RangeTestCircuit::<Fn> {
+	    range_bits: 9,
+	    input: Fn::from(100)
+        };
+	
+
+        halo2_proofs::dev::CircuitLayout::default()
+            .render(5, &circuit, &root)
+            .unwrap();
+    }    
 }
