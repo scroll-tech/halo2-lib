@@ -5,8 +5,7 @@ use num_traits::One;
 use std::marker::PhantomData;
 
 // Gate to perform `a + b * c - out = 0`
-// We chose `a + b * c` instead of `a * b + c` to allow "chaining" of gates,
-// i.e., the output `out` of one gate becomes `a` in the next gate.
+// We chose `a + b * c` instead of `a * b + c` to allow "chaining" of gates, i.e., the output of one gate because `a` in the next gate
 #[derive(Clone, Debug)]
 pub struct Config<F: FieldExt> {
     pub q_enable: Selector,
@@ -138,7 +137,6 @@ impl<F: FieldExt> Config<F> {
 
                 // Assign constant `-1` into `value` column at offset `2`
                 let minus_1 = big_to_fe(modulus::<F>() - big_uint::one());
-                println!("{:?}", modulus::<F>() - big_uint::one());
                 let cell = region.assign_advice_from_constant(|| "1", self.value, 2, minus_1)?;
                 region.constrain_constant(cell.cell(), minus_1)?;
 

@@ -1,12 +1,17 @@
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
-use num_bigint::BigUint;
+use num_bigint::BigUint as big_uint;
+use num_traits::One;
 
-use crate::gates::qap_gate;
+use crate::{
+    gates::qap_gate,
+    utils::{big_to_fe, decompose_big},
+};
 
 pub mod add_no_carry;
-pub mod decompose;
-pub mod mul_no_carry;
 pub mod check_carry_to_zero;
+pub mod decompose;
+pub mod mod_reduce;
+pub mod mul_no_carry;
 
 pub trait PolynomialInstructions<F: FieldExt> {
     type Polynomial;
@@ -39,14 +44,14 @@ pub trait BigIntInstructions<F: FieldExt>: PolynomialInstructions<F> {
 #[derive(Clone, Debug)]
 pub struct OverflowInteger<F: FieldExt> {
     limbs: Vec<AssignedCell<F, F>>,
-    max_limb_size: BigUint,
+    max_limb_size: big_uint,
     limb_bits: usize,
 }
 
 impl<F: FieldExt> OverflowInteger<F> {
     pub fn construct(
         limbs: Vec<AssignedCell<F, F>>,
-        max_limb_size: BigUint,
+        max_limb_size: big_uint,
         limb_bits: usize,
     ) -> Self {
         Self {
@@ -125,11 +130,11 @@ pub(crate) mod tests {
         let circuit = MyCircuit::<Fn> {
             a: (vec![100, 200, 300, 400])
                 .iter()
-                .map(|&a| Some(big_to_fe(big_uint::from(a as u64))))
+                .map(|&a| Some(big_to_fe(&big_uint::from(a as u64))))
                 .collect(),
             b: (vec![500, 600, 700, 800])
                 .iter()
-                .map(|&a| Some(big_to_fe(big_uint::from(a as u64))))
+                .map(|&a| Some(big_to_fe(&big_uint::from(a as u64))))
                 .collect(),
         };
 
