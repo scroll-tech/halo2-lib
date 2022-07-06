@@ -1,6 +1,7 @@
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
 use num_bigint::BigUint;
 pub mod mul_no_carry;
+pub mod decompose;
 
 pub trait PolynomialInstructions<F: FieldExt> {
     type Polynomial;
@@ -19,13 +20,19 @@ pub trait BigIntInstructions<F: FieldExt>: PolynomialInstructions<F> {}
 pub struct OverflowInteger<F: FieldExt> {
     limbs: Vec<AssignedCell<F, F>>,
     max_limb_size: BigUint,
+    limb_base: BigUint,
 }
 
 impl<F: FieldExt> OverflowInteger<F> {
-    pub fn construct(limbs: Vec<AssignedCell<F, F>>, max_limb_size: BigUint) -> Self {
+    pub fn construct(
+	limbs: Vec<AssignedCell<F, F>>,
+	max_limb_size: BigUint,
+	limb_base: BigUint
+    ) -> Self {
         Self {
             limbs,
             max_limb_size,
+	    limb_base
         }
     }
 }

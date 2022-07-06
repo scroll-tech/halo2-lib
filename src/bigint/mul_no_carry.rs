@@ -10,6 +10,7 @@ pub fn assign<F: FieldExt>(
     a: &OverflowInteger<F>,
     b: &OverflowInteger<F>,
 ) -> Result<OverflowInteger<F>, Error> {
+    assert_eq!(a.limb_base, b.limb_base);
     let k_a = a.limbs.len();
     let k_b = b.limbs.len();
     let k_out = k_a + k_b - 1;
@@ -69,5 +70,6 @@ pub fn assign<F: FieldExt>(
     Ok(OverflowInteger::construct(
         out_limbs,
         BigUint::from(std::cmp::min(k_a, k_b)) * a.max_limb_size.clone() * b.max_limb_size.clone(),
+	a.limb_base.clone()
     ))
 }

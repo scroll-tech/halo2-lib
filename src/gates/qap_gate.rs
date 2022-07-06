@@ -2,7 +2,8 @@ use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*, poly::Rotation};
 use std::marker::PhantomData;
 
 // Gate to perform `a + b * c - out = 0`
-// We chose `a + b * c` instead of `a * b + c` to allow "chaining" of gates, i.e., the output of one gate because `a` in the next gate
+// We chose `a + b * c` instead of `a * b + c` to allow "chaining" of gates,
+// i.e., the output `out` of one gate becomes `a` in the next gate.
 #[derive(Clone, Debug)]
 pub struct Config<F: FieldExt> {
     pub q_enable: Selector,
