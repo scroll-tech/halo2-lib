@@ -70,6 +70,6 @@ pub fn assign<F: FieldExt>(
     Ok(OverflowInteger::construct(
         out_limbs,
         BigUint::from(std::cmp::min(k_a, k_b)) * a.max_limb_size.clone() * b.max_limb_size.clone(),
-	a.limb_bits
+        a.limb_bits,
     ))
 }

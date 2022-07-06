@@ -1,5 +1,6 @@
 // utils from halo2wrong
 use halo2_proofs::arithmetic::FieldExt;
+use num_bigint::BigInt as big_int;
 use num_bigint::BigUint as big_uint;
 use num_traits::{Num, One, Zero};
 use std::ops::Shl;

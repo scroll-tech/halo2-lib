@@ -3,11 +3,19 @@ use num_bigint::BigUint;
 
 use crate::gates::qap_gate;
 
-pub mod mul_no_carry;
+pub mod add_no_carry;
 pub mod decompose;
+pub mod mul_no_carry;
 
 pub trait PolynomialInstructions<F: FieldExt> {
     type Polynomial;
+
+    fn add_no_carry(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &Self::Polynomial,
+        b: &Self::Polynomial,
+    ) -> Result<Self::Polynomial, Error>;
 
     fn mul_no_carry(
         &self,
@@ -19,11 +27,11 @@ pub trait PolynomialInstructions<F: FieldExt> {
 
 pub trait BigIntInstructions<F: FieldExt>: PolynomialInstructions<F> {
     type BigInt;
-    
+
     fn decompose(
-	&self,
-	layouter: &mut impl Layouter<F>,
-	a: &AssignedCell<F, F>
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &AssignedCell<F, F>,
     ) -> Result<Self::BigInt, Error>;
 }
 
@@ -36,14 +44,14 @@ pub struct OverflowInteger<F: FieldExt> {
 
 impl<F: FieldExt> OverflowInteger<F> {
     pub fn construct(
-	limbs: Vec<AssignedCell<F, F>>,
-	max_limb_size: BigUint,
-	limb_bits: usize
+        limbs: Vec<AssignedCell<F, F>>,
+        max_limb_size: BigUint,
+        limb_bits: usize,
     ) -> Self {
         Self {
             limbs,
             max_limb_size,
-	    limb_bits
+            limb_bits,
         }
     }
 }
@@ -88,11 +96,24 @@ pub(crate) mod tests {
             let chip = FpChip::construct(config);
             let a_assigned = chip.load_private(layouter.namespace(|| "input a"), self.a.clone())?;
             let b_assigned = chip.load_private(layouter.namespace(|| "input b"), self.b.clone())?;
-            chip.mul_no_carry(
-                &mut layouter.namespace(|| "mul no carry"),
-                &a_assigned,
-                &b_assigned,
-            )?;
+
+            // test mul_no_carry
+            {
+                chip.mul_no_carry(
+                    &mut layouter.namespace(|| "mul no carry"),
+                    &a_assigned,
+                    &b_assigned,
+                )?;
+            }
+
+            // test add_no_carry
+            {
+                chip.add_no_carry(
+                    &mut layouter.namespace(|| "add no carry"),
+                    &a_assigned,
+                    &b_assigned,
+                )?;
+            }
             Ok(())
         }
     }

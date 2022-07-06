@@ -1,4 +1,7 @@
+use crate::utils::*;
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*, poly::Rotation};
+use num_bigint::BigUint as big_uint;
+use num_traits::One;
 use std::marker::PhantomData;
 
 // Gate to perform `a + b * c - out = 0`
@@ -108,6 +111,40 @@ impl<F: FieldExt> Config<F> {
                 let a = a.value();
                 let b = b.value();
                 let out = a.zip(b).map(|(a, b)| *a + *b);
+                region.assign_advice(|| "out", self.value, 3, || out.ok_or(Error::Synthesis))
+            },
+        )
+    }
+
+    // Layouter creates new region that copies a, b and constrains `a + b * (-1) = out`
+    // Requires config to have a fixed column with `enable_constants` on
+    pub fn sub(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &AssignedCell<F, F>,
+        b: &AssignedCell<F, F>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        layouter.assign_region(
+            || "native sub",
+            |mut region| {
+                // Enable `q_enable` selector
+                self.q_enable.enable(&mut region, 0)?;
+
+                // Copy `a` into `value` column at offset `0`
+                a.copy_advice(|| "a", &mut region, self.value, 0)?;
+
+                // Copy `b` into `value` column at offset `1`
+                b.copy_advice(|| "b", &mut region, self.value, 1)?;
+
+                // Assign constant `-1` into `value` column at offset `2`
+                let minus_1 = big_to_fe(modulus::<F>() - big_uint::one());
+                println!("{:?}", modulus::<F>() - big_uint::one());
+                let cell = region.assign_advice_from_constant(|| "1", self.value, 2, minus_1)?;
+                region.constrain_constant(cell.cell(), minus_1)?;
+
+                let a = a.value();
+                let b = b.value();
+                let out = a.zip(b).map(|(a, b)| *a - *b);
                 region.assign_advice(|| "out", self.value, 3, || out.ok_or(Error::Synthesis))
             },
         )

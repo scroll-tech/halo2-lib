@@ -1,7 +1,7 @@
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
 use num_bigint::BigUint;
 
-use crate::bigint::{mul_no_carry, decompose, BigIntInstructions, OverflowInteger, PolynomialInstructions};
+use crate::bigint::*;
 use crate::gates::qap_gate;
 use crate::gates::range;
 
@@ -26,37 +26,37 @@ impl<F: FieldExt> FpChip<F> {
     pub fn construct(config: FpConfig<F>) -> Self {
         Self { config }
     }
-    
+
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
         value: Column<Advice>,
         constant: Column<Fixed>,
-	lookup_bits: usize,
-	limb_bits: usize,
-	num_limbs: usize,
+        lookup_bits: usize,
+        limb_bits: usize,
+        num_limbs: usize,
     ) -> FpConfig<F> {
-	let lookup = meta.lookup_table_column();
-	let q_lookup = meta.complex_selector();
+        let lookup = meta.lookup_table_column();
+        let q_lookup = meta.complex_selector();
         meta.enable_equality(value);
         meta.enable_constant(constant);
 
-	let gate_config = qap_gate::Config::configure(meta, value);
+        let gate_config = qap_gate::Config::configure(meta, value);
         FpConfig {
             value,
             constant,
-	    lookup,
-	    lookup_bits,
-	    q_lookup,
+            lookup,
+            lookup_bits,
+            q_lookup,
             gate: gate_config.clone(),
-	    range: range::RangeConfig::configure(
-		meta,
-		q_lookup,
-		lookup,
-		lookup_bits,
-		gate_config.clone()
-	    ),
-	    limb_bits,
-	    num_limbs,
+            range: range::RangeConfig::configure(
+                meta,
+                q_lookup,
+                lookup,
+                lookup_bits,
+                gate_config.clone(),
+            ),
+            limb_bits,
+            num_limbs,
         }
     }
 
@@ -86,7 +86,7 @@ impl<F: FieldExt> FpChip<F> {
         Ok(OverflowInteger::construct(
             limbs,
             BigUint::from(1u32) << 64,
-	    64
+            64,
         ))
     }
 
@@ -116,13 +116,23 @@ impl<F: FieldExt> FpChip<F> {
         Ok(OverflowInteger::construct(
             limbs,
             BigUint::from(1u32) << 64,
-	    64,
+            64,
         ))
     }
 }
 
 impl<F: FieldExt> PolynomialInstructions<F> for FpChip<F> {
-    type Polynomial = OverflowInteger<F>;	
+    type Polynomial = OverflowInteger<F>;
+
+    fn add_no_carry(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &Self::Polynomial,
+        b: &Self::Polynomial,
+    ) -> Result<Self::Polynomial, Error> {
+        add_no_carry::assign(&self.config.gate, layouter, a, b)
+    }
+
     fn mul_no_carry(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -136,14 +146,16 @@ impl<F: FieldExt> PolynomialInstructions<F> for FpChip<F> {
 impl<F: FieldExt> BigIntInstructions<F> for FpChip<F> {
     type BigInt = OverflowInteger<F>;
     fn decompose(
-	&self,
-	layouter: &mut impl Layouter<F>,
-	a: &AssignedCell<F, F>
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &AssignedCell<F, F>,
     ) -> Result<Self::BigInt, Error> {
-	decompose::assign(&self.config.range,
-			  layouter,
-			  a,
-			  self.config.limb_bits,
-			  self.config.num_limbs)
+        decompose::assign(
+            &self.config.range,
+            layouter,
+            a,
+            self.config.limb_bits,
+            self.config.num_limbs,
+        )
     }
 }

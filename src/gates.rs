@@ -91,6 +91,11 @@ pub(crate) mod tests {
                 config.gate.add(&mut layouter, &a_cell, &b_cell)?;
             }
 
+            // test sub
+            {
+                config.gate.sub(&mut layouter, &a_cell, &b_cell)?;
+            }
+
             // test multiply
             {
                 config.gate.mul(&mut layouter, &c_cell, &b_cell)?;
@@ -108,7 +113,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_gates() {
-        let k = 5;
+        let k = 6;
         let circuit = MyCircuit::<Fn> {
             a: Fn::from(10),
             b: Fn::from(12),
@@ -123,6 +128,7 @@ pub(crate) mod tests {
     #[cfg(feature = "dev-graph")]
     #[test]
     fn plot_gates() {
+        let k = 6;
         use plotters::prelude::*;
 
         let root = BitMapBackend::new("layout.png", (1024, 1024)).into_drawing_area();
@@ -135,7 +141,7 @@ pub(crate) mod tests {
             c: Fn::zero(),
         };
         halo2_proofs::dev::CircuitLayout::default()
-            .render(5, &circuit, &root)
+            .render(k, &circuit, &root)
             .unwrap();
     }
 
