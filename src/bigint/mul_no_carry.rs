@@ -1,8 +1,4 @@
-use halo2_proofs::{
-    arithmetic::{Field, FieldExt},
-    circuit::*,
-    plonk::*,
-};
+use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
 use num_bigint::BigUint;
 
 use super::OverflowInteger;
@@ -21,7 +17,7 @@ pub fn assign<F: FieldExt>(
 
     for i in 0..k_out {
         let out_cell = layouter.assign_region(
-            || "out_i",
+            || format!("mul_no_carry_{}", i),
             |mut region| {
                 let mut offset = 0;
 
@@ -30,8 +26,8 @@ pub fn assign<F: FieldExt>(
                     region.assign_advice_from_constant(|| "0", gate.value, 0, F::zero())?;
                 region.constrain_constant(out_cell.cell(), F::zero())?;
 
-                let startj = if i > k_b { i - k_b } else { 0 };
-                for j in startj..i {
+                let startj = if i >= k_b { i - k_b + 1 } else { 0 };
+                for j in startj..=i {
                     if j >= k_a {
                         break;
                     }
@@ -39,8 +35,18 @@ pub fn assign<F: FieldExt>(
 
                     let a_cell = &a.limbs[j];
                     let b_cell = &b.limbs[i - j];
-                    a_cell.copy_advice(|| "a_j", &mut region, gate.value, offset + 1)?;
-                    b_cell.copy_advice(|| "b_{i-j}", &mut region, gate.value, offset + 2)?;
+                    a_cell.copy_advice(
+                        || format!("a_{}", j),
+                        &mut region,
+                        gate.value,
+                        offset + 1,
+                    )?;
+                    b_cell.copy_advice(
+                        || format!("b_{}", i - j),
+                        &mut region,
+                        gate.value,
+                        offset + 2,
+                    )?;
 
                     out_val = out_val
                         .zip(a_cell.value())

@@ -126,7 +126,7 @@ pub(crate) mod tests {
 
         let root = BitMapBackend::new("layout.png", (1024, 1024)).into_drawing_area();
         root.fill(&WHITE).unwrap();
-        let root = root.titled("Dev Layout", ("sans-serif", 60)).unwrap();
+        let root = root.titled("Gates Layout", ("sans-serif", 60)).unwrap();
 
         let circuit = MyCircuit::<Fn> {
             a: Fn::zero(),

@@ -10,8 +10,13 @@ halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2.gi
 dev-graph = ["halo2_proofs/dev-graph", "plotters"]
 
 [dependencies]
-rand = "0.8"
 num-bigint = { version = "0.4", features = ["rand"] }
+num-integer = "0.1"
+num-traits = "0.2"
 halo2_proofs = { version = "0.1.0-beta.1" }
 plotters = { version = "0.3.0", optional = true }
 tabbycat = { version = "0.1", features = ["attributes"], optional = true }
+
+[dev-dependencies]
+rand = "0.8"
+rand_core = { version = "0.6", default-features = false }
