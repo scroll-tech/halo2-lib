@@ -5,7 +5,7 @@ use std::marker::PhantomData;
 // We chose `a + b * c` instead of `a * b + c` to allow "chaining" of gates, i.e., the output of one gate because `a` in the next gate
 #[derive(Clone, Debug)]
 pub struct Config<F: FieldExt> {
-    q_enable: Selector,
+    pub q_enable: Selector,
     // one column to store the inputs and outputs of the gate
     pub value: Column<Advice>,
     _marker: PhantomData<F>,
@@ -178,12 +178,59 @@ impl<F: FieldExt> Config<F> {
                         offset + 1,
                         *constant,
                     )?;
-                    region.constrain_constant(const_cell.cell(), *constant);
+                    region.constrain_constant(const_cell.cell(), *constant)?;
 
                     // `c = signal` as copy
                     signal.copy_advice(|| "signal", &mut region, self.value, offset + 2)?;
 
                     sum = sum.zip(signal.value()).map(|(sum, c)| sum + *constant * *c);
+                    a_cell = region.assign_advice(
+                        || "out",
+                        self.value,
+                        offset + 3,
+                        || sum.ok_or(Error::Synthesis),
+                    )?;
+
+                    offset += 3;
+                }
+                Ok(a_cell)
+            },
+        )
+    }
+
+    // Layouter takes two vectors of `AssignedCell` and constrains a witness output to the inner product of `<vec_a, vec_b>`
+    pub fn inner_product(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        vec_a: &Vec<AssignedCell<F, F>>,
+        vec_b: &Vec<AssignedCell<F, F>>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        assert_eq!(vec_a.len(), vec_b.len());
+        // don't try to call this function with empty inputs!
+        if vec_a.len() == 0 {
+            return Err(Error::Synthesis);
+        }
+        layouter.assign_region(
+            || "inner product",
+            |mut region| {
+                let mut offset = 0;
+
+                let mut sum = Some(F::zero());
+
+                let mut a_cell =
+                    region.assign_advice_from_constant(|| "0", self.value, 0, F::zero())?;
+                region.constrain_constant(a_cell.cell(), F::zero())?;
+
+                for (a, b) in vec_a.iter().zip(vec_b.iter()) {
+                    self.q_enable.enable(&mut region, offset)?;
+
+                    a.copy_advice(|| "a_i", &mut region, self.value, offset + 1)?;
+                    b.copy_advice(|| "b_i", &mut region, self.value, offset + 2)?;
+
+                    sum = sum
+                        .zip(a.value())
+                        .zip(b.value())
+                        .map(|((sum, a), b)| sum + *a * *b);
                     a_cell = region.assign_advice(
                         || "out",
                         self.value,
