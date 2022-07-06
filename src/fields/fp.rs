@@ -1,7 +1,7 @@
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
 use num_bigint::BigUint;
 
-use crate::bigint::{mul_no_carry, decompose, BigIntInstructions, OverflowInteger};
+use crate::bigint::{mul_no_carry, decompose, BigIntInstructions, OverflowInteger, PolynomialInstructions};
 use crate::gates::qap_gate;
 use crate::gates::range;
 
@@ -57,7 +57,7 @@ impl<F: FieldExt> FpChip<F> {
 	    ),
 	    limb_bits,
 	    num_limbs,
-        };
+        }
     }
 
     pub fn load_private(
@@ -85,7 +85,8 @@ impl<F: FieldExt> FpChip<F> {
         )?;
         Ok(OverflowInteger::construct(
             limbs,
-            big_uint::from(1u32) << 64,
+            BigUint::from(1u32) << 64,
+	    64
         ))
     }
 
@@ -114,13 +115,14 @@ impl<F: FieldExt> FpChip<F> {
         )?;
         Ok(OverflowInteger::construct(
             limbs,
-            big_uint::from(1u32) << 64,
+            BigUint::from(1u32) << 64,
+	    64,
         ))
     }
 }
 
 impl<F: FieldExt> PolynomialInstructions<F> for FpChip<F> {
-    type Polynomial = OverflowInteger<F>;
+    type Polynomial = OverflowInteger<F>;	
     fn mul_no_carry(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -129,7 +131,10 @@ impl<F: FieldExt> PolynomialInstructions<F> for FpChip<F> {
     ) -> Result<Self::Polynomial, Error> {
         mul_no_carry::assign(&self.config.gate, layouter, a, b)
     }
+}
 
+impl<F: FieldExt> BigIntInstructions<F> for FpChip<F> {
+    type BigInt = OverflowInteger<F>;
     fn decompose(
 	&self,
 	layouter: &mut impl Layouter<F>,

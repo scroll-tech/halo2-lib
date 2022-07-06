@@ -18,6 +18,8 @@ pub trait PolynomialInstructions<F: FieldExt> {
 }
 
 pub trait BigIntInstructions<F: FieldExt>: PolynomialInstructions<F> {
+    type BigInt;
+    
     fn decompose(
 	&self,
 	layouter: &mut impl Layouter<F>,
@@ -75,7 +77,7 @@ pub(crate) mod tests {
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
             let value = meta.advice_column();
             let constant = meta.fixed_column();
-            FpChip::configure(meta, value, constant)
+            FpChip::configure(meta, value, constant, 16, 64, 4)
         }
 
         fn synthesize(
