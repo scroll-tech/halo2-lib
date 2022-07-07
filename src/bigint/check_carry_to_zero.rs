@@ -37,7 +37,7 @@ pub fn assign<F: FieldExt>(
 		    Some(a_val_big / &limb_val)
 		} else {
 		    let carry_val = carries[idx - 1].as_ref().unwrap();
-		    Some((a_val_big + carry_val) / &limb_val)
+		    Some(((a_val_big + carry_val) % modulus::<F>()) / &limb_val)
 		}
 	    },
 	    None => None,
@@ -45,7 +45,7 @@ pub fn assign<F: FieldExt>(
 	carries.push(carry);
     }
 
-    let mut carry_assignments = Vec::with_capacity(k);
+    let mut neg_carry_assignments = Vec::with_capacity(k);
     layouter.assign_region(
         || "carry consistency",
         |mut region| {
@@ -69,7 +69,7 @@ pub fn assign<F: FieldExt>(
 			offset + 1,
 			|| neg_carry.ok_or(Error::Synthesis)
                     )?;
-                    carry_assignments.push(last_carry);
+                    neg_carry_assignments.push(last_carry);
 		}
                 let limb = region.assign_advice_from_constant(
                     || "base",
@@ -88,7 +88,7 @@ pub fn assign<F: FieldExt>(
                     )?;
                     region.constrain_constant(zero.cell(), F::from(0))?;
                 } else {
-                    carry_assignments[idx - 1].copy_advice(
+                    neg_carry_assignments[idx - 1].copy_advice(
                         || "prev negative carry",
                         &mut region,
                         range.qap_config.value,
@@ -97,7 +97,7 @@ pub fn assign<F: FieldExt>(
                 }
                 offset = offset + 4;
             }
-            region.constrain_equal(a.limbs[k - 1].cell(), carry_assignments[k - 2].cell())?;
+            region.constrain_equal(a.limbs[k - 1].cell(), neg_carry_assignments[k - 2].cell())?;
             Ok(())
         },
     )?;
@@ -107,7 +107,7 @@ pub fn assign<F: FieldExt>(
         * (range.lookup_bits as u64)) as usize;
     let shift_val = big_to_fe::<F>(&(BigUint::one() << (range_bits - 1)));
     let mut shifted_carry_assignments = Vec::with_capacity(k);
-    for carry_cell in carry_assignments.iter() {
+    for carry_cell in neg_carry_assignments.iter() {
         layouter.assign_region(
             || "shift carries",
             |mut region| {
