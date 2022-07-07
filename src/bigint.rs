@@ -212,7 +212,7 @@ pub(crate) mod tests {
     #[cfg(feature = "dev-graph")]
     #[test]
     fn plot_bigint() {
-        let k = 17;
+        let k = 9;
         use plotters::prelude::*;
 
         let root = BitMapBackend::new("layout.png", (1024, 4096)).into_drawing_area();

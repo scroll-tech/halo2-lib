@@ -149,7 +149,9 @@ pub(crate) mod tests {
     #[derive(Default)]
     struct RangeTestCircuit<F> {
         range_bits: usize,
-        input: Option<F>,
+	lt_bits: usize,
+        a: Option<F>,
+	b: Option<F>
     }
 
     impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
@@ -159,7 +161,9 @@ pub(crate) mod tests {
         fn without_witnesses(&self) -> Self {
 	    Self {
 		range_bits: self.range_bits,
-		input: None
+		lt_bits: self.lt_bits,
+		a: None,
+		b: None
 	    }
         }
 
@@ -179,32 +183,49 @@ pub(crate) mod tests {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
-            let input = layouter.assign_region(
+            let (a, b) = layouter.assign_region(
                 || "inputs",
                 |mut region| {
-                    region.assign_advice(
+                    let a = region.assign_advice(
                         || "input",
                         config.qap_config.value,
                         0,
-                        || self.input.ok_or(Error::Synthesis),
-                    )
-                },
-            )?;
+                        || self.a.ok_or(Error::Synthesis),
+                    )?;
+		    let b = region.assign_advice(
+                        || "input",
+                        config.qap_config.value,
+                        1,
+                        || self.b.ok_or(Error::Synthesis),
+                    )?;
+		    Ok((a, b))
+                })?;
+	    
             {
                 config.load_lookup_table(&mut layouter)?;
             }
             {
-                config.range_check(&mut layouter, &input, self.range_bits)
+                config.range_check(&mut layouter, &a, self.range_bits)?;
             }
+	    {
+		config.check_less_than(
+		    &mut layouter,
+		    &a,
+		    &b,
+		    self.lt_bits
+		)
+	    }
         }
     }
 
     #[test]
     fn test_range() {
-        let k = 10;
+        let k = 11;
         let circuit = RangeTestCircuit::<Fn> {
             range_bits: 8,
-            input: Some(Fn::from(100)),
+	    lt_bits: 8,
+            a: Some(Fn::from(100)),
+	    b: Some(Fn::from(101)),
         };
 
         let prover = MockProver::run(k, &circuit, vec![]).unwrap();
@@ -222,8 +243,10 @@ pub(crate) mod tests {
         let root = root.titled("Gates Layout", ("sans-serif", 60)).unwrap();
 
         let circuit = RangeTestCircuit::<Fn> {
-            range_bits: 8,
-            input: Some(Fn::from(100)),
+	    range_bits: 8,
+	    lt_bits: 8,
+            a: Some(Fn::from(100)),
+	    b: Some(Fn::from(101)),
         };
 
         halo2_proofs::dev::CircuitLayout::default()

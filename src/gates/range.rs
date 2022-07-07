@@ -1,5 +1,5 @@
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*, poly::Rotation};
-use num_bigint::BigUint;
+use num_bigint::{BigInt, BigUint};
 use std::marker::PhantomData;
 
 use crate::gates::qap_gate;
@@ -174,4 +174,86 @@ impl<F: FieldExt> RangeConfig<F> {
         )?;
         Ok(())
     }
+
+    // Warning: This may fail silently if a or b have more than num_bits
+    pub fn check_less_than(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &AssignedCell<F, F>,
+        b: &AssignedCell<F, F>,
+	num_bits: usize,
+    ) -> Result<(), Error> {
+	let shifted_val = layouter.assign_region(
+	    || format!("check_less_than {} bits", num_bits),
+	    |mut region| {
+		let mut offset = 0;
+
+		self.qap_config.q_enable.enable(&mut region, offset)?;
+		let shifted_val = region.assign_advice(
+		    || "shifted_val",
+		    self.qap_config.value,
+		    offset,
+		    || Some(biguint_to_fe::<F>(&(BigUint::from(1u64) << num_bits)))
+			.zip(a.value())
+			.zip(b.value())
+			.map(|((x, av), bv)| *av + x - *bv).ok_or(Error::Synthesis)
+		)?;
+		b.copy_advice(
+		    || "b copy",
+		    &mut region,
+		    self.qap_config.value,
+		    offset + 1
+		)?;
+		let one = region.assign_advice_from_constant(
+		    || "one",
+		    self.qap_config.value,
+		    offset + 2,
+		    F::from(1)
+		)?;
+		region.constrain_constant(one.cell(), F::from(1))?;
+
+		self.qap_config.q_enable.enable(&mut region, offset + 3)?;
+		let shifted_val_partial = region.assign_advice(
+		    || "shifted_val_partial",
+		    self.qap_config.value,
+		    offset + 3,
+		    || Some(biguint_to_fe::<F>(&(BigUint::from(1u64) << num_bits)))
+			.zip(a.value())
+			.map(|(x, av)| *av + x).ok_or(Error::Synthesis)
+		)?;
+		let neg_pow = region.assign_advice_from_constant(
+		    || "neg_pow",
+		    self.qap_config.value,
+		    offset + 4,
+		    bigint_to_fe::<F>(
+			&(BigInt::from(-1i64) * (BigInt::from(1u64) << num_bits)))
+		)?;
+		
+		region.constrain_constant(
+		    neg_pow.cell(),
+		    bigint_to_fe::<F>(
+			&(BigInt::from(-1i64) * (BigInt::from(1u64) << num_bits))))?;
+		let one_rep = region.assign_advice_from_constant(
+		    || "one",
+		    self.qap_config.value,
+		    offset + 5,
+		    F::from(1)
+		)?;
+		region.constrain_constant(one_rep.cell(), F::from(1))?;
+		a.copy_advice(
+		    || "a copy",
+		    &mut region,
+		    self.qap_config.value,
+		    offset + 6,
+		)?;
+		Ok(shifted_val)
+	    })?;
+
+	self.range_check(
+	    layouter,
+	    &shifted_val,
+	    num_bits
+	)
+    }
 }
+
