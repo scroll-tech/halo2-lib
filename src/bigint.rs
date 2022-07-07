@@ -71,7 +71,7 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::fields::fp::{FpChip, FpConfig};
-    use crate::utils::big_to_fe;
+    use crate::utils::{big_to_fe, fe_to_big, power_of_two};
     use num_bigint::BigUint as big_uint;
 
     #[derive(Default)]
@@ -119,6 +119,33 @@ pub(crate) mod tests {
                     &a_assigned,
                     &b_assigned,
                 )?;
+            }
+
+            // test mod_reduce
+            {
+                let modulus = big_uint::from(17u32);
+                let out = chip.mod_reduce(
+                    &mut layouter.namespace(|| "mod reduce"),
+                    &a_assigned,
+                    2,
+                    modulus.clone(),
+                )?;
+
+                let mut a_big = Some(big_uint::from(0u32));
+                for (i, val) in self.a.iter().enumerate() {
+                    a_big = a_big.zip(*val).map(|(a, b)| a + fe_to_big(&b) << (64 * i));
+                }
+                a_big = a_big.map(|a| a % &modulus);
+
+                let mut out_val = Some(big_uint::from(0u32));
+                for (i, cell) in out.limbs.iter().enumerate() {
+                    out_val = out_val
+                        .zip(cell.value())
+                        .map(|(a, b)| a + fe_to_big(b) << (64 * i));
+                }
+                out_val = out_val.map(|a| a % &modulus);
+
+                assert_eq!(a_big, out_val);
             }
             Ok(())
         }

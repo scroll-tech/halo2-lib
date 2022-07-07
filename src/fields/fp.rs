@@ -86,7 +86,7 @@ impl<F: FieldExt> FpChip<F> {
         Ok(OverflowInteger::construct(
             limbs,
             BigUint::from(1u32) << 64,
-            64,
+            self.config.limb_bits,
         ))
     }
 
@@ -118,6 +118,16 @@ impl<F: FieldExt> FpChip<F> {
             BigUint::from(1u32) << 64,
             64,
         ))
+    }
+
+    pub fn mod_reduce(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &OverflowInteger<F>,
+        desired_num_limbs: usize,
+        modulus: num_bigint::BigUint,
+    ) -> Result<OverflowInteger<F>, Error> {
+        mod_reduce::assign(&self.config.gate, layouter, a, desired_num_limbs, modulus)
     }
 }
 

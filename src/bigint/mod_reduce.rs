@@ -1,7 +1,7 @@
 use super::OverflowInteger;
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
 use num_bigint::BigUint as big_uint;
-use num_traits::One;
+use num_traits::{One, Zero};
 
 use crate::{
     gates::qap_gate,
@@ -23,19 +23,20 @@ pub fn assign<F: FieldExt>(
 
     let m = a.limbs.len() - k;
     let limb_base = big_uint::one() << n;
-    let mut r_limbs = Vec::with_capacity(m * k);
+    let mut r_limbs: Vec<F> = Vec::with_capacity(m * k);
 
     // For i >= desired_num_limbs, compute r[i] = limb_base^i % modulus
-    let mut r = (&limb_base << k) % &modulus;
+    let mut r = limb_base.pow(k.try_into().unwrap()) % &modulus;
     for _i in k..a.limbs.len() {
-        if _i > 0 {
+        if _i > k {
             r = (r * &limb_base) % &modulus;
         }
         let mut r_temp = r.clone();
         for _j in 0..k {
-            r_limbs.push(big_to_fe(&(&r_temp % &limb_base))); // r_limbs[ (i-k) * m + j ]
+            r_limbs.push(big_to_fe(&(&r_temp % &limb_base))); // r_limbs[ (i-k) * k + j ]
             r_temp = r_temp / &limb_base;
         }
+        assert_eq!(r_temp, big_uint::zero());
     }
 
     let mut out_limbs = Vec::with_capacity(k);
@@ -56,7 +57,7 @@ pub fn assign<F: FieldExt>(
                 for i in k..a.limbs.len() {
                     gate.q_enable.enable(&mut region, offset)?;
 
-                    let r_val = &r_limbs[(i - k) * m + j];
+                    let r_val = &r_limbs[(i - k) * k + j];
                     let r_cell = region.assign_advice_from_constant(
                         || format!("r[{}][{}]", i, j),
                         gate.value,
