@@ -203,7 +203,7 @@ pub(crate) mod tests {
     fn test_range() {
         let k = 10;
         let circuit = RangeTestCircuit::<Fn> {
-            range_bits: 9,
+            range_bits: 8,
             input: Some(Fn::from(100)),
         };
 
@@ -222,7 +222,7 @@ pub(crate) mod tests {
         let root = root.titled("Gates Layout", ("sans-serif", 60)).unwrap();
 
         let circuit = RangeTestCircuit::<Fn> {
-            range_bits: 9,
+            range_bits: 8,
             input: Some(Fn::from(100)),
         };
 
