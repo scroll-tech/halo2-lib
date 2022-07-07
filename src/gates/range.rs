@@ -61,12 +61,13 @@ impl<F: FieldExt> RangeConfig<F> {
         Ok(())
     }
 
+    // returns the limbs
     pub fn range_check(
         &self,
         layouter: &mut impl Layouter<F>,
         a: &AssignedCell<F, F>,
         range_bits: usize,
-    ) -> Result<(), Error> {
+    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
         let k = (range_bits + self.lookup_bits - 1) / self.lookup_bits;
         let rem_bits = range_bits % self.lookup_bits;
 
@@ -87,6 +88,7 @@ impl<F: FieldExt> RangeConfig<F> {
                 )?;
                 self.q_lookup.enable(&mut region, 0)?;
 
+		let mut assigned_limbs = Vec::with_capacity(k);		
                 let mut offset = 1;
                 let mut running_sum = limb;
                 for idx in 1..k {
@@ -111,6 +113,7 @@ impl<F: FieldExt> RangeConfig<F> {
                         offset + 1,
                         || limb.map(|x| F::from(x)).ok_or(Error::Synthesis),
                     )?;
+		    assigned_limbs.push(limb_cell.clone());
 
                     let out_cell = region.assign_advice(
                         || format!("running sum {}", idx),
@@ -169,10 +172,9 @@ impl<F: FieldExt> RangeConfig<F> {
                         }
                     }
                 }
-                Ok(())
+		Ok(assigned_limbs)
             },
-        )?;
-        Ok(())
+        )
     }
 
     // Warning: This may fail silently if a or b have more than num_bits
@@ -253,7 +255,8 @@ impl<F: FieldExt> RangeConfig<F> {
 	    layouter,
 	    &shifted_val,
 	    num_bits
-	)
+	)?;
+	Ok(())
     }
 }
 
