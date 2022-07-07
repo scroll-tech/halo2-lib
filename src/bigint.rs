@@ -178,7 +178,6 @@ pub(crate) mod tests {
                 )?;
             }
 
-            /*
             // test check_carry_to_zero
             {
                 chip.check_carry_to_zero(
@@ -186,7 +185,6 @@ pub(crate) mod tests {
                     &b_assigned,
                 )?;
             }
-            */
 
             Ok(())
         }

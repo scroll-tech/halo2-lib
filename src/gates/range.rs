@@ -68,7 +68,7 @@ impl<F: FieldExt> RangeConfig<F> {
         range_bits: usize,
     ) -> Result<(), Error> {
         let k = (range_bits + self.lookup_bits - 1) / self.lookup_bits;
-	let rem_bits = range_bits % self.lookup_bits;
+        let rem_bits = range_bits % self.lookup_bits;
 
         let mut a_val = a
             .value()
@@ -125,45 +125,49 @@ impl<F: FieldExt> RangeConfig<F> {
                     offset = offset + 3;
                     if idx == k - 1 {
                         region.constrain_equal(a.cell(), out_cell.cell())?;
-			if rem_bits != 0 {
-			    self.qap_config.q_enable.enable(&mut region, offset)?;
-			    
-			    let zero_cell = region.assign_advice_from_constant(
-				|| "zero",
-				self.qap_config.value,
-				offset,
-				F::from(0),
-			    )?;
-			    region.constrain_constant(zero_cell.cell(), F::from(0))?;
-			    
-			    let limb_copy = limb_cell.copy_advice(
-				|| "shifted lookup",
-				&mut region,
-				self.qap_config.value,
-				offset + 1
-			    )?;
+                        if rem_bits != 0 {
+                            self.qap_config.q_enable.enable(&mut region, offset)?;
 
-			    let mult_val = big_to_fe(&(BigUint::from(1u64) << (self.lookup_bits - rem_bits)));
-			    let mult_cell = region.assign_advice_from_constant(
-				|| "mult",
-				self.qap_config.value,
-				offset + 2,
-				mult_val
-			    )?;
-			    region.constrain_constant(mult_cell.cell(), mult_val)?;
+                            let zero_cell = region.assign_advice_from_constant(
+                                || "zero",
+                                self.qap_config.value,
+                                offset,
+                                F::from(0),
+                            )?;
+                            region.constrain_constant(zero_cell.cell(), F::from(0))?;
 
-			    let prod_cell = region.assign_advice(
-				|| "prod",
-				self.qap_config.value,
-				offset + 3,
-				|| Some(mult_val)
-				    .zip(limb_copy.value())
-				    .map(|(m, l)| m * l)
-				    .ok_or(Error::Synthesis)
-			    )?;
-			    self.q_lookup.enable(&mut region, offset + 3)?;				    
-			}
-                    }		    
+                            let limb_copy = limb_cell.copy_advice(
+                                || "shifted lookup",
+                                &mut region,
+                                self.qap_config.value,
+                                offset + 1,
+                            )?;
+
+                            let mult_val = biguint_to_fe(
+                                &(BigUint::from(1u64) << (self.lookup_bits - rem_bits)),
+                            );
+                            let mult_cell = region.assign_advice_from_constant(
+                                || "mult",
+                                self.qap_config.value,
+                                offset + 2,
+                                mult_val,
+                            )?;
+                            region.constrain_constant(mult_cell.cell(), mult_val)?;
+
+                            let prod_cell = region.assign_advice(
+                                || "prod",
+                                self.qap_config.value,
+                                offset + 3,
+                                || {
+                                    Some(mult_val)
+                                        .zip(limb_copy.value())
+                                        .map(|(m, l)| m * l)
+                                        .ok_or(Error::Synthesis)
+                                },
+                            )?;
+                            self.q_lookup.enable(&mut region, offset + 3)?;
+                        }
+                    }
                 }
                 Ok(())
             },
