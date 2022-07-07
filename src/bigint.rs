@@ -132,19 +132,25 @@ pub(crate) mod tests {
 
                 let mut a_big = Some(big_uint::from(0u32));
                 for (i, val) in self.a.iter().enumerate() {
-                    a_big = a_big.zip(*val).map(|(a, b)| a + fe_to_big(&b) << (32 * i));
+		    a_big = a_big.zip(*val).map(|(a, b)| a + fe_to_big(&b) << (32 * i));
                 }
                 a_big = a_big.map(|a| a % &modulus);
 
                 let mut out_val = Some(big_uint::from(0u32));
+		let mut is_none = false;
                 for (i, cell) in out.limbs.iter().enumerate() {
-                    out_val = out_val
+		    out_val = out_val
                         .zip(cell.value())
-                        .map(|(a, b)| a + fe_to_big(b) << (32 * i));
-                }
-                out_val = out_val.map(|a| a % &modulus);
+                        .map(|(a, b)| a + fe_to_big(b) << (32 * i));                 
+                    out_val = out_val.map(|a| a % &modulus);		    
 
-                assert_eq!(a_big, out_val);
+		    if cell.value().is_none() {
+			is_none = true;
+		    }
+		}
+		if !is_none {		    		    
+		    assert_eq!(a_big, out_val);
+		}
             }
 
             // test decompose

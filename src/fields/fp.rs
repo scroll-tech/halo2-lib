@@ -73,7 +73,7 @@ impl<F: FieldExt> FpChip<F> {
 
         let limbs = layouter.assign_region(
             || "load private",
-            |mut region| {
+            |mut region| {		
                 let mut limbs = Vec::with_capacity(vec_a.len());
                 for (i, a) in vec_a.iter().enumerate() {
                     let limb = region.assign_advice(
@@ -81,7 +81,7 @@ impl<F: FieldExt> FpChip<F> {
                         config.value,
                         i,
                         || a.ok_or(Error::Synthesis),
-                    )?;
+                    )?;		    
                     limbs.push(limb);
                 }
                 Ok(limbs)

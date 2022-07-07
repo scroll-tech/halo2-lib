@@ -72,10 +72,10 @@ pub fn assign<F: FieldExt>(
                         gate.value,
                         offset + 2,
                     )?;
-
                     out_val = out_val
                         .zip(a.limbs[i].value())
                         .map(|(sum, c)| sum + *r_val * *c);
+		    
                     out_limb = region.assign_advice(
                         || "running sum",
                         gate.value,
