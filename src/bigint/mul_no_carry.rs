@@ -13,6 +13,8 @@ pub fn assign<F: FieldExt>(
     assert_eq!(a.limb_bits, b.limb_bits);
     let k_a = a.limbs.len();
     let k_b = b.limbs.len();
+    assert!(k_a > 0);
+    assert!(k_b > 0);
     let k_out = k_a + k_b - 1;
     let mut out_limbs = Vec::with_capacity(k_out);
 

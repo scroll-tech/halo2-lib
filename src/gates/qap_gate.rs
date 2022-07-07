@@ -136,7 +136,7 @@ impl<F: FieldExt> Config<F> {
                 b.copy_advice(|| "b", &mut region, self.value, 1)?;
 
                 // Assign constant `-1` into `value` column at offset `2`
-                let minus_1 = big_to_fe(&(modulus::<F>() - big_uint::one()));
+                let minus_1 = -F::from(1);
                 let cell = region.assign_advice_from_constant(|| "1", self.value, 2, minus_1)?;
                 region.constrain_constant(cell.cell(), minus_1)?;
 

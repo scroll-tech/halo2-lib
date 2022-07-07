@@ -3,7 +3,10 @@ use halo2_proofs::arithmetic::FieldExt;
 use num_bigint::BigInt as big_int;
 use num_bigint::BigUint as big_uint;
 use num_bigint::Sign;
+use num_traits::Signed;
 use num_traits::{Num, One, Zero};
+use std::cmp::Ordering;
+use std::ops::Neg;
 use std::ops::Shl;
 
 // utils modified from halo2wrong
@@ -13,16 +16,16 @@ pub fn modulus<F: FieldExt>() -> big_uint {
 }
 
 pub fn power_of_two<F: FieldExt>(n: usize) -> F {
-    big_to_fe(&(big_uint::one() << n))
+    biguint_to_fe(&(big_uint::one() << n))
 }
 
-pub fn big_to_fe<F: FieldExt>(e: &big_uint) -> F {
+pub fn biguint_to_fe<F: FieldExt>(e: &big_uint) -> F {
     let modulus = modulus::<F>();
     let e = e % modulus;
     F::from_str_vartime(&e.to_str_radix(10)[..]).unwrap()
 }
 
-pub fn signed_big_to_fe<F: FieldExt>(e: &big_int) -> F {
+pub fn bigint_to_fe<F: FieldExt>(e: &big_int) -> F {
     let modulus = big_int::from_biguint(Sign::Plus, modulus::<F>());
     let e: big_int = if e < &big_int::zero() {
         let mut a: big_int = e + &modulus;
@@ -36,25 +39,66 @@ pub fn signed_big_to_fe<F: FieldExt>(e: &big_int) -> F {
     F::from_str_vartime(&e.to_str_radix(10)[..]).unwrap()
 }
 
-pub fn fe_to_big<F: FieldExt>(fe: &F) -> big_uint {
+pub fn fe_to_biguint<F: FieldExt>(fe: &F) -> big_uint {
     big_uint::from_bytes_le(fe.to_repr().as_ref())
 }
 
-pub fn decompose<F: FieldExt>(e: &F, number_of_limbs: usize, bit_len: usize) -> Vec<F> {
-    decompose_big(&fe_to_big(e), number_of_limbs, bit_len)
+pub fn fe_to_bigint<F: FieldExt>(fe: &F) -> big_int {
+    let modulus = modulus::<F>();
+    let e = fe_to_biguint(fe);
+    if e <= &modulus / 2u32 {
+        big_int::from_biguint(Sign::Plus, e)
+    } else {
+        big_int::from_biguint(Sign::Minus, modulus - e)
+    }
 }
 
-pub fn decompose_big<F: FieldExt>(e: &big_uint, number_of_limbs: usize, bit_len: usize) -> Vec<F> {
+pub fn decompose<F: FieldExt>(e: &F, number_of_limbs: usize, bit_len: usize) -> Vec<F> {
+    decompose_bigint(&fe_to_bigint(e), number_of_limbs, bit_len)
+}
+
+pub fn decompose_biguint<F: FieldExt>(
+    e: &big_uint,
+    number_of_limbs: usize,
+    bit_len: usize,
+) -> Vec<F> {
     let mut e = e.clone();
     let mask = big_uint::from(1usize).shl(bit_len) - 1usize;
     let limbs: Vec<F> = (0..number_of_limbs)
         .map(|_| {
             let limb = &mask & &e;
             e = &e >> bit_len;
-            big_to_fe(&limb)
+            biguint_to_fe(&limb)
         })
         .collect();
+    assert_eq!(e, big_uint::zero());
+    limbs
+}
 
+pub fn decompose_bigint<F: FieldExt>(
+    e: &big_int,
+    number_of_limbs: usize,
+    bit_len: usize,
+) -> Vec<F> {
+    let sgn = e.sign();
+    let mut e: big_uint = if e.is_negative() {
+        e.neg().to_biguint().unwrap()
+    } else {
+        e.to_biguint().unwrap()
+    };
+    let mask = (big_uint::one() << bit_len) - 1usize;
+    let limbs: Vec<F> = (0..number_of_limbs)
+        .map(|_| {
+            let limb = &mask & &e;
+            let limb_fe: F = biguint_to_fe(&limb);
+            e = &e >> bit_len;
+            match sgn {
+                Sign::Minus => -limb_fe,
+                _ => limb_fe,
+            }
+        })
+        .collect();
+    assert_eq!(e, big_uint::zero());
     limbs
 }
 
@@ -63,15 +107,32 @@ pub fn decompose_option<F: FieldExt>(
     number_of_limbs: usize,
     bit_len: usize,
 ) -> Vec<Option<F>> {
+    decompose_bigint_option(&value.map(|fe| fe_to_bigint(&fe)), number_of_limbs, bit_len)
+}
+
+pub fn decompose_bigint_option<F: FieldExt>(
+    value: &Option<big_int>,
+    number_of_limbs: usize,
+    bit_len: usize,
+) -> Vec<Option<F>> {
     match value {
-        Some(fe) => {
-            let mut e = fe_to_big(fe);
+        Some(e) => {
+            let sgn = e.sign();
+            let mut e: big_uint = if e.is_negative() {
+                e.neg().to_biguint().unwrap()
+            } else {
+                e.to_biguint().unwrap()
+            };
             let mask = (big_uint::one() << bit_len) - 1usize;
             let limbs: Vec<Option<F>> = (0..number_of_limbs)
                 .map(|_| {
                     let limb = &mask & &e;
+                    let limb_fe: F = biguint_to_fe(&limb);
                     e = &e >> bit_len;
-                    Some(big_to_fe(&limb))
+                    Some(match sgn {
+                        Sign::Minus => -limb_fe,
+                        _ => limb_fe,
+                    })
                 })
                 .collect();
             limbs
@@ -90,4 +151,14 @@ pub fn compose(input: Vec<big_uint>, bit_len: usize) -> big_uint {
         .iter()
         .rev()
         .fold(big_uint::zero(), |acc, val| (acc << bit_len) + val)
+}
+
+#[cfg(test)]
+#[test]
+fn test_signed_roundtrip() {
+    use halo2_proofs::pairing::bn256::Fr as F;
+    assert_eq!(
+        fe_to_bigint(&bigint_to_fe::<F>(&-big_int::one())),
+        -big_int::one()
+    );
 }

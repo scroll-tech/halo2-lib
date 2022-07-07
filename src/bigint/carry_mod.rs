@@ -1,40 +1,31 @@
-use super::OverflowInteger;
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
+use num_bigint::BigInt as big_int;
 use num_bigint::BigUint as big_uint;
+use num_bigint::Sign;
 use num_traits::{One, Zero};
 
+use super::*;
 use crate::{gates::qap_gate, utils::*};
 
+// Input `a` is `OverflowInteger` of length `k` with "signed" limbs
+// Output is `a (mod modulus)` as a proper BigInt of length `k` with limbs in [0, 2^limb_bits)`
+// The witness for `out` is a BigInt in [0, modulus), but we do not constrain the inequality
+// We constrain `a = out + modulus * quotient` and range check `out` and `quotient`
 pub fn assign<F: FieldExt>(
     gate: &qap_gate::Config<F>,
     layouter: &mut impl Layouter<F>,
     a: &OverflowInteger<F>,
-    desired_num_limbs: usize,
     modulus: big_uint,
 ) -> Result<OverflowInteger<F>, Error> {
     let n = a.limb_bits;
-    let k = desired_num_limbs;
-
-    assert!(k < a.limbs.len());
+    let k = a.limbs.len();
+    assert!(k > 0);
     assert!(modulus.bits() <= (n * k).try_into().unwrap());
 
-    let m = a.limbs.len() - k;
+    let a_big = a.to_signed_big();
+
     let limb_base = big_uint::one() << n;
     let mut r_limbs: Vec<F> = Vec::with_capacity(m * k);
-
-    // For i >= desired_num_limbs, compute r[i] = limb_base^i % modulus
-    let mut r = limb_base.pow(k.try_into().unwrap()) % &modulus;
-    for _i in k..a.limbs.len() {
-        if _i > k {
-            r = (r * &limb_base) % &modulus;
-        }
-        let mut r_temp = r.clone();
-        for _j in 0..k {
-            r_limbs.push(biguint_to_fe(&(&r_temp % &limb_base))); // r_limbs[ (i-k) * k + j ]
-            r_temp = r_temp / &limb_base;
-        }
-        assert_eq!(r_temp, big_uint::zero());
-    }
 
     let mut out_limbs = Vec::with_capacity(k);
     for j in 0..k {
@@ -92,4 +83,26 @@ pub fn assign<F: FieldExt>(
         &a.max_limb_size + big_uint::from(a.limbs.len() - k) * &a.max_limb_size * &limb_base,
         a.limb_bits,
     ))
+}
+
+pub fn get_carry_witness(a: &big_int, modulus: &big_uint) -> (big_uint, big_int) {
+    if a < &big_int::zero() {
+        let a_neg = big_int::to_biguint(&-a).unwrap();
+        let quotient = (&a_neg + modulus - 1u32) / modulus;
+        let out = modulus * &quotient - a_neg;
+        (out, big_int::from_biguint(Sign::Minus, quotient))
+    } else {
+        let a = big_int::to_biguint(a).unwrap();
+        let quotient = &a / modulus;
+        (a - modulus * &quotient, quotient.into())
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn test_carry_witness() {
+    let a = big_int::from(-17);
+    let modulus = big_uint::from(15u32);
+    let (out, q) = get_carry_witness(&a, &modulus);
+    assert_eq!(a, big_int::from(out) + big_int::from(modulus) * q);
 }

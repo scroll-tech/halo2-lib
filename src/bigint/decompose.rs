@@ -1,12 +1,7 @@
 use super::OverflowInteger;
-use crate::gates::qap_gate;
 use crate::gates::range;
 use crate::utils::*;
-use halo2_proofs::{
-    arithmetic::{Field, FieldExt},
-    circuit::*,
-    plonk::*,
-};
+use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
 use num_bigint::BigUint as big_uint;
 use num_traits::One;
 
@@ -25,7 +20,7 @@ pub fn assign<F: FieldExt>(
 
     let a_val = a.value().map(|fe| *fe);
     let out_limbs = decompose_option(&a_val, k, limb_bits);
-    let limb_base: F = big_to_fe(&(big_uint::one() << limb_bits));
+    let limb_base: F = biguint_to_fe(&(big_uint::one() << limb_bits));
 
     let mut out_assignments = Vec::with_capacity(k);
     layouter.assign_region(

@@ -3,9 +3,8 @@ use num_bigint::BigUint;
 use num_traits::One;
 
 use super::OverflowInteger;
-use crate::gates::qap_gate;
 use crate::gates::range;
-use crate::utils::{big_to_fe, fe_to_big, modulus};
+use crate::utils::*;
 
 // checks there exist d_i = -c_i so that
 // a0 = c0 * 2^n
@@ -30,19 +29,19 @@ pub fn assign<F: FieldExt>(
     let limb_val = BigUint::from(1u32) << limb_bits;
     for idx in 0..k {
         let a_val = a.limbs[idx].value();
-	let carry = match a_val {
-	    Some(a_fe) => {
-		let a_val_big = fe_to_big(a_fe);
-		if (idx == 0) {
-		    Some(a_val_big / &limb_val)
-		} else {
-		    let carry_val = carries[idx - 1].as_ref().unwrap();
-		    Some(((a_val_big + carry_val) % modulus::<F>()) / &limb_val)
-		}
-	    },
-	    None => None,
-	};
-	carries.push(carry);
+        let carry = match a_val {
+            Some(a_fe) => {
+                let a_val_big = fe_to_biguint(a_fe);
+                if idx == 0 {
+                    Some(a_val_big / &limb_val)
+                } else {
+                    let carry_val = carries[idx - 1].as_ref().unwrap();
+                    Some(((a_val_big + carry_val) % modulus::<F>()) / &limb_val)
+                }
+            }
+            None => None,
+        };
+        carries.push(carry);
     }
 
     let mut neg_carry_assignments = Vec::with_capacity(k);
@@ -59,25 +58,25 @@ pub fn assign<F: FieldExt>(
                     range.qap_config.value,
                     offset,
                 )?;
-		{
-		    let neg_carry = Some(modulus::<F>())
-			.zip(carries[idx].as_ref())
-			.map(|(m, c)| big_to_fe::<F>(&(m - c)));
+                {
+                    let neg_carry = Some(modulus::<F>())
+                        .zip(carries[idx].as_ref())
+                        .map(|(m, c)| biguint_to_fe::<F>(&(m - c)));
                     let last_carry = region.assign_advice(
-			|| "negative carry",
-			range.qap_config.value,
-			offset + 1,
-			|| neg_carry.ok_or(Error::Synthesis)
+                        || "negative carry",
+                        range.qap_config.value,
+                        offset + 1,
+                        || neg_carry.ok_or(Error::Synthesis),
                     )?;
                     neg_carry_assignments.push(last_carry);
-		}
+                }
                 let limb = region.assign_advice_from_constant(
                     || "base",
                     range.qap_config.value,
                     offset + 2,
-                    big_to_fe::<F>(&limb_val),
+                    biguint_to_fe::<F>(&limb_val),
                 )?;
-                region.constrain_constant(limb.cell(), big_to_fe::<F>(&limb_val))?;
+                region.constrain_constant(limb.cell(), biguint_to_fe::<F>(&limb_val))?;
 
                 if idx == 0 {
                     let zero = region.assign_advice_from_constant(
@@ -105,7 +104,7 @@ pub fn assign<F: FieldExt>(
     let range_bits = (((max_limb_bits - (limb_bits as u64) + 1 + (range.lookup_bits as u64) - 1)
         / (range.lookup_bits as u64))
         * (range.lookup_bits as u64)) as usize;
-    let shift_val = big_to_fe::<F>(&(BigUint::one() << (range_bits - 1)));
+    let shift_val = biguint_to_fe::<F>(&(BigUint::one() << (range_bits - 1)));
     let mut shifted_carry_assignments = Vec::with_capacity(k);
     for carry_cell in neg_carry_assignments.iter() {
         layouter.assign_region(
@@ -135,9 +134,7 @@ pub fn assign<F: FieldExt>(
                 )?;
                 region.constrain_constant(shift.cell(), shift_val)?;
 
-                let shift_carry_val = Some(shift_val)
-		    .zip(carry_cell.value())
-		    .map(|(s, c)| s + c);
+                let shift_carry_val = Some(shift_val).zip(carry_cell.value()).map(|(s, c)| s + c);
                 let shifted_carry = region.assign_advice(
                     || "shifted carry",
                     range.qap_config.value,
