@@ -40,19 +40,20 @@ pub fn assign<F: FieldExt>(
     for idx in 0..k {
         let limb = u64::try_from(&a_val % &limb_val_big).unwrap();
         out_limbs.push(limb);
-        a_val = &a_val / &limb_val_big;
+        a_val = a_val / &limb_val_big;
     }
 
     let mut out_assignments = Vec::with_capacity(k);
     layouter.assign_region(
         || "decompose",
         |mut region| {
-            region.assign_advice_from_constant(
+            let mut limb_cell = region.assign_advice_from_constant(
                 || "limb 0",
                 range.qap_config.value,
                 0,
                 F::from(out_limbs[0]),
             )?;
+            out_assignments.push(limb_cell);
 
             let mut offset = 1;
             let mut running_sum = F::from(out_limbs[0]);
@@ -67,7 +68,7 @@ pub fn assign<F: FieldExt>(
                     offset,
                     running_pow,
                 )?;
-                let limb_cell = region.assign_advice_from_constant(
+                limb_cell = region.assign_advice_from_constant(
                     || format!("limb {}", idx),
                     range.qap_config.value,
                     offset + 1,

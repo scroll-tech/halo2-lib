@@ -70,51 +70,57 @@ impl<F: FieldExt> RangeConfig<F> {
         assert!(range_bits % self.lookup_bits == 0);
         let k = range_bits / self.lookup_bits;
 
-        let a_val_temp = a.value().ok_or(Error::Synthesis)?;
-        let a_val = fe_to_big(a_val_temp);
+        let a_val = a.value();
+        let out_limbs = match a_val {
+            Some(a_fe) => decompose(a_fe, k, self.lookup_bits)
+                .into_iter()
+                .map(|limb| Some(limb))
+                .collect(),
+            None => vec![None; k],
+        };
 
-        let limb_val = 1u64 << self.lookup_bits;
-
-        let out_limbs = decompose_big::<F>(&a_val, k, self.lookup_bits);
+        let limb_base = 1u64 << self.lookup_bits;
 
         layouter.assign_region(
             || format!("range check {} bits", self.lookup_bits),
             |mut region| {
-                region.assign_advice_from_constant(
+                let mut running_sum = out_limbs[0];
+                region.assign_advice(
                     || "limb 0",
                     self.qap_config.value,
                     0,
-                    F::from(out_limbs[0]),
+                    || running_sum.ok_or(Error::Synthesis),
                 )?;
                 self.q_lookup.enable(&mut region, 0)?;
 
                 let mut offset = 1;
-                let mut running_sum = F::from(out_limbs[0]);
                 let mut running_pow = F::from(1);
                 for idx in 1..k {
-                    running_pow = running_pow * F::from(limb_val);
-                    running_sum = running_sum + F::from(out_limbs[idx]) * running_pow.clone();
+                    running_pow = running_pow * F::from(limb_base);
+                    running_sum = running_sum
+                        .zip(out_limbs[idx])
+                        .map(|(sum, x)| sum + x * running_pow);
 
                     let const_cell = region.assign_advice_from_constant(
                         || format!("base^{}", idx),
                         self.qap_config.value,
                         offset,
-                        running_pow.clone(),
+                        running_pow,
                     )?;
-                    let limb_cell = region.assign_advice_from_constant(
+                    let limb_cell = region.assign_advice(
                         || format!("limb {}", idx),
                         self.qap_config.value,
                         offset + 1,
-                        F::from(out_limbs[idx]),
+                        || out_limbs[idx].ok_or(Error::Synthesis),
                     )?;
-                    let out_cell = region.assign_advice_from_constant(
+                    let out_cell = region.assign_advice(
                         || format!("running sum {}", idx),
                         self.qap_config.value,
                         offset + 2,
-                        running_sum.clone(),
+                        || running_sum.ok_or(Error::Synthesis),
                     )?;
 
-                    region.constrain_constant(const_cell.cell(), running_pow.clone())?;
+                    region.constrain_constant(const_cell.cell(), running_pow)?;
                     self.qap_config.q_enable.enable(&mut region, offset - 1)?;
                     self.q_lookup.enable(&mut region, offset + 1)?;
 

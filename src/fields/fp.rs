@@ -60,6 +60,10 @@ impl<F: FieldExt> FpChip<F> {
         }
     }
 
+    pub fn load_lookup_table(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
+        self.config.range.load_lookup_table(layouter)
+    }
+
     pub fn load_private(
         &self,
         mut layouter: impl Layouter<F>,
@@ -128,6 +132,14 @@ impl<F: FieldExt> FpChip<F> {
         modulus: num_bigint::BigUint,
     ) -> Result<OverflowInteger<F>, Error> {
         mod_reduce::assign(&self.config.gate, layouter, a, desired_num_limbs, modulus)
+    }
+
+    pub fn check_carry_to_zero(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &OverflowInteger<F>,
+    ) -> Result<(), Error> {
+        check_carry_to_zero::assign(&self.config.range, layouter, a)
     }
 }
 

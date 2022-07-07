@@ -2,6 +2,7 @@
 use halo2_proofs::arithmetic::FieldExt;
 use num_bigint::BigInt as big_int;
 use num_bigint::BigUint as big_uint;
+use num_bigint::Sign;
 use num_traits::{Num, One, Zero};
 use std::ops::Shl;
 
@@ -16,6 +17,20 @@ pub fn power_of_two<F: FieldExt>(n: usize) -> F {
 pub fn big_to_fe<F: FieldExt>(e: &big_uint) -> F {
     let modulus = modulus::<F>();
     let e = e % modulus;
+    F::from_str_vartime(&e.to_str_radix(10)[..]).unwrap()
+}
+
+pub fn signed_big_to_fe<F: FieldExt>(e: &big_int) -> F {
+    let modulus = big_int::from_biguint(Sign::Plus, modulus::<F>());
+    let e: big_int = if e < &big_int::zero() {
+        let mut a: big_int = e + &modulus;
+        while a < big_int::zero() {
+            a += &modulus;
+        }
+        a
+    } else {
+        e % &modulus
+    };
     F::from_str_vartime(&e.to_str_radix(10)[..]).unwrap()
 }
 

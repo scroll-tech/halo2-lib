@@ -145,11 +145,10 @@ pub(crate) mod tests {
             .unwrap();
     }
 
-    
     #[derive(Default)]
     struct RangeTestCircuit<F> {
-	range_bits: usize,
-	input: F,
+        range_bits: usize,
+        input: F,
     }
 
     impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
@@ -161,23 +160,14 @@ pub(crate) mod tests {
         }
 
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-	    let q_lookup = meta.complex_selector();
-	    let lookup = meta.lookup_table_column();
-	    let value = meta.advice_column();
-	    let fixed = meta.fixed_column();
-	    meta.enable_constant(fixed);
-	    
-	    let qap_config = qap_gate::Config::configure(
-		meta,
-		value,
-	    );
-            range::RangeConfig::configure(
-		meta,
-		q_lookup,
-		lookup,
-		3,
-		qap_config,
-	    )
+            let q_lookup = meta.complex_selector();
+            let lookup = meta.lookup_table_column();
+            let value = meta.advice_column();
+            let fixed = meta.fixed_column();
+            meta.enable_constant(fixed);
+
+            let qap_config = qap_gate::Config::configure(meta, value);
+            range::RangeConfig::configure(meta, q_lookup, lookup, 3, qap_config)
         }
 
         fn synthesize(
@@ -185,29 +175,32 @@ pub(crate) mod tests {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
-	    let input = layouter.assign_region(
-		|| "inputs",
-		|mut region| {
-		    region.assign_advice_from_constant(|| "input", config.qap_config.value, 0, self.input)
-		})?;
-	    {
-		config.load_lookup_table(&mut layouter)?;
-	    }
-	    {
-		config.range_check(
-		    &mut layouter,
-		    &input,
-		    self.range_bits)
-	    }
+            let input = layouter.assign_region(
+                || "inputs",
+                |mut region| {
+                    region.assign_advice_from_constant(
+                        || "input",
+                        config.qap_config.value,
+                        0,
+                        self.input,
+                    )
+                },
+            )?;
+            {
+                config.load_lookup_table(&mut layouter)?;
+            }
+            {
+                config.range_check(&mut layouter, &input, self.range_bits)
+            }
         }
     }
-    
+
     #[test]
     fn test_range() {
         let k = 10;
         let circuit = RangeTestCircuit::<Fn> {
-	    range_bits: 9,
-	    input: Fn::from(100)
+            range_bits: 9,
+            input: Fn::from(100),
         };
 
         let prover = MockProver::run(k, &circuit, vec![]).unwrap();
@@ -225,13 +218,12 @@ pub(crate) mod tests {
         let root = root.titled("Gates Layout", ("sans-serif", 60)).unwrap();
 
         let circuit = RangeTestCircuit::<Fn> {
-	    range_bits: 9,
-	    input: Fn::from(100)
+            range_bits: 9,
+            input: Fn::from(100),
         };
-	
 
         halo2_proofs::dev::CircuitLayout::default()
             .render(5, &circuit, &root)
             .unwrap();
-    }    
+    }
 }

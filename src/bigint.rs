@@ -1,11 +1,9 @@
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
+use num_bigint::BigInt as big_int;
 use num_bigint::BigUint as big_uint;
 use num_traits::One;
 
-use crate::{
-    gates::qap_gate,
-    utils::{big_to_fe, decompose_big},
-};
+use crate::{gates::qap_gate, utils::*};
 
 pub mod add_no_carry;
 pub mod check_carry_to_zero;
@@ -71,7 +69,7 @@ pub(crate) mod tests {
 
     use super::*;
     use crate::fields::fp::{FpChip, FpConfig};
-    use crate::utils::{big_to_fe, fe_to_big, power_of_two};
+    use crate::utils::*;
     use num_bigint::BigUint as big_uint;
 
     #[derive(Default)]
@@ -91,7 +89,7 @@ pub(crate) mod tests {
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
             let value = meta.advice_column();
             let constant = meta.fixed_column();
-            FpChip::configure(meta, value, constant, 16, 64, 4)
+            FpChip::configure(meta, value, constant, 16, 32, 4)
         }
 
         fn synthesize(
@@ -100,6 +98,7 @@ pub(crate) mod tests {
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
             let chip = FpChip::construct(config);
+            chip.load_lookup_table(&mut layouter)?;
             let a_assigned = chip.load_private(layouter.namespace(|| "input a"), self.a.clone())?;
             let b_assigned = chip.load_private(layouter.namespace(|| "input b"), self.b.clone())?;
 
@@ -133,7 +132,7 @@ pub(crate) mod tests {
 
                 let mut a_big = Some(big_uint::from(0u32));
                 for (i, val) in self.a.iter().enumerate() {
-                    a_big = a_big.zip(*val).map(|(a, b)| a + fe_to_big(&b) << (64 * i));
+                    a_big = a_big.zip(*val).map(|(a, b)| a + fe_to_big(&b) << (32 * i));
                 }
                 a_big = a_big.map(|a| a % &modulus);
 
@@ -141,27 +140,45 @@ pub(crate) mod tests {
                 for (i, cell) in out.limbs.iter().enumerate() {
                     out_val = out_val
                         .zip(cell.value())
-                        .map(|(a, b)| a + fe_to_big(b) << (64 * i));
+                        .map(|(a, b)| a + fe_to_big(b) << (32 * i));
                 }
                 out_val = out_val.map(|a| a % &modulus);
 
                 assert_eq!(a_big, out_val);
             }
+
+            // test decompose
+            {
+                let decomposition = chip.decompose(
+                    &mut layouter.namespace(|| "decompose"),
+                    &b_assigned.limbs[0],
+                )?;
+            }
+
+            /*
+            // test check_carry_to_zero
+            {
+                chip.check_carry_to_zero(
+                    &mut layouter.namespace(|| "check carry to zero"),
+                    &b_assigned,
+                )?;
+            }
+            */
             Ok(())
         }
     }
 
     #[test]
     fn test_bigint() {
-        let k = 7;
+        let k = 17;
         let circuit = MyCircuit::<Fn> {
             a: (vec![100, 200, 300, 400])
                 .iter()
-                .map(|&a| Some(big_to_fe(&big_uint::from(a as u64))))
+                .map(|a| Some(big_to_fe(&big_uint::from(*a as u64))))
                 .collect(),
-            b: (vec![500, 600, 700, 800])
+            b: (vec![(1i64 << 32) + 1i64, 0, 0, 0])
                 .iter()
-                .map(|&a| Some(big_to_fe(&big_uint::from(a as u64))))
+                .map(|a| Some(signed_big_to_fe(&big_int::from(*a as i64))))
                 .collect(),
         };
 
@@ -173,7 +190,7 @@ pub(crate) mod tests {
     #[cfg(feature = "dev-graph")]
     #[test]
     fn plot_bigint() {
-        let k = 7;
+        let k = 17;
         use plotters::prelude::*;
 
         let root = BitMapBackend::new("layout.png", (1024, 1024)).into_drawing_area();
@@ -181,8 +198,14 @@ pub(crate) mod tests {
         let root = root.titled("BigInt Layout", ("sans-serif", 60)).unwrap();
 
         let circuit = MyCircuit::<Fn> {
-            a: vec![None, None, None, None],
-            b: vec![None, None, None, None],
+            a: (vec![100, 200, 300, 400])
+                .iter()
+                .map(|a| Some(big_to_fe(&big_uint::from(*a as u64))))
+                .collect(),
+            b: (vec![(1i64 << 32) + 1i64, 0, 0, 0])
+                .iter()
+                .map(|a| Some(signed_big_to_fe(&big_int::from(*a as i64))))
+                .collect(),
         };
         halo2_proofs::dev::CircuitLayout::default()
             .render(k, &circuit, &root)
