@@ -1,13 +1,14 @@
 use super::OverflowInteger;
 use crate::gates::qap_gate;
 use crate::gates::range;
-use crate::utils::decompose;
+use crate::utils::*;
 use halo2_proofs::{
     arithmetic::{Field, FieldExt},
     circuit::*,
     plonk::*,
 };
-use num_bigint::BigUint;
+use num_bigint::BigUint as big_uint;
+use num_traits::One;
 
 // given an AssignedCell `a`, creates an OverflowInteger<F> containing a base
 // `limb_base` decomposition of the value of `a`
@@ -21,17 +22,11 @@ pub fn assign<F: FieldExt>(
     assert!(limb_bits <= 64);
     assert!(limb_bits % range.lookup_bits == 0);
     let k = num_limbs;
-    
-    let a_val = a.value();
-    let out_limbs = match a_val {
-	Some(a_fe) => decompose(a_fe, k, limb_bits)
-	    .into_iter()
-	    .map(|limb| Some(limb))
-	    .collect(),
-	None => vec![None; k],
-    };
 
-    let limb_base = 1u64 << limb_bits;
+    let a_val = a.value().map(|fe| *fe);
+    let out_limbs = decompose_option(&a_val, k, limb_bits);
+    let limb_base: F = big_to_fe(&(big_uint::one() << limb_bits));
+
     let mut out_assignments = Vec::with_capacity(k);
     layouter.assign_region(
         || "decompose",
@@ -48,10 +43,10 @@ pub fn assign<F: FieldExt>(
             let mut running_sum = out_limbs[0];
             let mut running_pow = F::from(1);
             for idx in 1..k {
-                running_pow = running_pow * F::from(limb_base);
+                running_pow = running_pow * limb_base;
                 running_sum = running_sum
-		    .zip(out_limbs[idx])
-		    .map(|(sum, x)| sum + x * running_pow);
+                    .zip(out_limbs[idx])
+                    .map(|(sum, x)| sum + x * running_pow);
 
                 let const_cell = region.assign_advice_from_constant(
                     || format!("base^{}", idx),
@@ -59,6 +54,8 @@ pub fn assign<F: FieldExt>(
                     offset,
                     running_pow,
                 )?;
+                region.constrain_constant(const_cell.cell(), running_pow)?;
+
                 limb_cell = region.assign_advice(
                     || format!("limb {}", idx),
                     range.qap_config.value,
@@ -72,7 +69,6 @@ pub fn assign<F: FieldExt>(
                     || running_sum.ok_or(Error::Synthesis),
                 )?;
 
-                region.constrain_constant(const_cell.cell(), running_pow)?;
                 range.qap_config.q_enable.enable(&mut region, offset - 1)?;
 
                 offset = offset + 3;
@@ -91,7 +87,7 @@ pub fn assign<F: FieldExt>(
 
     Ok(OverflowInteger::construct(
         out_assignments,
-        BigUint::from(limb_base),
+        big_uint::one() << limb_bits,
         limb_bits,
     ))
 }

@@ -1,10 +1,12 @@
-// utils from halo2wrong
+use halo2_proofs::arithmetic::Field;
 use halo2_proofs::arithmetic::FieldExt;
 use num_bigint::BigInt as big_int;
 use num_bigint::BigUint as big_uint;
 use num_bigint::Sign;
 use num_traits::{Num, One, Zero};
 use std::ops::Shl;
+
+// utils modified from halo2wrong
 
 pub fn modulus<F: FieldExt>() -> big_uint {
     big_uint::from_str_radix(&F::MODULUS[2..], 16).unwrap()
@@ -54,6 +56,28 @@ pub fn decompose_big<F: FieldExt>(e: &big_uint, number_of_limbs: usize, bit_len:
         .collect();
 
     limbs
+}
+
+pub fn decompose_option<F: FieldExt>(
+    value: &Option<F>,
+    number_of_limbs: usize,
+    bit_len: usize,
+) -> Vec<Option<F>> {
+    match value {
+        Some(fe) => {
+            let mut e = fe_to_big(fe);
+            let mask = (big_uint::one() << bit_len) - 1usize;
+            let limbs: Vec<Option<F>> = (0..number_of_limbs)
+                .map(|_| {
+                    let limb = &mask & &e;
+                    e = &e >> bit_len;
+                    Some(big_to_fe(&limb))
+                })
+                .collect();
+            limbs
+        }
+        None => vec![None; number_of_limbs],
+    }
 }
 
 /// Compute the represented value by a vector of values and a bit length.
