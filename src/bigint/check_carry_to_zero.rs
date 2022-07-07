@@ -5,7 +5,7 @@ use num_traits::One;
 use super::OverflowInteger;
 use crate::gates::qap_gate;
 use crate::gates::range;
-use crate::utils::{big_to_fe, modulus};
+use crate::utils::{big_to_fe, fe_to_big, modulus};
 
 // checks there exist d_i = -c_i so that
 // a0 = c0 * 2^n
@@ -26,18 +26,23 @@ pub fn assign<F: FieldExt>(
     let limb_bits = a.limb_bits;
     let max_limb_bits = a.max_limb_size.bits();
 
-    let mut carries = Vec::with_capacity(k);
+    let mut carries: Vec<Option<BigUint>> = Vec::with_capacity(k);
     let limb_val = BigUint::from(1u32) << limb_bits;
     for idx in 0..k {
-        let a_val_temp = a.limbs[idx].value().ok_or(Error::Synthesis)?;
-        let a_val = BigUint::from_bytes_le(a_val_temp.to_repr().as_ref().try_into().unwrap());
-
-        if idx == 0 {
-            carries.push(a_val / &limb_val);
-        } else {
-            let carry_val = &carries[idx - 1];
-            carries.push((a_val + carry_val) / &limb_val);
-        }
+        let a_val = a.limbs[idx].value();
+	let carry = match a_val {
+	    Some(a_fe) => {
+		let a_val_big = fe_to_big(a_fe);
+		if (idx == 0) {
+		    Some(a_val_big / &limb_val)
+		} else {
+		    let carry_val = carries[idx - 1].as_ref().unwrap();
+		    Some((a_val_big + carry_val) / &limb_val)
+		}
+	    },
+	    None => None,
+	};
+	carries.push(carry);
     }
 
     let mut carry_assignments = Vec::with_capacity(k);
@@ -54,13 +59,18 @@ pub fn assign<F: FieldExt>(
                     range.qap_config.value,
                     offset,
                 )?;
-                let last_carry = region.assign_advice(
-                    || "negative carry",
-                    range.qap_config.value,
-                    offset + 1,
-                    || Ok(big_to_fe::<F>(&(modulus::<F>() - &carries[idx]))),
-                )?;
-                carry_assignments.push(last_carry);
+		{
+		    let neg_carry = Some(modulus::<F>())
+			.zip(carries[idx].as_ref())
+			.map(|(m, c)| big_to_fe::<F>(&(m - c)));
+                    let last_carry = region.assign_advice(
+			|| "negative carry",
+			range.qap_config.value,
+			offset + 1,
+			|| neg_carry.ok_or(Error::Synthesis)
+                    )?;
+                    carry_assignments.push(last_carry);
+		}
                 let limb = region.assign_advice_from_constant(
                     || "base",
                     range.qap_config.value,
@@ -125,12 +135,14 @@ pub fn assign<F: FieldExt>(
                 )?;
                 region.constrain_constant(shift.cell(), shift_val)?;
 
-                let carry_val = carry_cell.value().ok_or(Error::Synthesis)?;
+                let shift_carry_val = Some(shift_val)
+		    .zip(carry_cell.value())
+		    .map(|(s, c)| s + c);
                 let shifted_carry = region.assign_advice(
                     || "shifted carry",
                     range.qap_config.value,
                     3,
-                    || Ok(*carry_val + shift_val),
+                    || shift_carry_val.ok_or(Error::Synthesis),
                 )?;
                 shifted_carry_assignments.push(shifted_carry);
                 Ok(())

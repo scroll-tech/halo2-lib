@@ -1,4 +1,4 @@
-use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
+use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*, circuit::floor_planner::V1};
 use num_bigint::BigInt as big_int;
 use num_bigint::BigUint as big_uint;
 use num_traits::One;
@@ -80,10 +80,13 @@ pub(crate) mod tests {
 
     impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         type Config = FpConfig<F>;
-        type FloorPlanner = SimpleFloorPlanner;
+        type FloorPlanner = V1;
 
         fn without_witnesses(&self) -> Self {
-            Self::default()
+	    Self {
+		a: vec![None; 4],
+		b: vec![None; 4]
+	    }
         }
 
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
@@ -160,8 +163,7 @@ pub(crate) mod tests {
                     &b_assigned.limbs[0],
                 )?;
             }
-
-            /*
+            
             // test check_carry_to_zero
             {
                 chip.check_carry_to_zero(
@@ -169,7 +171,7 @@ pub(crate) mod tests {
                     &b_assigned,
                 )?;
             }
-            */
+
             Ok(())
         }
     }
@@ -182,7 +184,7 @@ pub(crate) mod tests {
                 .iter()
                 .map(|a| Some(big_to_fe(&big_uint::from(*a as u64))))
                 .collect(),
-            b: (vec![(1i64 << 32) + 1i64, 0, 0, 0])
+            b: (vec![(1i64 << 33), -2i64, 0, 0])
                 .iter()
                 .map(|a| Some(signed_big_to_fe(&big_int::from(*a as i64))))
                 .collect(),
