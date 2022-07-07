@@ -1,11 +1,13 @@
 use super::OverflowInteger;
 use crate::gates::qap_gate;
 use crate::gates::range;
+use crate::utils::fe_to_big;
 use halo2_proofs::{
     arithmetic::{Field, FieldExt},
     circuit::*,
     plonk::*,
 };
+use num_bigint::BigUint;
 
 // given an AssignedCell `a`, creates an OverflowInteger<F> containing a base
 // `limb_base` decomposition of the value of `a`
@@ -21,7 +23,7 @@ pub fn assign<F: FieldExt>(
     let k = num_limbs;
 
     let a_val_temp = a.value().ok_or(Error::Synthesis)?;
-    let mut a_val = BigUint::from_bytes_le(a_val_temp.to_repr().as_ref().try_into().unwrap());
+    let mut a_val = fe_to_big(a_val_temp);
 
     let mut limb_val = F::from(0);
     if limb_bits < 64 {
@@ -36,9 +38,9 @@ pub fn assign<F: FieldExt>(
 
     let mut out_limbs = Vec::with_capacity(k);
     for idx in 0..k {
-        let limb = u64::try_from(a_val.clone() % limb_val_big.clone()).unwrap();
+        let limb = u64::try_from(&a_val % &limb_val_big).unwrap();
         out_limbs.push(limb);
-        a_val = a_val.clone() / limb_val_big.clone();
+        a_val = &a_val / &limb_val_big;
     }
 
     let mut out_assignments = Vec::with_capacity(k);
@@ -57,13 +59,13 @@ pub fn assign<F: FieldExt>(
             let mut running_pow = F::from(1);
             for idx in 1..k {
                 running_pow = running_pow * limb_val;
-                running_sum = running_sum + F::from(out_limbs[idx]) * running_pow.clone();
+                running_sum = running_sum + F::from(out_limbs[idx]) * &running_pow;
 
                 let const_cell = region.assign_advice_from_constant(
                     || format!("base^{}", idx),
                     range.qap_config.value,
                     offset,
-                    running_pow.clone(),
+                    running_pow,
                 )?;
                 let limb_cell = region.assign_advice_from_constant(
                     || format!("limb {}", idx),

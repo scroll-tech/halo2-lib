@@ -28,7 +28,7 @@ pub fn decompose<F: FieldExt>(e: &F, number_of_limbs: usize, bit_len: usize) -> 
 }
 
 pub fn decompose_big<F: FieldExt>(e: &big_uint, number_of_limbs: usize, bit_len: usize) -> Vec<F> {
-    let mut e: big_uint = *e;
+    let mut e = e.clone();
     let mask = big_uint::from(1usize).shl(bit_len) - 1usize;
     let limbs: Vec<F> = (0..number_of_limbs)
         .map(|_| {

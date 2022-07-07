@@ -1,5 +1,6 @@
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
 use num_bigint::BigUint;
+use num_traits::One;
 
 use super::OverflowInteger;
 use crate::gates::qap_gate;
@@ -86,10 +87,10 @@ pub fn assign<F: FieldExt>(
                 }
                 offset = offset + 4;
             }
-            region.constrain_equal(a.limbs[k - 1].cell(), carry_assignments[k - 2].cell());
+            region.constrain_equal(a.limbs[k - 1].cell(), carry_assignments[k - 2].cell())?;
             Ok(())
         },
-    );
+    )?;
 
     let range_bits = (((max_limb_bits - (limb_bits as u64) + 1 + (range.lookup_bits as u64) - 1)
         / (range.lookup_bits as u64))
