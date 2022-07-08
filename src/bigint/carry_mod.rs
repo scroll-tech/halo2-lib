@@ -21,13 +21,12 @@ pub fn assign<F: FieldExt>(
     let n = a.limb_bits;
     let k = a.limbs.len();
     assert!(k > 0);
-    assert!(modulus.bits() <= (n * k).try_into().unwrap());
 
     // overflow := a.max_limb_size.bits()
     // quot <= ceil(2^overflow * 2^{n * k} / modulus) < 2^{overflow + n * k - modulus.bits() + 1}
     // there quot will need ceil( (overflow + n * k - modulus.bits() + 1 ) / n ) limbs
-    let overflow = a.max_limb_size.bits().to_usize().unwrap();
-    let m: usize = (overflow + n * k - modulus.bits().to_usize().unwrap() + n) / n;
+    let overflow = a.max_limb_size.bits() as usize;
+    let m = (overflow + n * k - modulus.bits() as usize + n) / n;
     assert!(m > 0);
 
     let a_val = a.to_bigint();
@@ -41,8 +40,24 @@ pub fn assign<F: FieldExt>(
     } else {
         (vec![None; k], vec![None; m])
     };
+
     // this is a constant vector:
-    let mod_vec = decompose_biguint(&modulus, k, n);
+    // to decrease mod_vec.len(), we can store `modulus` with some overflow:
+    // say `mod_vec` has limbs with at most `mod_overflow` bits
+    // we just need `log_2(min(mod_limb_len,m)) + mod_overflow + n < overflow`
+
+    let mut mod_overflow = ((&a.max_limb_size >> n) / m).bits() as usize;
+    mod_overflow = std::cmp::max(mod_overflow, n);
+    println!("mod overflow bitlen = {}", mod_overflow);
+    let mask = (big_uint::from(1u64) << mod_overflow) - 1usize;
+    let mut mod_vec = Vec::with_capacity(k);
+    let mut temp_mod = modulus.clone();
+    while temp_mod != big_uint::zero() {
+        let limb = &temp_mod & &mask;
+        temp_mod = (temp_mod - &limb) >> n;
+        mod_vec.push(biguint_to_fe(&limb));
+    }
+    println!("mod_vec.len() = {}", mod_vec.len());
 
     //println!("a_limbs: {:?}", a.limbs);
     //println!("out_vec: {:?}", out_vec);
@@ -56,8 +71,9 @@ pub fn assign<F: FieldExt>(
     //    | prod | -1 | a | prod - a | 1 | out | prod - a + out |
     //    where we assigned `out` as we go
 
-    let k_prod = k + m - 1;
-    let mut mod_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(k);
+    let k_prod = mod_vec.len() + m - 1;
+    assert!(k_prod >= k);
+    let mut mod_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(mod_vec.len());
     let mut quot_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(m);
     // let mut prod_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(k_prod);
     let mut out_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(k);
@@ -77,7 +93,7 @@ pub fn assign<F: FieldExt>(
 
                 let startj = if i >= m { i - m + 1 } else { 0 };
                 for j in startj..=i {
-                    if j >= k {
+                    if j >= mod_vec.len() {
                         break;
                     }
                     gate.q_enable.enable(&mut region, offset)?;
@@ -196,7 +212,7 @@ pub fn assign<F: FieldExt>(
             },
         )?;
     }
-    assert_eq!(mod_assigned.len(), k);
+    assert_eq!(mod_assigned.len(), mod_vec.len());
     assert_eq!(quot_assigned.len(), m);
 
     let out_max_limb_size = (big_uint::one() << n) - 1usize;
@@ -206,7 +222,7 @@ pub fn assign<F: FieldExt>(
     }
 
     let limb_base = biguint_to_fe(&(big_uint::one() << n));
-    // range check that quot_cell in quot_assigned is in [-2^n, 2^n)
+    // range check that quot_cell in quot_assigned is in [-2^{n-1}, 2^{n-1})
     for quot_cell in quot_assigned.iter() {
         // compute quot_cell + 2^n and range check with n + 1 bits
         let quot_shift = layouter.assign_region(
@@ -231,7 +247,9 @@ pub fn assign<F: FieldExt>(
 
     let check_overflow_int = &OverflowInteger::construct(
         check_assigned,
-        &out_max_limb_size + &a.max_limb_size + (big_uint::from(std::cmp::min(k, m)) << (2 * n)),
+        &out_max_limb_size
+            + &a.max_limb_size
+            + (big_uint::from(std::cmp::min(mod_vec.len(), m)) << (mod_overflow + n)),
         n,
     );
     // check that `out - a + modulus * quotient == 0` after carry

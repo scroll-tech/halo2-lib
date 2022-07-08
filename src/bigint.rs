@@ -141,7 +141,6 @@ pub(crate) mod tests {
                 big_uint::one() << 64 - 1usize,
             )?;
 
-            /*
             // test mul_no_carry
             {
                 chip.mul_no_carry(
@@ -218,18 +217,8 @@ pub(crate) mod tests {
 
             // test big_less_than
             {
-            chip.big_less_than(
-                &mut layouter.namespace(|| "big_less_than"),
-                &a_assigned,
-                &c_assigned
-            )?;
-            }
-            */
-
-            // test fp_multiply
-            {
-                chip.fp_multiply(
-                    &mut layouter.namespace(|| "fp_multiply"),
+                chip.big_less_than(
+                    &mut layouter.namespace(|| "big_less_than"),
                     &a_assigned,
                     &c_assigned,
                 )?;
@@ -267,14 +256,12 @@ pub(crate) mod tests {
     #[cfg(feature = "dev-graph")]
     #[test]
     fn plot_bigint() {
-        let k = 10;
+        let k = 9;
         use plotters::prelude::*;
 
-        let root = BitMapBackend::new("layout.png", (5048, 5048)).into_drawing_area();
+        let root = BitMapBackend::new("layout.png", (1024, 1024)).into_drawing_area();
         root.fill(&WHITE).unwrap();
-        let root = root
-            .titled("Fp Multiply Layout", ("sans-serif", 60))
-            .unwrap();
+        let root = root.titled("BigInt Layout", ("sans-serif", 60)).unwrap();
 
         let circuit = MyCircuit::<Fn> {
             a: vec![None; 4],
