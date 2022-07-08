@@ -471,6 +471,130 @@ impl<F: FieldExt> RangeConfig<F> {
 		Err(Error::Synthesis)
             },
         )
-    }    
+    }
+
+    pub fn is_zero(
+	&self,
+	layouter: &mut impl Layouter<F>,
+	a: &AssignedCell<F, F>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+	let is_zero = a.value().map(|x| {
+		if (*x).is_zero_vartime() {
+		    F::from(1)
+		} else {
+		    F::from(0)
+		}
+	    });
+	let inv = a.value().map(|x| {
+		if *x == F::from(0) {
+		    F::from(1)
+		} else {
+		    (*x).invert().unwrap()
+		}
+	    });
+
+	layouter.assign_region(
+            || "is_equal",
+            |mut region| {
+		self.qap_config.q_enable.enable(&mut region, 0)?;
+		let is_zero_assign = region.assign_advice(
+		    || "is_zero",
+		    self.qap_config.value,
+		    0,
+		    || is_zero.ok_or(Error::Synthesis))?;
+
+		let a_copy = a.copy_advice(
+		    || "a copy",
+		    &mut region,
+		    self.qap_config.value,
+		    1)?;			
+		
+		let inv_assign = region.assign_advice(
+		    || "inv",
+		    self.qap_config.value,
+		    2,
+		    || inv.ok_or(Error::Synthesis))?;
+		
+		let one = region.assign_advice_from_constant(
+		    || "one",
+		    self.qap_config.value,
+		    3,
+		    F::from(1)
+		)?;			
+		region.constrain_constant(one.cell(), F::from(1))?;
+		
+		self.qap_config.q_enable.enable(&mut region, 4)?;			
+		let zero = region.assign_advice_from_constant(
+		    || "zero",
+		    self.qap_config.value,
+		    4,
+		    F::from(0)
+		)?;			
+		region.constrain_constant(zero.cell(), F::from(0))?;
+
+		let a_copy2 = a.copy_advice(
+		    || "a copy 2",
+		    &mut region,
+		    self.qap_config.value,
+		    5)?;			
+
+		let is_zero_copy = is_zero_assign.copy_advice(
+		    || "is_zero copy",
+		    &mut region,
+		    self.qap_config.value,
+		    6)?;			
+
+		let zero_temp = region.assign_advice_from_constant(
+		    || "zero",
+		    self.qap_config.value,
+		    7,
+		    F::from(0)
+		)?;			
+		region.constrain_constant(zero_temp.cell(), F::from(0))?;
+		Ok(is_zero_assign)
+	    }
+	)
+    }
+    
+    pub fn is_equal(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &AssignedCell<F, F>,
+        b: &AssignedCell<F, F>
+    ) -> Result<AssignedCell<F, F>, Error> {
+	let diff = layouter.assign_region(
+            || "is_equal",
+            |mut region| {
+		self.qap_config.q_enable.enable(&mut region, 0)?;		
+		let diff = region.assign_advice(
+		    || "diff",
+		    self.qap_config.value,
+		    0,
+		    || a.value()
+			.zip(b.value())
+			.map(|(av, bv)| *av - *bv)
+			.ok_or(Error::Synthesis)
+		)?;
+		let one = region.assign_advice_from_constant(
+		    || "one",
+		    self.qap_config.value,
+		    1,
+		    F::from(1))?;
+		region.constrain_constant(one.cell(), F::from(1))?;
+		b.copy_advice(
+		    || "b copy",
+		    &mut region,
+		    self.qap_config.value,
+		    2)?;
+		a.copy_advice(
+		    || "a copy",
+		    &mut region,
+		    self.qap_config.value,
+		    3)?;
+		Ok(diff)
+	    }
+	)?;
+	self.is_zero(layouter, &diff)
+    }
 }
 

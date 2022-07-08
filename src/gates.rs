@@ -231,6 +231,19 @@ pub(crate) mod tests {
 		    self.lt_bits
 		)?;
 	    }
+	    {
+		config.is_equal(
+		    &mut layouter,
+		    &b,
+		    &a
+		)?;
+	    }
+	    {
+		config.is_zero(
+		    &mut layouter,
+		    &a
+		)?;
+	    }	    
 	    Ok(())
         }
     }
@@ -267,7 +280,7 @@ pub(crate) mod tests {
         };
 
         halo2_proofs::dev::CircuitLayout::default()
-            .render(6, &circuit, &root)
+            .render(7, &circuit, &root)
             .unwrap();
     }
 }
