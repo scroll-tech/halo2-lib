@@ -1,14 +1,12 @@
-use halo2_proofs::{arithmetic::FieldExt, circuit::floor_planner::V1, circuit::*, plonk::*};
+use crate::utils::*;
+use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
 use num_bigint::BigInt as big_int;
 use num_bigint::BigUint as big_uint;
-use num_traits::One;
 use num_traits::Zero;
 
-use crate::{gates::qap_gate, utils::*};
-
 pub mod add_no_carry;
-pub mod big_less_than;
-//pub mod carry_mod;
+// pub mod big_less_than;
+pub mod carry_mod;
 pub mod check_carry_to_zero;
 pub mod decompose;
 pub mod mod_reduce;
@@ -75,10 +73,12 @@ impl<F: FieldExt> OverflowInteger<F> {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use halo2_proofs::circuit::floor_planner::V1;
     use halo2_proofs::{
         arithmetic::FieldExt, circuit::*, dev::MockProver, pairing::bn256::Fr as Fn, plonk::*,
         poly::Rotation,
     };
+    use num_traits::One;
 
     use super::*;
     use crate::fields::fp::{FpChip, FpConfig};
@@ -105,7 +105,7 @@ pub(crate) mod tests {
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
             let value = meta.advice_column();
             let constant = meta.fixed_column();
-            FpChip::configure(meta, value, constant, 4, 32, 4)
+            FpChip::configure(meta, value, constant, 16, 32, 4, big_uint::from(17u32))
         }
 
         fn synthesize(
@@ -115,9 +115,18 @@ pub(crate) mod tests {
         ) -> Result<(), Error> {
             let chip = FpChip::construct(config);
             chip.load_lookup_table(&mut layouter)?;
-            let a_assigned = chip.load_private(layouter.namespace(|| "input a"), self.a.clone())?;
-            let b_assigned = chip.load_private(layouter.namespace(|| "input b"), self.b.clone())?;
+            let a_assigned = chip.load_private(
+                layouter.namespace(|| "input a"),
+                self.a.clone(),
+                big_uint::one() << 32,
+            )?;
+            let b_assigned = chip.load_private(
+                layouter.namespace(|| "input b"),
+                self.b.clone(),
+                big_uint::one() << 32,
+            )?;
 
+            /*
             // test mul_no_carry
             {
                 chip.mul_no_carry(
@@ -186,7 +195,12 @@ pub(crate) mod tests {
                     &b_assigned,
                 )?;
             }
+            */
 
+            // test carry_mod
+            {
+                chip.carry_mod(&mut layouter.namespace(|| "carry mod"), &a_assigned)?;
+            }
             Ok(())
         }
     }
@@ -195,9 +209,9 @@ pub(crate) mod tests {
     fn test_bigint() {
         let k = 17;
         let circuit = MyCircuit::<Fn> {
-            a: (vec![100, 200, 300, 400])
+            a: (vec![50, 3, 11, 1 << 30])
                 .iter()
-                .map(|a| Some(biguint_to_fe(&big_uint::from(*a as u64))))
+                .map(|a| Some(bigint_to_fe(&big_int::from(*a as i64))))
                 .collect(),
             b: (vec![(1i64 << 33), -2i64, 0, 0])
                 .iter()

@@ -135,6 +135,7 @@ pub fn decompose_bigint_option<F: FieldExt>(
                     })
                 })
                 .collect();
+            assert_eq!(e, big_uint::zero());
             limbs
         }
         None => vec![None; number_of_limbs],

@@ -16,6 +16,7 @@ pub struct FpConfig<F: FieldExt> {
     range: range::RangeConfig<F>,
     limb_bits: usize,
     num_limbs: usize,
+    p: BigUint,
 }
 
 pub struct FpChip<F: FieldExt> {
@@ -34,6 +35,7 @@ impl<F: FieldExt> FpChip<F> {
         lookup_bits: usize,
         limb_bits: usize,
         num_limbs: usize,
+        p: BigUint,
     ) -> FpConfig<F> {
         let lookup = meta.lookup_table_column();
         let q_lookup = meta.complex_selector();
@@ -57,6 +59,7 @@ impl<F: FieldExt> FpChip<F> {
             ),
             limb_bits,
             num_limbs,
+            p,
         }
     }
 
@@ -68,12 +71,13 @@ impl<F: FieldExt> FpChip<F> {
         &self,
         mut layouter: impl Layouter<F>,
         vec_a: Vec<Option<F>>,
+        max_limb_size: BigUint,
     ) -> Result<OverflowInteger<F>, Error> {
         let config = &self.config;
 
         let limbs = layouter.assign_region(
             || "load private",
-            |mut region| {		
+            |mut region| {
                 let mut limbs = Vec::with_capacity(vec_a.len());
                 for (i, a) in vec_a.iter().enumerate() {
                     let limb = region.assign_advice(
@@ -81,7 +85,7 @@ impl<F: FieldExt> FpChip<F> {
                         config.value,
                         i,
                         || a.ok_or(Error::Synthesis),
-                    )?;		    
+                    )?;
                     limbs.push(limb);
                 }
                 Ok(limbs)
@@ -89,7 +93,7 @@ impl<F: FieldExt> FpChip<F> {
         )?;
         Ok(OverflowInteger::construct(
             limbs,
-            BigUint::from(1u32) << 64,
+            max_limb_size,
             self.config.limb_bits,
         ))
     }
@@ -140,6 +144,14 @@ impl<F: FieldExt> FpChip<F> {
         a: &OverflowInteger<F>,
     ) -> Result<(), Error> {
         check_carry_to_zero::assign(&self.config.range, layouter, a)
+    }
+
+    pub fn carry_mod(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &OverflowInteger<F>,
+    ) -> Result<OverflowInteger<F>, Error> {
+        carry_mod::assign(&self.config.range, layouter, a, &self.config.p)
     }
 }
 

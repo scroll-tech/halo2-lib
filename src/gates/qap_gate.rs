@@ -137,7 +137,7 @@ impl<F: FieldExt> Config<F> {
 
                 // Assign constant `-1` into `value` column at offset `2`
                 let minus_1 = -F::from(1);
-                let cell = region.assign_advice_from_constant(|| "1", self.value, 2, minus_1)?;
+                let cell = region.assign_advice_from_constant(|| "-1", self.value, 2, minus_1)?;
                 region.constrain_constant(cell.cell(), minus_1)?;
 
                 let a = a.value();

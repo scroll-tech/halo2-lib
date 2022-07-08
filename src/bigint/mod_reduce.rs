@@ -89,7 +89,8 @@ pub fn assign<F: FieldExt>(
     }
     Ok(OverflowInteger::construct(
         out_limbs,
-        &a.max_limb_size + big_uint::from(a.limbs.len() - k) * &a.max_limb_size * &limb_base,
+        &a.max_limb_size
+            + big_uint::from(a.limbs.len() - k) * &a.max_limb_size * (&limb_base - 1usize),
         a.limb_bits,
     ))
 }
