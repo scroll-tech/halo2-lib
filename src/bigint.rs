@@ -5,7 +5,7 @@ use num_bigint::BigUint as big_uint;
 use num_traits::Zero;
 
 pub mod add_no_carry;
-// pub mod big_less_than;
+pub mod big_less_than;
 pub mod carry_mod;
 pub mod check_carry_to_zero;
 pub mod decompose;
@@ -38,6 +38,13 @@ pub trait BigIntInstructions<F: FieldExt>: PolynomialInstructions<F> {
         layouter: &mut impl Layouter<F>,
         a: &AssignedCell<F, F>,
     ) -> Result<Self::BigInt, Error>;
+
+    fn big_less_than(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &Self::BigInt,
+	b: &Self::BigInt,
+    ) -> Result<AssignedCell<F, F>, Error>;
 }
 
 #[derive(Clone, Debug)]
@@ -89,6 +96,7 @@ pub(crate) mod tests {
     struct MyCircuit<F> {
         a: Vec<Option<F>>,
         b: Vec<Option<F>>,
+	c: Vec<Option<F>>,
     }
 
     impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
@@ -99,6 +107,7 @@ pub(crate) mod tests {
             Self {
                 a: vec![None; 4],
                 b: vec![None; 4],
+		c: vec![None; 4],
             }
         }
 
@@ -115,6 +124,7 @@ pub(crate) mod tests {
         ) -> Result<(), Error> {
             let chip = FpChip::construct(config);
             chip.load_lookup_table(&mut layouter)?;
+
             let a_assigned = chip.load_private(
                 layouter.namespace(|| "input a"),
                 self.a.clone(),
@@ -126,7 +136,12 @@ pub(crate) mod tests {
                 big_uint::one() << 32,
             )?;
 
-            /*
+	    let c_assigned = chip.load_private(
+		layouter.namespace(|| "input c"),
+		self.c.clone(),
+	        big_uint::one() << 32
+	    )?;
+
             // test mul_no_carry
             {
                 chip.mul_no_carry(
@@ -195,12 +210,22 @@ pub(crate) mod tests {
                     &b_assigned,
                 )?;
             }
-            */
+            
 
             // test carry_mod
             {
                 chip.carry_mod(&mut layouter.namespace(|| "carry mod"), &a_assigned)?;
             }
+
+	    // test big_less_than
+	    {
+		chip.big_less_than(
+		    &mut layouter.namespace(|| "big_less_than"),
+		    &a_assigned,
+		    &c_assigned
+		)?;
+	    }
+	    
             Ok(())
         }
     }
@@ -217,6 +242,10 @@ pub(crate) mod tests {
                 .iter()
                 .map(|a| Some(bigint_to_fe(&big_int::from(*a as i64))))
                 .collect(),
+            c: (vec![(1i64 << 31), 2i64, 0, 0])
+                .iter()
+                .map(|a| Some(bigint_to_fe(&big_int::from(*a as i64))))
+                .collect(),
         };
 
         let prover = MockProver::run(k, &circuit, vec![]).unwrap();
@@ -227,7 +256,7 @@ pub(crate) mod tests {
     #[cfg(feature = "dev-graph")]
     #[test]
     fn plot_bigint() {
-        let k = 9;
+        let k = 10;
         use plotters::prelude::*;
 
         let root = BitMapBackend::new("layout.png", (1024, 4096)).into_drawing_area();
@@ -237,6 +266,7 @@ pub(crate) mod tests {
         let circuit = MyCircuit::<Fn> {
             a: vec![None; 4],
             b: vec![None; 4],
+	    c: vec![None; 4],
         };
         halo2_proofs::dev::CircuitLayout::default()
             .render(k, &circuit, &root)

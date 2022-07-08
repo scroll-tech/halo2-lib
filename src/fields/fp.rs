@@ -192,4 +192,18 @@ impl<F: FieldExt> BigIntInstructions<F> for FpChip<F> {
             self.config.num_limbs,
         )
     }
+
+    fn big_less_than(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &Self::BigInt,
+	b: &Self::BigInt,
+    ) -> Result<AssignedCell<F, F>, Error> {
+	big_less_than::assign(
+	    &self.config.range,
+	    layouter,
+	    a,	    
+	    b
+	)
+    }
 }
