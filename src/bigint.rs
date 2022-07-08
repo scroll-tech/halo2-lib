@@ -49,7 +49,7 @@ pub trait BigIntInstructions<F: FieldExt>: PolynomialInstructions<F> {
 
 #[derive(Clone, Debug)]
 pub struct OverflowInteger<F: FieldExt> {
-    limbs: Vec<AssignedCell<F, F>>,
+    pub limbs: Vec<AssignedCell<F, F>>,
     max_limb_size: big_uint,
     limb_bits: usize,
 }
@@ -114,7 +114,7 @@ pub(crate) mod tests {
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
             let value = meta.advice_column();
             let constant = meta.fixed_column();
-            FpChip::configure(meta, value, constant, 16, 32, 4, big_uint::from(17u32))
+            FpChip::configure(meta, value, constant, 16, 64, 4, big_uint::from(17u32))
         }
 
         fn synthesize(
@@ -128,18 +128,17 @@ pub(crate) mod tests {
             let a_assigned = chip.load_private(
                 layouter.namespace(|| "input a"),
                 self.a.clone(),
-                big_uint::one() << 32,
+                big_uint::one() << 65,
             )?;
             let b_assigned = chip.load_private(
                 layouter.namespace(|| "input b"),
                 self.b.clone(),
-                big_uint::one() << 32,
+                big_uint::one() << 65,
             )?;
-
 	    let c_assigned = chip.load_private(
 		layouter.namespace(|| "input c"),
 		self.c.clone(),
-	        big_uint::one() << 32
+	        big_uint::one() << 65
 	    )?;
 
             // test mul_no_carry
@@ -225,7 +224,16 @@ pub(crate) mod tests {
 		    &c_assigned
 		)?;
 	    }
-	    
+
+	    // test fp_multiply
+	    {
+		chip.fp_multiply(
+		    &mut layouter.namespace(|| "fp_multiply"),
+		    &a_assigned,
+		    &c_assigned
+		)?;
+	    }
+
             Ok(())
         }
     }
@@ -238,10 +246,10 @@ pub(crate) mod tests {
                 .iter()
                 .map(|a| Some(bigint_to_fe(&big_int::from(*a as i64))))
                 .collect(),
-            b: (vec![(1i64 << 33), -2i64, 0, 0])
-                .iter()
-                .map(|a| Some(bigint_to_fe(&big_int::from(*a as i64))))
-                .collect(),
+            b: vec![Some(biguint_to_fe(&(big_uint::from(1u64) << 65))),
+		    Some(bigint_to_fe(&big_int::from(-2i64))),
+		    Some(Fn::from(0)),
+		    Some(Fn::from(0))],
             c: (vec![(1i64 << 31), 2i64, 0, 0])
                 .iter()
                 .map(|a| Some(bigint_to_fe(&big_int::from(*a as i64))))
@@ -256,7 +264,7 @@ pub(crate) mod tests {
     #[cfg(feature = "dev-graph")]
     #[test]
     fn plot_bigint() {
-        let k = 10;
+        let k = 11;
         use plotters::prelude::*;
 
         let root = BitMapBackend::new("layout.png", (1024, 4096)).into_drawing_area();
