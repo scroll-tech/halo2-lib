@@ -153,6 +153,33 @@ impl<F: FieldExt> FpChip<F> {
     ) -> Result<OverflowInteger<F>, Error> {
         carry_mod::assign(&self.config.range, layouter, a, &self.config.p)
     }
+
+    pub fn fp_multiply(
+	&self,
+	layouter: &mut impl Layouter<F>,
+	a: &OverflowInteger<F>,
+	b: &OverflowInteger<F>,
+    ) -> Result<OverflowInteger<F>, Error> {
+	let k_a = a.limbs.len();
+	let k_b = b.limbs.len();
+	assert_eq!(k_a, k_b);
+	let k = k_a;
+	
+	let no_carry = self.mul_no_carry(
+	    layouter,
+	    a,
+	    b
+	)?;
+	let prime_reduce = self.mod_reduce(
+	    layouter,
+	    &no_carry,
+	    k,
+	    self.config.p.clone())?;
+	self.carry_mod(
+	    layouter,
+	    &prime_reduce
+	)
+    }
 }
 
 impl<F: FieldExt> PolynomialInstructions<F> for FpChip<F> {
@@ -191,5 +218,19 @@ impl<F: FieldExt> BigIntInstructions<F> for FpChip<F> {
             self.config.limb_bits,
             self.config.num_limbs,
         )
+    }
+
+    fn big_less_than(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &Self::BigInt,
+	b: &Self::BigInt,
+    ) -> Result<AssignedCell<F, F>, Error> {
+	big_less_than::assign(
+	    &self.config.range,
+	    layouter,
+	    a,	    
+	    b
+	)
     }
 }

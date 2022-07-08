@@ -355,7 +355,7 @@ impl<F: FieldExt> RangeConfig<F> {
                         .zip(limb.as_ref())
                         .map(|(sum, x)| sum + (x << (idx * self.lookup_bits)));
 
-                    let running_pow = F::from(1u64 << (idx * self.lookup_bits));
+                    let running_pow = biguint_to_fe(&(BigUint::from(1u64) << (idx * self.lookup_bits)));
                     let const_cell = region.assign_advice_from_constant(
                         || format!("base^{}", idx),
                         self.qap_config.value,
