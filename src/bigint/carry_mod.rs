@@ -24,10 +24,10 @@ pub fn assign<F: FieldExt>(
     assert!(modulus.bits() <= (n * k).try_into().unwrap());
 
     // overflow := a.max_limb_size.bits()
-    // quot <= ceil(2^{overflow * k} / modulus) < 2^{overflow * k - modulus.bits() + 1}
-    // there quot will need ceil( (overflow * k - modulus.bits() + 1 ) / n ) limbs
+    // quot <= ceil(2^overflow * 2^{n * k} / modulus) < 2^{overflow + n * k - modulus.bits() + 1}
+    // there quot will need ceil( (overflow + n * k - modulus.bits() + 1 ) / n ) limbs
     let overflow = a.max_limb_size.bits().to_usize().unwrap();
-    let m: usize = (n + overflow * k - modulus.bits().to_usize().unwrap() - 1) / n;
+    let m: usize = (overflow + n * k - modulus.bits().to_usize().unwrap() + n) / n;
     assert!(m > 0);
 
     let a_val = a.to_bigint();
