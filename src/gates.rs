@@ -5,14 +5,15 @@ pub mod range;
 pub(crate) mod tests {
     use halo2_proofs::{
         arithmetic::FieldExt,
+        circuit::floor_planner::V1,
         circuit::{AssignedCell, Layouter, SimpleFloorPlanner},
-	circuit::floor_planner::V1,
         dev::MockProver,
         pairing::bn256::Fr as Fn,
         plonk::{Advice, Circuit, Column, ConstraintSystem, Error, Expression, Fixed, Selector},
         poly::Rotation,
     };
 
+    use super::qap_gate::QuantumCell::*;
     use super::{qap_gate, range};
 
     #[derive(Debug, Clone)]
@@ -54,7 +55,7 @@ pub(crate) mod tests {
         type FloorPlanner = V1;
 
         fn without_witnesses(&self) -> Self {
-	    Self::default()
+            Self::default()
         }
 
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
@@ -69,16 +70,40 @@ pub(crate) mod tests {
             let (a_cell, b_cell, c_cell) = layouter.assign_region(
                 || "inputs",
                 |mut region| {
-                    let a_cell = region.assign_advice(|| "a", config.a, 0, || self.a.ok_or(Error::Synthesis))?;
-                    let b_cell = region.assign_advice(|| "b", config.a, 1, || self.b.ok_or(Error::Synthesis))?;
-                    let c_cell = region.assign_advice(|| "c", config.a, 2, || self.c.ok_or(Error::Synthesis))?;
+                    let a_cell = region.assign_advice(
+                        || "a",
+                        config.a,
+                        0,
+                        || self.a.ok_or(Error::Synthesis),
+                    )?;
+                    let b_cell = region.assign_advice(
+                        || "b",
+                        config.a,
+                        1,
+                        || self.b.ok_or(Error::Synthesis),
+                    )?;
+                    let c_cell = region.assign_advice(
+                        || "c",
+                        config.a,
+                        2,
+                        || self.c.ok_or(Error::Synthesis),
+                    )?;
 
-                    // test basic gate
+                    // test assign_region
                     {
                         config.gate.assign_region(
-                            a_cell.value().map(|a| *a),
-                            b_cell.value().map(|a| *a),
-                            c_cell.value().map(|a| *a),
+                            vec![
+                                Existing(&a_cell),
+                                Existing(&b_cell),
+                                Existing(&c_cell),
+                                Witness(
+                                    &a_cell
+                                        .value()
+                                        .zip(b_cell.value())
+                                        .zip(c_cell.value())
+                                        .map(|((a, b), c)| *a + *b * *c),
+                                ),
+                            ],
                             3,
                             &mut region,
                         )?;
@@ -149,9 +174,9 @@ pub(crate) mod tests {
     #[derive(Default)]
     struct RangeTestCircuit<F> {
         range_bits: usize,
-	lt_bits: usize,
+        lt_bits: usize,
         a: Option<F>,
-	b: Option<F>
+        b: Option<F>,
     }
 
     impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
@@ -159,12 +184,12 @@ pub(crate) mod tests {
         type FloorPlanner = V1;
 
         fn without_witnesses(&self) -> Self {
-	    Self {
-		range_bits: self.range_bits,
-		lt_bits: self.lt_bits,
-		a: None,
-		b: None
-	    }
+            Self {
+                range_bits: self.range_bits,
+                lt_bits: self.lt_bits,
+                a: None,
+                b: None,
+            }
         }
 
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
@@ -192,59 +217,38 @@ pub(crate) mod tests {
                         0,
                         || self.a.ok_or(Error::Synthesis),
                     )?;
-		    let b = region.assign_advice(
+                    let b = region.assign_advice(
                         || "input",
                         config.qap_config.value,
                         1,
                         || self.b.ok_or(Error::Synthesis),
                     )?;
-		    Ok((a, b))
-                })?;
-	    
+                    Ok((a, b))
+                },
+            )?;
+
             {
-                 config.load_lookup_table(&mut layouter)?;
+                config.load_lookup_table(&mut layouter)?;
             }
             {
                 config.range_check(&mut layouter, &a, self.range_bits)?;
             }
-	    {
-		config.check_less_than(
-		    &mut layouter,
-		    &a,
-		    &b,
-		    self.lt_bits
-		)?;
-	    }
-	    {
-		config.is_less_than(
-		    &mut layouter,
-		    &a,
-		    &b,
-		    self.lt_bits
-		)?;
-	    }
-	    {
-		config.is_less_than(
-		    &mut layouter,
-		    &b,
-		    &a,
-		    self.lt_bits
-		)?;
-	    }
-	    {
-		config.is_equal(
-		    &mut layouter,
-		    &b,
-		    &a
-		)?;
-	    }
-	    {
-		config.is_zero(
-		    &mut layouter,
-		    &a
-		)?;
-	    }	    
-	    Ok(())
+            {
+                config.check_less_than(&mut layouter, &a, &b, self.lt_bits)?;
+            }
+            {
+                config.is_less_than(&mut layouter, &a, &b, self.lt_bits)?;
+            }
+            {
+                config.is_less_than(&mut layouter, &b, &a, self.lt_bits)?;
+            }
+            {
+                config.is_equal(&mut layouter, &b, &a)?;
+            }
+            {
+                config.is_zero(&mut layouter, &a)?;
+            }
+            Ok(())
         }
     }
 
@@ -253,9 +257,9 @@ pub(crate) mod tests {
         let k = 11;
         let circuit = RangeTestCircuit::<Fn> {
             range_bits: 8,
-	    lt_bits: 8,
+            lt_bits: 8,
             a: Some(Fn::from(100)),
-	    b: Some(Fn::from(101)),
+            b: Some(Fn::from(101)),
         };
 
         let prover = MockProver::run(k, &circuit, vec![]).unwrap();
@@ -273,10 +277,10 @@ pub(crate) mod tests {
         let root = root.titled("Gates Layout", ("sans-serif", 60)).unwrap();
 
         let circuit = RangeTestCircuit::<Fn> {
-	    range_bits: 8,
-	    lt_bits: 8,
+            range_bits: 8,
+            lt_bits: 8,
             a: Some(Fn::from(100)),
-	    b: Some(Fn::from(101)),
+            b: Some(Fn::from(101)),
         };
 
         halo2_proofs::dev::CircuitLayout::default()

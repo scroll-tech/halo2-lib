@@ -4,6 +4,12 @@ use num_bigint::BigUint as big_uint;
 use num_traits::One;
 use std::marker::PhantomData;
 
+pub enum QuantumCell<'a, F: FieldExt> {
+    Existing(&'a AssignedCell<F, F>),
+    Witness(&'a Option<F>),
+    Constant(&'a F),
+}
+
 // Gate to perform `a + b * c - out = 0`
 // We chose `a + b * c` instead of `a * b + c` to allow "chaining" of gates, i.e., the output of one gate because `a` in the next gate
 #[derive(Clone, Debug)]
@@ -43,44 +49,37 @@ impl<F: FieldExt> Config<F> {
 
     pub fn assign_region(
         &self,
-        a: Option<F>,
-        b: Option<F>,
-        c: Option<F>,
+        inputs: Vec<QuantumCell<F>>,
         offset: usize,
         region: &mut Region<'_, F>,
-    ) -> Result<
-        (
-            AssignedCell<F, F>,
-            AssignedCell<F, F>,
-            AssignedCell<F, F>,
-            AssignedCell<F, F>,
-        ),
-        Error,
-    > {
-        // Enable `q_enable` selector
-        self.q_enable.enable(region, offset)?;
+    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+        let mut assigned_cells = Vec::with_capacity(inputs.len());
 
-        // Assign `a` into `value` column at `offset`
-        let a_cell =
-            region.assign_advice(|| "a", self.value, offset, || a.ok_or(Error::Synthesis))?;
-
-        // Assign `b` into `value` column at `offset + 1`
-        let b_cell =
-            region.assign_advice(|| "b", self.value, offset + 1, || b.ok_or(Error::Synthesis))?;
-
-        // Assign `c` into `value` column at `offset + 2`
-        let c_cell =
-            region.assign_advice(|| "c", self.value, offset + 2, || c.ok_or(Error::Synthesis))?;
-
-        let out = a.zip(b).zip(c).map(|((a, b), c)| a + b * c);
-        let out_cell = region.assign_advice(
-            || "out",
-            self.value,
-            offset + 3,
-            || out.ok_or(Error::Synthesis),
-        )?;
-
-        Ok((a_cell, b_cell, c_cell, out_cell))
+        for (i, input) in inputs.iter().enumerate() {
+            let assigned_cell = match *input {
+                QuantumCell::Existing(acell) => {
+                    acell.copy_advice(|| "gate: copy advice", region, self.value, offset + i)
+                }
+                QuantumCell::Witness(val) => region.assign_advice(
+                    || "gate: assign advice",
+                    self.value,
+                    offset + i,
+                    || val.ok_or(Error::Synthesis),
+                ),
+                QuantumCell::Constant(c) => {
+                    let cell = region.assign_advice_from_constant(
+                        || "gate: assign const",
+                        self.value,
+                        offset + i,
+                        *c,
+                    )?;
+                    region.constrain_constant(cell.cell(), c)?;
+                    Ok(cell)
+                }
+            }?;
+            assigned_cells.push(assigned_cell);
+        }
+        Ok(assigned_cells)
     }
 
     // Layouter creates new region that copies a, b and constrains `a + b * 1 = out`
@@ -283,223 +282,150 @@ impl<F: FieldExt> Config<F> {
 
     // | 1 - b | 1 | b | 1 | b | a | 1 - b | out |
     pub fn or(
-	&self,
-	layouter: &mut impl Layouter<F>,
-	a: &AssignedCell<F, F>,
-	b: &AssignedCell<F, F>,
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &AssignedCell<F, F>,
+        b: &AssignedCell<F, F>,
     ) -> Result<AssignedCell<F, F>, Error> {
         layouter.assign_region(
             || "or",
             |mut region| {
-		self.q_enable.enable(&mut region, 0)?;
-		let one_minus_b = region.assign_advice(
-		    || "1 - b",
+                self.q_enable.enable(&mut region, 0)?;
+                let one_minus_b = region.assign_advice(
+                    || "1 - b",
                     self.value,
-		    0,
-                    || b.value()
-			.map(|x| F::from(1) - *x)
-			.ok_or(Error::Synthesis),
+                    0,
+                    || b.value().map(|x| F::from(1) - *x).ok_or(Error::Synthesis),
                 )?;
-		let one = region.assign_advice_from_constant(
-                    || "one",
-                    self.value,
-                    1,
-                    F::from(1)
-                )?;
+                let one =
+                    region.assign_advice_from_constant(|| "one", self.value, 1, F::from(1))?;
                 region.constrain_constant(one.cell(), F::from(1))?;
 
-		b.copy_advice(
-		    || "b copy",
-		    &mut region,
-		    self.value,
-		    2
-		)?;
-		let one_res = region.assign_advice_from_constant(
-                    || "one",
-                    self.value,
-                    3,
-                    F::from(1)
-                )?;
+                b.copy_advice(|| "b copy", &mut region, self.value, 2)?;
+                let one_res =
+                    region.assign_advice_from_constant(|| "one", self.value, 3, F::from(1))?;
                 region.constrain_constant(one_res.cell(), F::from(1))?;
 
-		self.q_enable.enable(&mut region, 4)?;		    
-		b.copy_advice(
-		    || "b copy",
-		    &mut region,
-		    self.value,
-		    4
-		)?;
-		a.copy_advice(
-		    || "a copy",
-		    &mut region,
-		    self.value,
-		    5
-		)?;
-		one_minus_b.copy_advice(
-		    || "1-b copy",
-		    &mut region,
-		    self.value,
-		    6
-		)?;
-		
-		region.assign_advice(
-		    || "or",
-		    self.value,
-		    7,
-		    || a.value().
-			zip(b.value())
-			.map(|(av, bv)| *av + *bv - (*av) * (*bv))
-			.ok_or(Error::Synthesis),
-		)
-	    }
-	)
+                self.q_enable.enable(&mut region, 4)?;
+                b.copy_advice(|| "b copy", &mut region, self.value, 4)?;
+                a.copy_advice(|| "a copy", &mut region, self.value, 5)?;
+                one_minus_b.copy_advice(|| "1-b copy", &mut region, self.value, 6)?;
+
+                region.assign_advice(
+                    || "or",
+                    self.value,
+                    7,
+                    || {
+                        a.value()
+                            .zip(b.value())
+                            .map(|(av, bv)| *av + *bv - (*av) * (*bv))
+                            .ok_or(Error::Synthesis)
+                    },
+                )
+            },
+        )
     }
 
-    // | 0 | a | b | out | 
+    // | 0 | a | b | out |
     pub fn and(
-	&self,
-	layouter: &mut impl Layouter<F>,
-	a: &AssignedCell<F, F>,
-	b: &AssignedCell<F, F>,
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &AssignedCell<F, F>,
+        b: &AssignedCell<F, F>,
     ) -> Result<AssignedCell<F, F>, Error> {
         layouter.assign_region(
             || "and",
             |mut region| {
-		self.q_enable.enable(&mut region, 0)?;
-		let zero = region.assign_advice_from_constant(
-                    || "zero",
-                    self.value,
-                    0,
-                    F::from(0)
-                )?;
+                self.q_enable.enable(&mut region, 0)?;
+                let zero =
+                    region.assign_advice_from_constant(|| "zero", self.value, 0, F::from(0))?;
                 region.constrain_constant(zero.cell(), F::from(0))?;
-		a.copy_advice(
-		    || "a copy",
-		    &mut region,
-		    self.value,
-		    1
-		)?;
-		b.copy_advice(
-		    || "b copy",
-		    &mut region,
-		    self.value,
-		    2
-		)?;
-		region.assign_advice(
+                a.copy_advice(|| "a copy", &mut region, self.value, 1)?;
+                b.copy_advice(|| "b copy", &mut region, self.value, 2)?;
+                region.assign_advice(
                     || "and",
                     self.value,
                     3,
-                    || a.value()
-			.zip(b.value())
-			.map(|(av, bv)| (*av) * (*bv))
-			.ok_or(Error::Synthesis),
+                    || {
+                        a.value()
+                            .zip(b.value())
+                            .map(|(av, bv)| (*av) * (*bv))
+                            .ok_or(Error::Synthesis)
+                    },
                 )
-	    }
-	)
+            },
+        )
     }
 
     // returns: a || (b && c)
     // | 1 - b c | b | c | 1 | a - 1 | 1 - b c | out | a - 1 | 1 | 1 | a |
     pub fn or_and(
-	&self,
-	layouter: &mut impl Layouter<F>,
-	a: &AssignedCell<F, F>,
-	b: &AssignedCell<F, F>,
-	c: &AssignedCell<F, F>,
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &AssignedCell<F, F>,
+        b: &AssignedCell<F, F>,
+        c: &AssignedCell<F, F>,
     ) -> Result<AssignedCell<F, F>, Error> {
         layouter.assign_region(
             || "or_and",
             |mut region| {
-		self.q_enable.enable(&mut region, 0)?;
-		let one_minus_bc = region.assign_advice(
-		    || "1 - bc",
+                self.q_enable.enable(&mut region, 0)?;
+                let one_minus_bc = region.assign_advice(
+                    || "1 - bc",
                     self.value,
-		    0,
-                    || b.value()
-			.zip(c.value())
-			.map(|(bv, cv)| F::from(1) - (*bv) * (*cv))
-			.ok_or(Error::Synthesis),
+                    0,
+                    || {
+                        b.value()
+                            .zip(c.value())
+                            .map(|(bv, cv)| F::from(1) - (*bv) * (*cv))
+                            .ok_or(Error::Synthesis)
+                    },
                 )?;
-		b.copy_advice(
-		    || "b copy",
-		    &mut region,
-		    self.value,
-		    1
-		)?;
-		c.copy_advice(
-		    || "c copy",
-		    &mut region,
-		    self.value,
-		    2
-		)?;
+                b.copy_advice(|| "b copy", &mut region, self.value, 1)?;
+                c.copy_advice(|| "c copy", &mut region, self.value, 2)?;
 
-		self.q_enable.enable(&mut region, 3)?;
-		let one = region.assign_advice_from_constant(
-                    || "one",
-                    self.value,
-                    3,
-                    F::from(1)
-                )?;
+                self.q_enable.enable(&mut region, 3)?;
+                let one =
+                    region.assign_advice_from_constant(|| "one", self.value, 3, F::from(1))?;
                 region.constrain_constant(one.cell(), F::from(1))?;
-		
-		let a_minus_one = region.assign_advice(
+
+                let a_minus_one = region.assign_advice(
                     || "a - 1",
                     self.value,
                     7,
-                    || a.value()
-			.map(|x| *x - F::from(1))
-			.ok_or(Error::Synthesis),
+                    || a.value().map(|x| *x - F::from(1)).ok_or(Error::Synthesis),
                 )?;
 
-		let a_minus_one_copy = a_minus_one.copy_advice(
-		    || "a - 1 copy",
-		    &mut region,
-		    self.value,
-		    4
-		)?;
-		
-		let one_minus_bc_copy = one_minus_bc.copy_advice(
-		    || "1 - bc copy",
-		    &mut region,
-		    self.value,
-		    5
-		)?;
+                let a_minus_one_copy =
+                    a_minus_one.copy_advice(|| "a - 1 copy", &mut region, self.value, 4)?;
 
-		let out = region.assign_advice(
-		    || "out",
-		    self.value,
-		    6,
-		    || a.value()
-			.zip(b.value())
-			.zip(c.value())
-			.map(|((av, bv), cv)| *av + (*bv) * (*cv) - (*av) * (*bv) * (*cv))
-			.ok_or(Error::Synthesis)
-		)?;
-		
-		self.q_enable.enable(&mut region, 7)?;			
-		let one2 = region.assign_advice_from_constant(
-                    || "one2",
+                let one_minus_bc_copy =
+                    one_minus_bc.copy_advice(|| "1 - bc copy", &mut region, self.value, 5)?;
+
+                let out = region.assign_advice(
+                    || "out",
                     self.value,
-                    8,
-                    F::from(1)
+                    6,
+                    || {
+                        a.value()
+                            .zip(b.value())
+                            .zip(c.value())
+                            .map(|((av, bv), cv)| *av + (*bv) * (*cv) - (*av) * (*bv) * (*cv))
+                            .ok_or(Error::Synthesis)
+                    },
                 )?;
+
+                self.q_enable.enable(&mut region, 7)?;
+                let one2 =
+                    region.assign_advice_from_constant(|| "one2", self.value, 8, F::from(1))?;
                 region.constrain_constant(one2.cell(), F::from(1))?;
-		let one3 = region.assign_advice_from_constant(
-                    || "one3",
-                    self.value,
-                    9,
-                    F::from(1)
-                )?;
+                let one3 =
+                    region.assign_advice_from_constant(|| "one3", self.value, 9, F::from(1))?;
                 region.constrain_constant(one3.cell(), F::from(1))?;
 
-		let a_copy = a.copy_advice(
-		    || "a copy",
-		    &mut region,
-		    self.value,
-		    10
-		)?;
-		Ok(out)
-	    }
-	)
-    }    
+                let a_copy = a.copy_advice(|| "a copy", &mut region, self.value, 10)?;
+                Ok(out)
+            },
+        )
+    }
 }
