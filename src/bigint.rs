@@ -209,7 +209,7 @@ pub(crate) mod tests {
     fn test_bigint() {
         let k = 17;
         let circuit = MyCircuit::<Fn> {
-            a: (vec![50, 3, 11, 1 << 30])
+            a: (vec![50, -3, 11, -(1 << 30)])
                 .iter()
                 .map(|a| Some(bigint_to_fe(&big_int::from(*a as i64))))
                 .collect(),

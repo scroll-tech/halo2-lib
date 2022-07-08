@@ -1,4 +1,5 @@
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
+use num_bigint::BigInt;
 use num_bigint::BigUint;
 use num_traits::One;
 
@@ -10,7 +11,8 @@ use crate::utils::*;
 // a0 = c0 * 2^n
 // a_{i + 1} + c_i = c_{i + 1} * 2^n for i = 0.. k - 2
 // a_{k - 1} + c_{k - 2} = 0
-// and c_i \in [-2^{m - n}, 2^{m - n}]
+// and c_i \in [-2^{m - n + EPSILON}, 2^{m - n + EPSILON}], with EPSILON >= 1
+// where m = a.max_limb_size.bits() and we choose EPSILON to round up to the next multiple of the range check table size
 //
 // translated to d_i, this becomes:
 // a0 + d0 * 2^n = 0
@@ -25,18 +27,20 @@ pub fn assign<F: FieldExt>(
     let limb_bits = a.limb_bits;
     let max_limb_bits = a.max_limb_size.bits();
 
-    let mut carries: Vec<Option<BigUint>> = Vec::with_capacity(k);
-    let limb_val = BigUint::from(1u32) << limb_bits;
+    let mut carries: Vec<Option<BigInt>> = Vec::with_capacity(k);
+    let limb_val = BigInt::from(1) << limb_bits;
+    let limb_base = bigint_to_fe(&limb_val);
+
     for idx in 0..k {
         let a_val = a.limbs[idx].value();
         let carry = match a_val {
             Some(a_fe) => {
-                let a_val_big = fe_to_biguint(a_fe);
+                let a_val_big = fe_to_bigint(a_fe);
                 if idx == 0 {
                     Some(a_val_big / &limb_val)
                 } else {
                     let carry_val = carries[idx - 1].as_ref().unwrap();
-                    Some(((a_val_big + carry_val) % modulus::<F>()) / &limb_val)
+                    Some((a_val_big + carry_val) / &limb_val)
                 }
             }
             None => None,
@@ -59,9 +63,7 @@ pub fn assign<F: FieldExt>(
                     offset,
                 )?;
                 {
-                    let neg_carry = Some(modulus::<F>())
-                        .zip(carries[idx].as_ref())
-                        .map(|(m, c)| biguint_to_fe::<F>(&(m - c)));
+                    let neg_carry = carries[idx].as_ref().map(|c| bigint_to_fe::<F>(&-c));
                     let last_carry = region.assign_advice(
                         || "negative carry",
                         range.qap_config.value,
@@ -74,9 +76,9 @@ pub fn assign<F: FieldExt>(
                     || "base",
                     range.qap_config.value,
                     offset + 2,
-                    biguint_to_fe::<F>(&limb_val),
+                    limb_base,
                 )?;
-                region.constrain_constant(limb.cell(), biguint_to_fe::<F>(&limb_val))?;
+                region.constrain_constant(limb.cell(), limb_base)?;
 
                 if idx == 0 {
                     let zero = region.assign_advice_from_constant(
@@ -101,9 +103,11 @@ pub fn assign<F: FieldExt>(
         },
     )?;
 
+    // round `max_limb_bits - limb_bits` up to the next multiple of range.lookup_bits
     let range_bits = (((max_limb_bits - (limb_bits as u64) + 1 + (range.lookup_bits as u64) - 1)
         / (range.lookup_bits as u64))
         * (range.lookup_bits as u64)) as usize;
+
     let shift_val = biguint_to_fe::<F>(&(BigUint::one() << (range_bits - 1)));
     let mut shifted_carry_assignments = Vec::with_capacity(k);
     for carry_cell in neg_carry_assignments.iter() {

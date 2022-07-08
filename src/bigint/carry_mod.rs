@@ -44,8 +44,12 @@ pub fn assign<F: FieldExt>(
     // this is a constant vector:
     let mod_vec = decompose_biguint(&modulus, k, n);
 
-    // Goal: assign cells to `out - a + modulus * quotient`
+    //println!("a_limbs: {:?}", a.limbs);
+    //println!("out_vec: {:?}", out_vec);
+    //println!("quot_vec: {:?}", quotient_vec);
+    //println!("mod_vec: {:?}", mod_vec);
 
+    // Goal: assign cells to `out - a + modulus * quotient`
     // 1. we do mul_no_carry(modulus, quotient) while assigning `modulus` and `quotient` as we go
     //    call the output `prod`
     // 2. for prod[i], i < k we can compute out - a + prod by using the transpose of
