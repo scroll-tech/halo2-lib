@@ -202,7 +202,7 @@ pub(crate) mod tests {
                 })?;
 	    
             {
-                config.load_lookup_table(&mut layouter)?;
+                 config.load_lookup_table(&mut layouter)?;
             }
             {
                 config.range_check(&mut layouter, &a, self.range_bits)?;
@@ -213,8 +213,38 @@ pub(crate) mod tests {
 		    &a,
 		    &b,
 		    self.lt_bits
-		)
+		)?;
 	    }
+	    {
+		config.is_less_than(
+		    &mut layouter,
+		    &a,
+		    &b,
+		    self.lt_bits
+		)?;
+	    }
+	    {
+		config.is_less_than(
+		    &mut layouter,
+		    &b,
+		    &a,
+		    self.lt_bits
+		)?;
+	    }
+	    {
+		config.is_equal(
+		    &mut layouter,
+		    &b,
+		    &a
+		)?;
+	    }
+	    {
+		config.is_zero(
+		    &mut layouter,
+		    &a
+		)?;
+	    }	    
+	    Ok(())
         }
     }
 
@@ -250,7 +280,7 @@ pub(crate) mod tests {
         };
 
         halo2_proofs::dev::CircuitLayout::default()
-            .render(5, &circuit, &root)
+            .render(7, &circuit, &root)
             .unwrap();
     }
 }
