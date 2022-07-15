@@ -6,8 +6,8 @@ use std::marker::PhantomData;
 
 pub enum QuantumCell<'a, F: FieldExt> {
     Existing(&'a AssignedCell<F, F>),
-    Witness(&'a Option<F>),
-    Constant(&'a F),
+    Witness(Option<F>),
+    Constant(F),
 }
 
 // Gate to perform `a + b * c - out = 0`
@@ -71,7 +71,7 @@ impl<F: FieldExt> Config<F> {
                         || "gate: assign const",
                         self.value,
                         offset + i,
-                        *c,
+                        c,
                     )?;
                     region.constrain_constant(cell.cell(), c)?;
                     Ok(cell)

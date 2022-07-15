@@ -128,6 +128,25 @@ impl<F: FieldExt> FpChip<F> {
         ))
     }
 
+    // signed overflow BigInt functions
+    pub fn add_no_carry(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &OverflowInteger<F>,
+        b: &OverflowInteger<F>,
+    ) -> Result<OverflowInteger<F>, Error> {
+        add_no_carry::assign(&self.config.gate, layouter, a, b)
+    }
+
+    pub fn mul_no_carry(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &OverflowInteger<F>,
+        b: &OverflowInteger<F>,
+    ) -> Result<OverflowInteger<F>, Error> {
+        mul_no_carry::assign(&self.config.gate, layouter, a, b)
+    }
+
     pub fn mod_reduce(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -154,6 +173,31 @@ impl<F: FieldExt> FpChip<F> {
         carry_mod::assign(&self.config.range, layouter, a, &self.config.p)
     }
 
+    // BigInt functions
+    pub fn decompose(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &AssignedCell<F, F>,
+    ) -> Result<OverflowInteger<F>, Error> {
+        decompose::assign(
+            &self.config.range,
+            layouter,
+            a,
+            self.config.limb_bits,
+            self.config.num_limbs,
+        )
+    }
+
+    pub fn big_less_than(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &OverflowInteger<F>,
+        b: &OverflowInteger<F>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        big_less_than::assign(&self.config.range, layouter, a, b)
+    }
+
+    // F_p functions
     pub fn mul(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -168,53 +212,5 @@ impl<F: FieldExt> FpChip<F> {
         let no_carry = self.mul_no_carry(layouter, a, b)?;
         let prime_reduce = self.mod_reduce(layouter, &no_carry, k, self.config.p.clone())?;
         self.carry_mod(layouter, &prime_reduce)
-    }
-}
-
-impl<F: FieldExt> PolynomialInstructions<F> for FpChip<F> {
-    type Polynomial = OverflowInteger<F>;
-
-    fn add_no_carry(
-        &self,
-        layouter: &mut impl Layouter<F>,
-        a: &Self::Polynomial,
-        b: &Self::Polynomial,
-    ) -> Result<Self::Polynomial, Error> {
-        add_no_carry::assign(&self.config.gate, layouter, a, b)
-    }
-
-    fn mul_no_carry(
-        &self,
-        layouter: &mut impl Layouter<F>,
-        a: &Self::Polynomial,
-        b: &Self::Polynomial,
-    ) -> Result<Self::Polynomial, Error> {
-        mul_no_carry::assign(&self.config.gate, layouter, a, b)
-    }
-}
-
-impl<F: FieldExt> BigIntInstructions<F> for FpChip<F> {
-    type BigInt = OverflowInteger<F>;
-    fn decompose(
-        &self,
-        layouter: &mut impl Layouter<F>,
-        a: &AssignedCell<F, F>,
-    ) -> Result<Self::BigInt, Error> {
-        decompose::assign(
-            &self.config.range,
-            layouter,
-            a,
-            self.config.limb_bits,
-            self.config.num_limbs,
-        )
-    }
-
-    fn big_less_than(
-        &self,
-        layouter: &mut impl Layouter<F>,
-        a: &Self::BigInt,
-        b: &Self::BigInt,
-    ) -> Result<AssignedCell<F, F>, Error> {
-        big_less_than::assign(&self.config.range, layouter, a, b)
     }
 }

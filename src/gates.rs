@@ -97,7 +97,7 @@ pub(crate) mod tests {
                                 Existing(&b_cell),
                                 Existing(&c_cell),
                                 Witness(
-                                    &a_cell
+                                    a_cell
                                         .value()
                                         .zip(b_cell.value())
                                         .zip(c_cell.value())

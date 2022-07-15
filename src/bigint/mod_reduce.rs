@@ -3,6 +3,9 @@ use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
 use num_bigint::BigUint as big_uint;
 use num_traits::{One, Zero};
 
+use crate::gates::qap_gate::QuantumCell;
+use crate::gates::qap_gate::QuantumCell::*;
+use crate::utils::modulus as native_modulus;
 use crate::{gates::qap_gate, utils::*};
 
 pub fn assign<F: FieldExt>(
@@ -19,6 +22,8 @@ pub fn assign<F: FieldExt>(
     assert!(modulus.bits() <= (n * k).try_into().unwrap());
 
     let m = a.limbs.len() - k;
+    assert!(&a.max_limb_size * (1usize + (big_uint::from(m) << n)) <= native_modulus::<F>() / 2u32);
+
     let limb_base = big_uint::one() << n;
     let mut r_limbs: Vec<F> = Vec::with_capacity(m * k);
 
@@ -43,54 +48,33 @@ pub fn assign<F: FieldExt>(
             |mut region| {
                 let mut offset = 0;
 
-                let mut out_val = a.limbs[j].value().map(|a| *a);
-                let mut out_limb = a.limbs[j].copy_advice(
-                    || format!("limbs_{}", j),
-                    &mut region,
-                    gate.value,
-                    offset,
-                )?;
+                let mut r_computation: Vec<QuantumCell<F>> = Vec::with_capacity(3 * m + 1);
+                r_computation.push(Existing(&a.limbs[j]));
 
+                let mut out_val = a.limbs[j].value().map(|a| *a);
                 for i in k..a.limbs.len() {
                     gate.q_enable.enable(&mut region, offset)?;
 
-                    let r_val = &r_limbs[(i - k) * k + j];
-                    let r_cell = region.assign_advice_from_constant(
-                        || format!("r[{}][{}]", i, j),
-                        gate.value,
-                        offset + 1,
-                        *r_val,
-                    )?;
-                    region.constrain_constant(r_cell.cell(), *r_val)?;
-
-                    a.limbs[i].copy_advice(
-                        || format!("limbs_{}", i),
-                        &mut region,
-                        gate.value,
-                        offset + 2,
-                    )?;
+                    let r_val = r_limbs[(i - k) * k + j];
                     out_val = out_val
                         .zip(a.limbs[i].value())
-                        .map(|(sum, c)| sum + *r_val * *c);
+                        .map(|(sum, c)| sum + r_val * *c);
 
-                    out_limb = region.assign_advice(
-                        || "running sum",
-                        gate.value,
-                        offset + 3,
-                        || out_val.ok_or(Error::Synthesis),
-                    )?;
+                    r_computation.push(Constant(r_val));
+                    r_computation.push(Existing(&a.limbs[i]));
+                    r_computation.push(Witness(out_val));
 
                     offset += 3;
                 }
-                Ok(out_limb)
+                let r_computation_assigned = gate.assign_region(r_computation, 0, &mut region)?;
+                Ok(r_computation_assigned.last().unwrap().clone())
             },
         )?;
         out_limbs.push(out_limb);
     }
     Ok(OverflowInteger::construct(
         out_limbs,
-        &a.max_limb_size
-            + big_uint::from(a.limbs.len() - k) * &a.max_limb_size * (&limb_base - 1usize),
+        &a.max_limb_size + big_uint::from(m) * &a.max_limb_size * (&limb_base - 1usize),
         a.limb_bits,
     ))
 }

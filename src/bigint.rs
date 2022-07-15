@@ -1,5 +1,5 @@
 use crate::utils::*;
-use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
+use halo2_proofs::{arithmetic::FieldExt, circuit::*};
 use num_bigint::BigInt as big_int;
 use num_bigint::BigUint as big_uint;
 use num_traits::Zero;
@@ -12,45 +12,10 @@ pub mod decompose;
 pub mod mod_reduce;
 pub mod mul_no_carry;
 
-pub trait PolynomialInstructions<F: FieldExt> {
-    type Polynomial;
-
-    fn add_no_carry(
-        &self,
-        layouter: &mut impl Layouter<F>,
-        a: &Self::Polynomial,
-        b: &Self::Polynomial,
-    ) -> Result<Self::Polynomial, Error>;
-
-    fn mul_no_carry(
-        &self,
-        layouter: &mut impl Layouter<F>,
-        a: &Self::Polynomial,
-        b: &Self::Polynomial,
-    ) -> Result<Self::Polynomial, Error>;
-}
-
-pub trait BigIntInstructions<F: FieldExt>: PolynomialInstructions<F> {
-    type BigInt;
-
-    fn decompose(
-        &self,
-        layouter: &mut impl Layouter<F>,
-        a: &AssignedCell<F, F>,
-    ) -> Result<Self::BigInt, Error>;
-
-    fn big_less_than(
-        &self,
-        layouter: &mut impl Layouter<F>,
-        a: &Self::BigInt,
-        b: &Self::BigInt,
-    ) -> Result<AssignedCell<F, F>, Error>;
-}
-
 #[derive(Clone, Debug)]
 pub struct OverflowInteger<F: FieldExt> {
     pub limbs: Vec<AssignedCell<F, F>>,
-    max_limb_size: big_uint,
+    max_limb_size: big_uint, // max absolute value of integer value of a limb
     limb_bits: usize,
 }
 
