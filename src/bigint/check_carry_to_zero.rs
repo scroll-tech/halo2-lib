@@ -6,6 +6,8 @@ use num_traits::One;
 use super::OverflowInteger;
 use crate::gates::range;
 use crate::utils::*;
+use crate::gates::qap_gate::QuantumCell;
+use crate::gates::qap_gate::QuantumCell::*;
 
 // checks there exist d_i = -c_i so that
 // a0 = c0 * 2^n
@@ -52,54 +54,26 @@ pub fn assign<F: FieldExt>(
     layouter.assign_region(
         || "carry consistency",
         |mut region| {
-            let mut offset = 0;
+	    let mut cells = Vec::with_capacity(4 * k);
             for idx in 0..k {
-                range.qap_config.q_enable.enable(&mut region, offset)?;
+                range.qap_config.q_enable.enable(&mut region, 4 * idx)?;
+		
+		cells.push(Existing(&a.limbs[idx]));
+		cells.push(Witness(carries[idx].as_ref().map(|c| bigint_to_fe::<F>(&-c))));
+		cells.push(Constant(limb_base));
+		if idx == 0 {
+		    cells.push(Constant(F::from(0)));
+		} else {
+		    cells.push(cells[4 * idx - 3].clone());
+		}
+	    }
+	    let assigned_cells = range.qap_config.assign_region(cells, 0, &mut region)?;
+	    region.constrain_equal(a.limbs[k - 1].cell(), assigned_cells[4 * (k - 2) + 1].cell())?;
 
-                a.limbs[idx].copy_advice(
-                    || format!("a_{}", idx),
-                    &mut region,
-                    range.qap_config.value,
-                    offset,
-                )?;
-                {
-                    let neg_carry = carries[idx].as_ref().map(|c| bigint_to_fe::<F>(&-c));
-                    let last_carry = region.assign_advice(
-                        || "negative carry",
-                        range.qap_config.value,
-                        offset + 1,
-                        || neg_carry.ok_or(Error::Synthesis),
-                    )?;
-                    neg_carry_assignments.push(last_carry);
-                }
-                let limb = region.assign_advice_from_constant(
-                    || "base",
-                    range.qap_config.value,
-                    offset + 2,
-                    limb_base,
-                )?;
-                region.constrain_constant(limb.cell(), limb_base)?;
-
-                if idx == 0 {
-                    let zero = region.assign_advice_from_constant(
-                        || "zero",
-                        range.qap_config.value,
-                        offset + 3,
-                        F::from(0),
-                    )?;
-                    region.constrain_constant(zero.cell(), F::from(0))?;
-                } else {
-                    neg_carry_assignments[idx - 1].copy_advice(
-                        || "prev negative carry",
-                        &mut region,
-                        range.qap_config.value,
-                        offset + 3,
-                    )?;
-                }
-                offset = offset + 4;
-            }
-            region.constrain_equal(a.limbs[k - 1].cell(), neg_carry_assignments[k - 2].cell())?;
-            Ok(())
+	    for idx in 0..k {
+		neg_carry_assignments.push(assigned_cells[4 * idx + 1].clone());
+	    }
+	    Ok(())
         },
     )?;
 
@@ -115,37 +89,14 @@ pub fn assign<F: FieldExt>(
             || "shift carries",
             |mut region| {
                 range.qap_config.q_enable.enable(&mut region, 0)?;
-                carry_cell.copy_advice(
-                    || "copy for range",
-                    &mut region,
-                    range.qap_config.value,
-                    0,
-                )?;
-
-                let one = region.assign_advice_from_constant(
-                    || "one",
-                    range.qap_config.value,
-                    1,
-                    F::from(1),
-                )?;
-                region.constrain_constant(one.cell(), F::from(1))?;
-
-                let shift = region.assign_advice_from_constant(
-                    || "shift",
-                    range.qap_config.value,
-                    2,
-                    shift_val,
-                )?;
-                region.constrain_constant(shift.cell(), shift_val)?;
-
-                let shift_carry_val = Some(shift_val).zip(carry_cell.value()).map(|(s, c)| s + c);
-                let shifted_carry = region.assign_advice(
-                    || "shifted carry",
-                    range.qap_config.value,
-                    3,
-                    || shift_carry_val.ok_or(Error::Synthesis),
-                )?;
-                shifted_carry_assignments.push(shifted_carry);
+		let shift_carry_val = Some(shift_val).zip(carry_cell.value()).map(|(s, c)| s + c);
+		let cells = vec![
+		    Existing(&carry_cell),
+		    Constant(F::from(1)),
+		    Constant(shift_val),
+		    Witness(shift_carry_val)];
+		let assigned_cells = range.qap_config.assign_region(cells, 0, &mut region)?;		
+                shifted_carry_assignments.push(assigned_cells.last().unwrap().clone());
                 Ok(())
             },
         )?;

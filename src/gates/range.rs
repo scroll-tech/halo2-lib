@@ -4,6 +4,8 @@ use std::marker::PhantomData;
 
 use crate::gates::qap_gate;
 use crate::utils::*;
+use crate::gates::qap_gate::QuantumCell;
+use crate::gates::qap_gate::QuantumCell::*;
 
 #[derive(Clone, Debug)]
 pub struct RangeConfig<F: FieldExt> {
@@ -78,107 +80,59 @@ impl<F: FieldExt> RangeConfig<F> {
         layouter.assign_region(
             || format!("range check {} bits", self.lookup_bits),
             |mut region| {
-                let mut assigned_limbs = Vec::with_capacity(k);
-
-                let limb_cell = region.assign_advice(
-                    || "limb 0",
-                    self.qap_config.value,
-                    0,
-                    || limbs[0].ok_or(Error::Synthesis),
-                )?;
-                assigned_limbs.push(limb_cell);
-
-                self.q_lookup.enable(&mut region, 0)?;
-
                 let mut offset = 1;
                 let mut running_sum = limbs[0];
                 let mut running_pow = F::from(1u64);
+
+		self.q_lookup.enable(&mut region, 0)?;		
+		let mut cells = Vec::with_capacity(3 * k + 2);
+		cells.push(Witness(limbs[0]));		
                 for idx in 1..k {
                     running_pow = running_pow * limb_base;
                     running_sum = running_sum
                         .zip(limbs[idx])
                         .map(|(sum, x)| sum + x * running_pow);
-
-                    let const_cell = region.assign_advice_from_constant(
-                        || format!("base^{}", idx),
-                        self.qap_config.value,
-                        offset,
-                        running_pow,
-                    )?;
-                    region.constrain_constant(const_cell.cell(), running_pow)?;
-
-                    let limb_cell = region.assign_advice(
-                        || format!("limb {}", idx),
-                        self.qap_config.value,
-                        offset + 1,
-                        || limbs[idx].ok_or(Error::Synthesis),
-                    )?;
-                    assigned_limbs.push(limb_cell);
-
-                    let out_cell = region.assign_advice(
-                        || format!("running sum {}", idx),
-                        self.qap_config.value,
-                        offset + 2,
-                        || running_sum.ok_or(Error::Synthesis),
-                    )?;
-
-                    self.qap_config.q_enable.enable(&mut region, offset - 1)?;
+		    cells.push(Constant(running_pow));
+		    cells.push(Witness(limbs[idx]));
+		    cells.push(Witness(running_sum));
+		    self.qap_config.q_enable.enable(&mut region, offset - 1)?;
                     self.q_lookup.enable(&mut region, offset + 1)?;
 
-                    offset = offset + 3;
+		    offset = offset + 3;
                     if idx == k - 1 {
-                        assert_eq!(assigned_limbs.len(), k);
-                        region.constrain_equal(a.cell(), out_cell.cell())?;
                         if rem_bits != 0 {
                             self.qap_config.q_enable.enable(&mut region, offset)?;
-
-                            let zero_cell = region.assign_advice_from_constant(
-                                || "zero",
-                                self.qap_config.value,
-                                offset,
-                                F::from(0),
-                            )?;
-                            region.constrain_constant(zero_cell.cell(), F::from(0))?;
-
-                            let limb_copy = assigned_limbs[k - 1].copy_advice(
-                                || "shifted lookup",
-                                &mut region,
-                                self.qap_config.value,
-                                offset + 1,
-                            )?;
-
-                            let mult_val = biguint_to_fe(
+			    cells.push(Constant(F::from(0)));
+			    cells.push(Witness(limbs[k - 1]));
+			    let mult_val = biguint_to_fe(
                                 &(BigUint::from(1u64) << (self.lookup_bits - rem_bits)),
                             );
-                            let mult_cell = region.assign_advice_from_constant(
-                                || "mult",
-                                self.qap_config.value,
-                                offset + 2,
-                                mult_val,
-                            )?;
-                            region.constrain_constant(mult_cell.cell(), mult_val)?;
-
-                            let prod_cell = region.assign_advice(
-                                || "prod",
-                                self.qap_config.value,
-                                offset + 3,
-                                || {
-                                    Some(mult_val)
-                                        .zip(limb_copy.value())
-                                        .map(|(m, l)| m * l)
-                                        .ok_or(Error::Synthesis)
-                                },
-                            )?;
+			    cells.push(Constant(mult_val));
+			    cells.push(Witness(Some(mult_val)
+                                               .zip(limbs[k - 1])
+                                               .map(|(m, l)| m * l)));
                             self.q_lookup.enable(&mut region, offset + 3)?;
                         }
                     }
-                }
+		}
+		let assigned_cells = self.qap_config.assign_region(cells, 0, &mut region)?;
+		region.constrain_equal(a.cell(), assigned_cells[3 * (k - 1)].cell())?;
+		if rem_bits != 0 {
+		    region.constrain_equal(assigned_cells[3 * k - 1].cell(), assigned_cells[3 * k - 4].cell())?;
+		}
+
+                let mut assigned_limbs = Vec::with_capacity(k);
+		assigned_limbs.push(assigned_cells[0].clone());
+		for idx in 1..k {
+		    assigned_limbs.push(assigned_cells[3 * idx - 1].clone());
+		}
                 Ok(assigned_limbs)
             },
         )
     }
 
     // Warning: This may fail silently if a or b have more than num_bits
+    // | a + 2^(num_bits) - b | b | 1 | a + 2^(num_bits) | - 2^(num_bits) | 1 | a |
     pub fn check_less_than(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -189,62 +143,24 @@ impl<F: FieldExt> RangeConfig<F> {
         let shifted_val = layouter.assign_region(
             || format!("check_less_than {} bits", num_bits),
             |mut region| {
-                let mut offset = 0;
+		self.qap_config.q_enable.enable(&mut region, 0)?;
+		self.qap_config.q_enable.enable(&mut region, 3)?;
 
-                self.qap_config.q_enable.enable(&mut region, offset)?;
-                let shifted_val = region.assign_advice(
-                    || "shifted_val",
-                    self.qap_config.value,
-                    offset,
-                    || {
-                        Some(biguint_to_fe::<F>(&(BigUint::from(1u64) << num_bits)))
+		let cells = vec![
+		    Witness(Some(biguint_to_fe::<F>(&(BigUint::from(1u64) << num_bits)))
                             .zip(a.value())
                             .zip(b.value())
-                            .map(|((x, av), bv)| *av + x - *bv)
-                            .ok_or(Error::Synthesis)
-                    },
-                )?;
-                b.copy_advice(|| "b copy", &mut region, self.qap_config.value, offset + 1)?;
-                let one = region.assign_advice_from_constant(
-                    || "one",
-                    self.qap_config.value,
-                    offset + 2,
-                    F::from(1),
-                )?;
-                region.constrain_constant(one.cell(), F::from(1))?;
-
-                self.qap_config.q_enable.enable(&mut region, offset + 3)?;
-                let shifted_val_partial = region.assign_advice(
-                    || "shifted_val_partial",
-                    self.qap_config.value,
-                    offset + 3,
-                    || {
-                        Some(biguint_to_fe::<F>(&(BigUint::from(1u64) << num_bits)))
+                            .map(|((x, av), bv)| *av + x - *bv)),
+		    Existing(&b),
+		    Constant(F::from(1)),
+		    Witness(Some(biguint_to_fe::<F>(&(BigUint::from(1u64) << num_bits)))
                             .zip(a.value())
-                            .map(|(x, av)| *av + x)
-                            .ok_or(Error::Synthesis)
-                    },
-                )?;
-                let neg_pow = region.assign_advice_from_constant(
-                    || "neg_pow",
-                    self.qap_config.value,
-                    offset + 4,
-                    bigint_to_fe::<F>(&(BigInt::from(-1i64) * (BigInt::from(1u64) << num_bits))),
-                )?;
-
-                region.constrain_constant(
-                    neg_pow.cell(),
-                    bigint_to_fe::<F>(&(BigInt::from(-1i64) * (BigInt::from(1u64) << num_bits))),
-                )?;
-                let one_rep = region.assign_advice_from_constant(
-                    || "one",
-                    self.qap_config.value,
-                    offset + 5,
-                    F::from(1),
-                )?;
-                region.constrain_constant(one_rep.cell(), F::from(1))?;
-                a.copy_advice(|| "a copy", &mut region, self.qap_config.value, offset + 6)?;
-                Ok(shifted_val)
+                            .map(|(x, av)| *av + x)),
+		    Constant(bigint_to_fe::<F>(&(BigInt::from(-1i64) * (BigInt::from(1u64) << num_bits)))),
+		    Constant(F::from(1)),
+		    Existing(&a)];
+		let assigned_cells = self.qap_config.assign_region(cells, 0, &mut region)?;
+		Ok(assigned_cells[0].clone())
             },
         )?;
 
@@ -265,89 +181,34 @@ impl<F: FieldExt> RangeConfig<F> {
         layouter.assign_region(
             || format!("is_less_than {} bit bound", num_bits),
             |mut region| {
-                let mut offset = 0;
-                self.qap_config.q_enable.enable(&mut region, offset)?;
-                let shifted_val = region.assign_advice(
-                    || "shifted_val",
-                    self.qap_config.value,
-                    offset,
-                    || {
-                        Some(biguint_to_fe::<F>(&(BigUint::from(1u64) << padded_bits)))
-                            .zip(a.value())
-                            .zip(b.value())
-                            .map(|((x, av), bv)| *av + x - *bv)
-                            .ok_or(Error::Synthesis)
-                    },
-                )?;
-                b.copy_advice(|| "b copy", &mut region, self.qap_config.value, offset + 1)?;
-                let one = region.assign_advice_from_constant(
-                    || "one",
-                    self.qap_config.value,
-                    offset + 2,
-                    F::from(1),
-                )?;
-                region.constrain_constant(one.cell(), F::from(1))?;
+                self.qap_config.q_enable.enable(&mut region, 0)?;
+		self.qap_config.q_enable.enable(&mut region, 3)?;
+		self.q_lookup.enable(&mut region, 8)?;
 
-                self.qap_config.q_enable.enable(&mut region, offset + 3)?;
-                let shifted_val_partial = region.assign_advice(
-                    || "shifted_val_partial",
-                    self.qap_config.value,
-                    offset + 3,
-                    || {
-                        Some(biguint_to_fe::<F>(&(BigUint::from(1u64) << padded_bits)))
-                            .zip(a.value())
-                            .map(|(x, av)| *av + x)
-                            .ok_or(Error::Synthesis)
-                    },
-                )?;
+		let mut cells = Vec::with_capacity(9 + 3 * k + 8);
+		let shifted_val = Some(biguint_to_fe::<F>(&(BigUint::from(1u64) << padded_bits)))
+		    .zip(a.value())
+		    .zip(b.value())
+		    .map(|((x, av), bv)| *av + x - *bv);
+		cells.push(Witness(shifted_val));
+		cells.push(Existing(&b));
+		cells.push(Constant(F::from(1)));
+		cells.push(Witness(Some(biguint_to_fe::<F>(&(BigUint::from(1u64) << padded_bits)))
+				   .zip(a.value())
+				   .map(|(x, av)| *av + x)));
+		cells.push(Constant(bigint_to_fe::<F>(&(BigInt::from(-1i64) * (BigInt::from(1u64) << padded_bits)))));
+		cells.push(Constant(F::from(1)));
+		cells.push(Existing(&a));
+		cells.push(Witness(shifted_val));
 
-                let neg_pow = region.assign_advice_from_constant(
-                    || "neg_pow",
-                    self.qap_config.value,
-                    offset + 4,
-                    bigint_to_fe::<F>(&(BigInt::from(-1i64) * (BigInt::from(1u64) << padded_bits))),
-                )?;
-                region.constrain_constant(
-                    neg_pow.cell(),
-                    bigint_to_fe::<F>(&(BigInt::from(-1i64) * (BigInt::from(1u64) << padded_bits))),
-                )?;
-
-                let one_rep = region.assign_advice_from_constant(
-                    || "one",
-                    self.qap_config.value,
-                    offset + 5,
-                    F::from(1),
-                )?;
-                region.constrain_constant(one_rep.cell(), F::from(1))?;
-
-                a.copy_advice(|| "a copy", &mut region, self.qap_config.value, offset + 6)?;
-
-                let shift = shifted_val.copy_advice(
-                    || "shifted_val copy",
-                    &mut region,
-                    self.qap_config.value,
-                    offset + 7,
-                )?;
-
-                let mut shift_val = shift.value().map(|fe| fe_to_biguint(fe));
+		let mut shift_val = shifted_val.as_ref().map(|fe| fe_to_biguint(fe));
                 let mask = BigUint::from(1u64 << self.lookup_bits);
                 let mut limb = shift_val
                     .as_ref()
                     .map(|x| x.modpow(&BigUint::from(1u64), &mask));
+		cells.push(Witness(limb.as_ref().map(|x| biguint_to_fe(x))));
 
-                region.assign_advice(
-                    || "limb 0",
-                    self.qap_config.value,
-                    offset + 8,
-                    || {
-                        limb.as_ref()
-                            .map(|x| biguint_to_fe(x))
-                            .ok_or(Error::Synthesis)
-                    },
-                )?;
-                self.q_lookup.enable(&mut region, offset + 8)?;
-                offset = offset + 9;
-
+		let mut offset = 9;
                 let mut running_sum = limb;
                 for idx in 1..(k + 1) {
                     shift_val = shift_val.map(|x| x >> self.lookup_bits);
@@ -357,130 +218,55 @@ impl<F: FieldExt> RangeConfig<F> {
                     running_sum = running_sum
                         .zip(limb.as_ref())
                         .map(|(sum, x)| sum + (x << (idx * self.lookup_bits)));
-
                     let running_pow =
                         biguint_to_fe(&(BigUint::from(1u64) << (idx * self.lookup_bits)));
-                    let const_cell = region.assign_advice_from_constant(
-                        || format!("base^{}", idx),
-                        self.qap_config.value,
-                        offset,
-                        running_pow,
-                    )?;
-                    region.constrain_constant(const_cell.cell(), running_pow)?;
-
-                    let limb_cell = region.assign_advice(
-                        || format!("limb {}", idx),
-                        self.qap_config.value,
-                        offset + 1,
-                        || {
-                            limb.as_ref()
-                                .map(|x| biguint_to_fe(x))
-                                .ok_or(Error::Synthesis)
-                        },
-                    )?;
-
-                    let out_cell = region.assign_advice(
-                        || format!("running sum {}", idx),
-                        self.qap_config.value,
-                        offset + 2,
-                        || {
-                            running_sum
-                                .as_ref()
-                                .map(|sum| biguint_to_fe(sum))
-                                .ok_or(Error::Synthesis)
-                        },
-                    )?;
-
+		    cells.push(Constant(running_pow));
+		    cells.push(Witness(limb.as_ref().map(|x| biguint_to_fe(x))));
+		    cells.push(Witness(running_sum.as_ref().map(|sum| biguint_to_fe(sum))));
                     self.qap_config.q_enable.enable(&mut region, offset - 1)?;
                     self.q_lookup.enable(&mut region, offset + 1)?;
 
                     offset = offset + 3;
-                    if idx == k {
-                        region.constrain_equal(shift.cell(), out_cell.cell())?;
-
-                        let is_zero = limb_cell.value().zip(Some(F::from(1))).map(|(x, y)| {
-                            if (*x).is_zero_vartime() {
+		    if idx == k {
+			let is_zero = limb.clone().zip(Some(F::from(1))).map(|(x, y)| {
+                            if x == BigUint::from(0u64) {
                                 F::from(1)
                             } else {
                                 F::from(0)
                             }
                         });
-                        let inv = limb_cell.value().zip(Some(F::from(1))).map(|(x, y)| {
-                            if *x == F::from(0) {
+                        let inv = limb.clone().zip(Some(F::from(1))).map(|(x, y)| {
+                            if x == BigUint::from(0u64) {
                                 F::from(1)
                             } else {
-                                (*x).invert().unwrap()
+                                biguint_to_fe::<F>(&x).invert().unwrap()
                             }
                         });
-
+			
                         self.qap_config.q_enable.enable(&mut region, offset)?;
-                        let is_zero_assign = region.assign_advice(
-                            || "is_zero",
-                            self.qap_config.value,
-                            offset,
-                            || is_zero.ok_or(Error::Synthesis),
-                        )?;
-
-                        let limb_copy = limb_cell.copy_advice(
-                            || "limb copy",
-                            &mut region,
-                            self.qap_config.value,
-                            offset + 1,
-                        )?;
-
-                        let inv_assign = region.assign_advice(
-                            || "inv",
-                            self.qap_config.value,
-                            offset + 2,
-                            || inv.ok_or(Error::Synthesis),
-                        )?;
-
-                        let one = region.assign_advice_from_constant(
-                            || "one",
-                            self.qap_config.value,
-                            offset + 3,
-                            F::from(1),
-                        )?;
-                        region.constrain_constant(one.cell(), F::from(1))?;
-
-                        self.qap_config.q_enable.enable(&mut region, offset + 4)?;
-                        let zero = region.assign_advice_from_constant(
-                            || "zero",
-                            self.qap_config.value,
-                            offset + 4,
-                            F::from(0),
-                        )?;
-                        region.constrain_constant(zero.cell(), F::from(0))?;
-
-                        let limb_copy2 = limb_cell.copy_advice(
-                            || "limb copy 2",
-                            &mut region,
-                            self.qap_config.value,
-                            offset + 5,
-                        )?;
-
-                        let is_zero_copy = is_zero_assign.copy_advice(
-                            || "is_zero copy",
-                            &mut region,
-                            self.qap_config.value,
-                            offset + 6,
-                        )?;
-
-                        let zero_temp = region.assign_advice_from_constant(
-                            || "zero",
-                            self.qap_config.value,
-                            offset + 7,
-                            F::from(0),
-                        )?;
-                        region.constrain_constant(zero_temp.cell(), F::from(0))?;
-                        return Ok(is_zero_assign);
-                    }
-                }
-                Err(Error::Synthesis)
+			cells.push(Witness(is_zero));
+			cells.push(Witness(limb.as_ref().map(|bi| biguint_to_fe(bi))));
+			cells.push(Witness(inv));
+			cells.push(Constant(F::from(1)));
+			cells.push(Constant(F::from(0)));
+			cells.push(Witness(limb.as_ref().map(|bi| biguint_to_fe(bi))));
+			cells.push(Witness(is_zero));
+			cells.push(Constant(F::from(0)));
+		    }				   
+		}
+		let assigned_cells = self.qap_config.assign_region(cells, 0, &mut region)?;
+		region.constrain_equal(assigned_cells[0].cell(), assigned_cells[7].cell())?;
+		// check limb equalities for idx = k
+		region.constrain_equal(assigned_cells[9 + 3 * k - 2].cell(), assigned_cells[9 + 3 * k + 1].cell())?;
+		region.constrain_equal(assigned_cells[9 + 3 * k - 2].cell(), assigned_cells[9 + 3 * k + 5].cell())?;
+		// check is_zero equalities
+		region.constrain_equal(assigned_cells[9 + 3 * k].cell(), assigned_cells[9 + 3 * k + 6].cell())?;
+		Ok(assigned_cells[9 + 3 * k].clone())
             },
         )
     }
 
+    // | out | a | inv | 1 | 0 | a | out | 0
     pub fn is_zero(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -505,57 +291,19 @@ impl<F: FieldExt> RangeConfig<F> {
             || "is_equal",
             |mut region| {
                 self.qap_config.q_enable.enable(&mut region, 0)?;
-                let is_zero_assign = region.assign_advice(
-                    || "is_zero",
-                    self.qap_config.value,
-                    0,
-                    || is_zero.ok_or(Error::Synthesis),
-                )?;
-
-                let a_copy = a.copy_advice(|| "a copy", &mut region, self.qap_config.value, 1)?;
-
-                let inv_assign = region.assign_advice(
-                    || "inv",
-                    self.qap_config.value,
-                    2,
-                    || inv.ok_or(Error::Synthesis),
-                )?;
-
-                let one = region.assign_advice_from_constant(
-                    || "one",
-                    self.qap_config.value,
-                    3,
-                    F::from(1),
-                )?;
-                region.constrain_constant(one.cell(), F::from(1))?;
-
-                self.qap_config.q_enable.enable(&mut region, 4)?;
-                let zero = region.assign_advice_from_constant(
-                    || "zero",
-                    self.qap_config.value,
-                    4,
-                    F::from(0),
-                )?;
-                region.constrain_constant(zero.cell(), F::from(0))?;
-
-                let a_copy2 =
-                    a.copy_advice(|| "a copy 2", &mut region, self.qap_config.value, 5)?;
-
-                let is_zero_copy = is_zero_assign.copy_advice(
-                    || "is_zero copy",
-                    &mut region,
-                    self.qap_config.value,
-                    6,
-                )?;
-
-                let zero_temp = region.assign_advice_from_constant(
-                    || "zero",
-                    self.qap_config.value,
-                    7,
-                    F::from(0),
-                )?;
-                region.constrain_constant(zero_temp.cell(), F::from(0))?;
-                Ok(is_zero_assign)
+		self.qap_config.q_enable.enable(&mut region, 4)?;
+		let cells = vec![
+		    Witness(is_zero),
+		    Existing(&a),
+		    Witness(inv),
+		    Constant(F::from(1)),
+		    Constant(F::from(0)),
+		    Existing(&a),
+		    Witness(is_zero),
+		    Constant(F::from(0))];
+		let assigned_cells = self.qap_config.assign_region(cells, 0, &mut region)?;
+		region.constrain_equal(assigned_cells[0].cell(), assigned_cells[6].cell())?;
+		Ok(assigned_cells[0].clone())
             },
         )
     }
@@ -570,27 +318,15 @@ impl<F: FieldExt> RangeConfig<F> {
             || "is_equal",
             |mut region| {
                 self.qap_config.q_enable.enable(&mut region, 0)?;
-                let diff = region.assign_advice(
-                    || "diff",
-                    self.qap_config.value,
-                    0,
-                    || {
-                        a.value()
+		let cells = vec![
+		    Witness(a.value()
                             .zip(b.value())
-                            .map(|(av, bv)| *av - *bv)
-                            .ok_or(Error::Synthesis)
-                    },
-                )?;
-                let one = region.assign_advice_from_constant(
-                    || "one",
-                    self.qap_config.value,
-                    1,
-                    F::from(1),
-                )?;
-                region.constrain_constant(one.cell(), F::from(1))?;
-                b.copy_advice(|| "b copy", &mut region, self.qap_config.value, 2)?;
-                a.copy_advice(|| "a copy", &mut region, self.qap_config.value, 3)?;
-                Ok(diff)
+                            .map(|(av, bv)| *av - *bv)),
+		    Constant(F::from(1)),
+		    Existing(&b),
+		    Existing(&a)];
+		let assigned_cells = self.qap_config.assign_region(cells, 0, &mut region)?;
+		Ok(assigned_cells[0].clone())
             },
         )?;
         self.is_zero(layouter, &diff)
