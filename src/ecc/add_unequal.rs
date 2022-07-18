@@ -61,10 +61,7 @@ pub fn assign<F: FieldExt>(
         let lambda = (y_2 - y_1) * (x_2 - x_1).invert().unwrap();
         let x_3 = lambda * lambda - x_1 - x_2;
         let y_3 = lambda * (x_1 - x_3) - y_1;
-        (
-            Some(big_int::from_bytes_le(Sign::Plus, &x_3.to_bytes())),
-            Some(big_int::from_bytes_le(Sign::Plus, &y_3.to_bytes())),
-        )
+	(Some(fp_to_bigint(&x_3)), Some(fp_to_bigint(&y_3)))
     } else {
         (None, None)
     };
@@ -174,3 +171,4 @@ pub fn assign<F: FieldExt>(
 
     Ok(EccPoint::construct(out_x, out_y))
 }
+

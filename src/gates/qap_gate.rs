@@ -158,6 +158,30 @@ impl<F: FieldExt> Config<F> {
         )
     }
 
+    // Layouter creates new region that copies a, b and constrains `0 + a * b = out`
+    // | 0 | a | b | a * b |
+    pub fn mul_constant(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &AssignedCell<F, F>,
+        b: F,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        layouter.assign_region(
+            || "native mul",
+            |mut region| {
+                self.q_enable.enable(&mut region, 0)?;
+                let cells: Vec<QuantumCell<F>> = vec![
+                    QuantumCell::Constant(F::from(0)),
+                    QuantumCell::Existing(&a),
+                    QuantumCell::Constant(b),
+                    QuantumCell::Witness(a.value().map(|av| (*av) * b)),
+                ];
+                let assigned_cells = self.assign_region(cells, 0, &mut region)?;
+                Ok(assigned_cells.last().unwrap().clone())
+            },
+        )
+    }
+    
     // Layouter takes in vector `constants` of "constant" values, and a same-length vector `signals` of `AssignedCell` and constrains a witness output to the inner product of `<constants, signals>`
     pub fn linear(
         &self,

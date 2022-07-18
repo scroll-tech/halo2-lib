@@ -170,6 +170,10 @@ pub fn bigint_to_fp(x: big_int) -> Fp {
     Fp::from_bytes(x_bytes).unwrap()
 }
 
+pub fn fp_to_bigint(x: &Fp) -> big_int {
+    big_int::from_bytes_le(Sign::Plus, &x.to_bytes())
+}
+
 #[cfg(test)]
 #[test]
 fn test_signed_roundtrip() {

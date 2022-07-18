@@ -3,9 +3,9 @@ use num_bigint::{BigInt, BigUint};
 use std::marker::PhantomData;
 
 use crate::gates::qap_gate;
-use crate::utils::*;
 use crate::gates::qap_gate::QuantumCell;
 use crate::gates::qap_gate::QuantumCell::*;
+use crate::utils::*;
 
 #[derive(Clone, Debug)]
 pub struct RangeConfig<F: FieldExt> {
@@ -228,14 +228,14 @@ impl<F: FieldExt> RangeConfig<F> {
 
                     offset = offset + 3;
 		    if idx == k {
-			let is_zero = limb.clone().zip(Some(F::from(1))).map(|(x, y)| {
+			let is_zero = limb.clone().zip(Some(F::from(1))).map(|(x, _y)| {
                             if x == BigUint::from(0u64) {
                                 F::from(1)
                             } else {
                                 F::from(0)
                             }
                         });
-                        let inv = limb.clone().zip(Some(F::from(1))).map(|(x, y)| {
+                        let inv = limb.clone().zip(Some(F::from(1))).map(|(x, _y)| {
                             if x == BigUint::from(0u64) {
                                 F::from(1)
                             } else {
