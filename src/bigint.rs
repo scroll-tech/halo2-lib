@@ -7,6 +7,7 @@ use num_traits::Zero;
 pub mod add_no_carry;
 pub mod big_less_than;
 pub mod carry_mod;
+pub mod check_carry_mod_to_zero;
 pub mod check_carry_to_zero;
 pub mod decompose;
 pub mod mod_reduce;

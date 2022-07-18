@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use halo2_proofs::arithmetic::Field;
 use halo2_proofs::pairing::bn256::Fq as Fp;
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
@@ -12,7 +14,7 @@ use crate::gates::qap_gate::QuantumCell;
 use crate::gates::qap_gate::QuantumCell::*;
 use crate::{gates::*, utils::*};
 
-// commiting to prime field F_p with
+// committing to prime field F_p with
 // p = 21888242871839275222246405745257275088696311157297823662689037894645226208583
 //   = 0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47
 
@@ -33,7 +35,7 @@ pub fn assign<F: FieldExt>(
     layouter: &mut impl Layouter<F>,
     P: &EccPoint<F>,
     Q: &EccPoint<F>,
-) -> Result<() /*EccPoint<F>*/, Error> {
+) -> Result<EccPoint<F>, Error> {
     let k = P.x.limbs.len();
     let n = P.x.limb_bits;
     assert!(k > 0);
@@ -76,8 +78,8 @@ pub fn assign<F: FieldExt>(
     let dy = sub_no_carry::assign(gate, layouter, &Q.y, &P.y)?;
 
     // constrain x_3 by CUBIC (x_1 + x_2 + x_3) * (x_2 - x_1)^2 - (y_2 - y_1)^2 = 0 mod p
-    let dx_sq = mul_no_carry::assign(gate, layouter, &dx, &dx);
-    let dy_sq = mul_no_carry::assign(gate, layouter, &dy, &dy);
+    let dx_sq = mul_no_carry::assign(gate, layouter, &dx, &dx)?;
+    let dy_sq = mul_no_carry::assign(gate, layouter, &dy, &dy)?;
 
     // x_1 + x_2 + x_3 cells
     let mut sum_cells: Vec<AssignedCell<F, F>> = Vec::with_capacity(k);
@@ -111,8 +113,64 @@ pub fn assign<F: FieldExt>(
         x_3_cells.push(x_3_cell);
     }
 
-    Ok(EccPoint::construct(
-        OverflowInteger::construct(x_3_cells, n, k),
-        OverflowInteger::construct(y_3_cells, n, k),
-    ))
+    let sum = OverflowInteger::construct(sum_cells, 3u32 * &P.x.max_limb_size, n);
+    // (x_1 + x_2 + x_3) * (x_2 - x_1)^2
+    let cubic_lhs = mul_no_carry::assign(gate, layouter, &sum, &dx_sq)?;
+    // (x_1 + x_2 + x_3) * (x_2 - x_1)^2 - (y_2 - y_1)^2
+    let cubic_vanish = sub_no_carry::assign(gate, layouter, &cubic_lhs, &dy_sq)?;
+
+    // check (x_1 + x_2 + x_3) * (x_2 - x_1)^2 - (y_2 - y_1)^2 == 0 (mod p)
+    let cubic_red = mod_reduce::assign(gate, layouter, &cubic_vanish, k, FP_MODULUS.clone())?;
+    check_carry_mod_to_zero::assign(range, layouter, &cubic_red, &*FP_MODULUS)?;
+
+    let out_x = OverflowInteger::construct(x_3_cells, P.x.max_limb_size.clone(), n);
+    // Implements constraint: (y_1 + y_3) * (x_2 - x_1) - (y_2 - y_1)*(x_1 - x_3) = 0 mod p
+    // used to show (x1, y1), (x2, y2), (x3, -y3) are co-linear
+    let mut point_on_line = || -> Result<Vec<AssignedCell<F, F>>, Error> {
+        // y_1 + y_3
+        let mut sum_y_cells = Vec::with_capacity(k);
+        let mut y_3_cells = Vec::with_capacity(k);
+
+        for i in 0..k {
+            let (y_3_cell, sum_cell) = layouter.assign_region(
+                || format!("(y_1 + y_3)[{}]", i),
+                |mut region| {
+                    let sum_val = P.y.limbs[i].value().zip(y_3_limbs[i]).map(|(&a, b)| a + b);
+                    // | y_1[i] | 1 | y_3[i] | y_1[i] + y_3[i]
+                    let add_assignments = gate.assign_region(
+                        vec![
+                            Existing(&P.y.limbs[i]),
+                            Constant(F::from(1u64)),
+                            Witness(y_3_limbs[i]),
+                            Witness(sum_val),
+                        ],
+                        0,
+                        &mut region,
+                    )?;
+                    Ok((add_assignments[2].clone(), add_assignments[3].clone()))
+                },
+            )?;
+            sum_y_cells.push(sum_cell);
+            y_3_cells.push(y_3_cell);
+        }
+        let sum_y = OverflowInteger::construct(sum_y_cells, 2u32 * &P.x.max_limb_size, n);
+        let dx1_3 = sub_no_carry::assign(gate, layouter, &P.x, &out_x)?;
+
+        // (y_1 + y_3) * (x_2 - x_1)
+        let lhs = mul_no_carry::assign(gate, layouter, &sum_y, &dx)?;
+        // (y_2 - y_1) * (x_1 - x_3)
+        let rhs = mul_no_carry::assign(gate, layouter, &dy, &dx1_3)?;
+        // (y_1 + y_3) * (x_2 - x_1) - (y_2 - y_1)*(x_1 - x_3) = 0 mod p
+        let should_vanish = sub_no_carry::assign(gate, layouter, &lhs, &rhs)?;
+        let should_vanish_red =
+            mod_reduce::assign(gate, layouter, &should_vanish, k, FP_MODULUS.clone())?;
+        check_carry_mod_to_zero::assign(range, layouter, &should_vanish_red, &*FP_MODULUS)?;
+
+        Ok(y_3_cells)
+    };
+
+    let y_3_cells = point_on_line()?;
+    let out_y = OverflowInteger::construct(y_3_cells, P.y.max_limb_size.clone(), n);
+
+    Ok(EccPoint::construct(out_x, out_y))
 }
