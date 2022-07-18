@@ -5,6 +5,7 @@ use num_bigint::BigUint as big_uint;
 use num_traits::Zero;
 
 pub mod add_no_carry;
+pub mod big_is_equal;
 pub mod big_less_than;
 pub mod carry_mod;
 pub mod check_carry_mod_to_zero;

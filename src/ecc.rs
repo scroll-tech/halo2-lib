@@ -173,9 +173,37 @@ pub fn point_double<F: FieldExt>(
 	}
     )?;
 
+    for limb in &Q.x.limbs {
+	range.range_check(layouter, &limb, n)?;
+    }
+    for limb in &Q.y.limbs {
+	range.range_check(layouter, &limb, n)?;
+    }
     point_on_curve(range, layouter, &Q, b)?;
     point_on_tangent(range, layouter, &P, &Q)?;
 
-    // TODO: FpIsEqual
+    let mod_limbs = decompose_biguint::<F>(&*FP_MODULUS, k, n);
+    let fp_mod = layouter.assign_region(
+	|| "const modulus",
+	|mut region| {
+	    let mod_cells = mod_limbs.iter().map(|x| Constant(*x)).collect();
+	    let mod_bigint_limbs = range.qap_config.assign_region(mod_cells, 0, &mut region)?;
+	    Ok(OverflowInteger::construct(mod_bigint_limbs, BigUint::from(1u64) << n, n))
+	}
+    )?;
+
+    let px_less_than = big_less_than::assign(range, layouter, &P.x, &fp_mod)?;
+    let qx_less_than = big_less_than::assign(range, layouter, &Q.x, &fp_mod)?;
+    let px_equals_qx = big_is_equal::assign(range, layouter, &P.x, &Q.x)?;
+    let check_answer = layouter.assign_region(
+	|| "fp inequality check",
+	|mut region| {
+	    region.constrain_constant(px_less_than.cell(), F::from(1))?;
+	    region.constrain_constant(qx_less_than.cell(), F::from(1))?;
+	    region.constrain_constant(px_equals_qx.cell(), F::from(0))?;
+	    Ok(())
+	}
+    )?;
+
     Ok(Q)
 }
