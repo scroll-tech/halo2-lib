@@ -138,6 +138,15 @@ impl<F: FieldExt> FpChip<F> {
         add_no_carry::assign(&self.config.gate, layouter, a, b)
     }
 
+    pub fn sub_no_carry(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &OverflowInteger<F>,
+        b: &OverflowInteger<F>,
+    ) -> Result<OverflowInteger<F>, Error> {
+        sub_no_carry::assign(&self.config.gate, layouter, a, b)
+    }
+
     pub fn mul_no_carry(
         &self,
         layouter: &mut impl Layouter<F>,

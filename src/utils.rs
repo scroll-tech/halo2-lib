@@ -9,6 +9,8 @@ use std::cmp::Ordering;
 use std::ops::Neg;
 use std::ops::Shl;
 
+use halo2_proofs::pairing::bn256::Fq as Fp;
+
 // utils modified from halo2wrong
 
 pub fn modulus<F: FieldExt>() -> big_uint {
@@ -154,6 +156,20 @@ pub fn compose(input: Vec<big_uint>, bit_len: usize) -> big_uint {
         .fold(big_uint::zero(), |acc, val| (acc << bit_len) + val)
 }
 
+pub fn bigint_to_fp(x: big_int) -> Fp {
+    let p: big_int = big_int::from_str_radix(
+        "21888242871839275222246405745257275088696311157297823662689037894645226208583",
+        10,
+    )
+    .unwrap();
+    let mut x = x % &p;
+    if x < big_int::zero() {
+        x += &p;
+    }
+    let x_bytes: &[u8; 32] = &x.to_bytes_le().1[0..32].try_into().unwrap();
+    Fp::from_bytes(x_bytes).unwrap()
+}
+
 #[cfg(test)]
 #[test]
 fn test_signed_roundtrip() {
@@ -162,4 +178,16 @@ fn test_signed_roundtrip() {
         fe_to_bigint(&bigint_to_fe::<F>(&-big_int::one())),
         -big_int::one()
     );
+}
+
+#[cfg(test)]
+#[test]
+fn test_fp() {
+    use super::*;
+    let x = big_int::from_str_radix(
+        "21888242871839275222246405745257275088696311157297823662689037894645226208582",
+        10,
+    )
+    .unwrap();
+    println!("{:?}", bigint_to_fp(x));
 }

@@ -11,12 +11,13 @@ pub mod check_carry_to_zero;
 pub mod decompose;
 pub mod mod_reduce;
 pub mod mul_no_carry;
+pub mod sub_no_carry;
 
 #[derive(Clone, Debug)]
 pub struct OverflowInteger<F: FieldExt> {
     pub limbs: Vec<AssignedCell<F, F>>,
-    max_limb_size: big_uint, // max absolute value of integer value of a limb
-    limb_bits: usize,
+    pub max_limb_size: big_uint, // max absolute value of integer value of a limb
+    pub limb_bits: usize,
 }
 
 impl<F: FieldExt> OverflowInteger<F> {
