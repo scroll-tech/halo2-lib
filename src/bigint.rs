@@ -14,6 +14,7 @@ pub mod decompose;
 pub mod mod_reduce;
 pub mod mul_no_carry;
 pub mod scalar_mul_no_carry;
+pub mod select;
 pub mod sub_no_carry;
 
 #[derive(Clone, Debug)]

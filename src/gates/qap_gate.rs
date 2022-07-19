@@ -335,6 +335,41 @@ impl<F: FieldExt> Config<F> {
         )
     }
 
+    // assumes sel is boolean
+    // | a - b | 1 | b | a |
+    // | b | sel | a - b | out |
+    // returns
+    //   a * sel + b * (1 - sel)
+    pub fn select(
+	&self,
+	layouter: &mut impl Layouter<F>,
+	a: &AssignedCell<F, F>,
+	b: &AssignedCell<F, F>,
+	sel: &AssignedCell<F, F>
+    ) -> Result<AssignedCell<F, F>, Error> {
+	layouter.assign_region(
+	    || "sel",
+	    |mut region| {
+		self.q_enable.enable(&mut region, 0)?;
+		self.q_enable.enable(&mut region, 4)?;
+		let cells = vec![
+		    QuantumCell::Witness(a.value().zip(b.value()).map(|(av, bv)| (*av) - (*bv))),
+		    QuantumCell::Constant(F::from(1)),
+		    QuantumCell::Existing(&b),
+		    QuantumCell::Existing(&a),
+		    QuantumCell::Existing(&b),
+		    QuantumCell::Existing(&sel),
+		    QuantumCell::Witness(a.value().zip(b.value()).map(|(av, bv)| (*av) - (*bv))),
+		    QuantumCell::Witness(a.value().zip(b.value()).zip(sel.value())
+					 .map(|((av, bv), sv)| (*av) * (*sv) + (*bv) * (F::from(1) - *sv))),
+		];
+		let assigned_cells = self.assign_region(cells, 0, &mut region)?;
+		region.constrain_equal(assigned_cells[0].cell(), assigned_cells[6].cell())?;
+		Ok(assigned_cells.last().unwrap().clone())
+	    },
+	)
+    }
+
     // returns: a || (b && c)
     // | 1 - b c | b | c | 1 | a - 1 | 1 - b c | out | a - 1 | 1 | 1 | a |
     pub fn or_and(

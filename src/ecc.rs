@@ -246,6 +246,51 @@ pub fn point_double<F: FieldExt>(
     Ok(Q)
 }
 
+pub fn select<F: FieldExt>(
+    range: &range::RangeConfig<F>,
+    layouter: &mut impl Layouter<F>,
+    P: &EccPoint<F>,
+    Q: &EccPoint<F>,
+    sel: &AssignedCell<F, F>,
+) -> Result<EccPoint<F>, Error> {
+    let Rx = select::assign(&range.qap_config, layouter, &P.x, &Q.x, sel)?;
+    let Ry = select::assign(&range.qap_config, layouter, &P.y, &Q.y, sel)?;
+    Ok(EccPoint::<F>::construct(Rx, Ry))
+}
+
+// computes x * P on y^2 = x^3 + b
+// assumes:
+//   * 0 < x < scalar field modulus
+//   * P has order given by the scalar field modulus
+pub fn scalar_multiply<F: FieldExt>(
+    range: &range::RangeConfig<F>,
+    layouter: &mut impl Layouter<F>,
+    P: &EccPoint<F>,
+    x: &AssignedCell<F, F>,
+    b: F,
+    max_bits: usize,
+) -> Result<EccPoint<F>, Error> {
+    let bits = range.num_to_bits(layouter, x, max_bits)?;
+
+    // is_started[idx] holds whether there is a 1 in bits with index at least (max_bits - idx)
+    let mut is_started = Vec::with_capacity(max_bits);
+    is_started.push(bits[max_bits - 1].clone());
+    for idx in 1..max_bits {
+	let or = range.qap_config.or(layouter, &is_started[idx - 1], &bits[max_bits - 1 - idx])?;
+	is_started.push(or.clone());
+    }
+    
+    let mut curr_point = P.clone();
+    for idx in 1..max_bits {
+	let double = point_double(range, layouter, &curr_point, b)?;
+	let double_and_add = add_unequal::assign(range, layouter, &double, &P)?;
+	
+	let is_started_point = select(range, layouter, &double_and_add, &double, &bits[max_bits - 1 - idx])?;
+	curr_point = select(range, layouter, &is_started_point, &P, &is_started[idx - 1])?;
+    }
+    Ok(curr_point.clone())
+}
+
 pub struct EccChip<F: FieldExt> {
     fp_chip: FpChip<F>,
 }
@@ -333,6 +378,17 @@ impl<F: FieldExt> EccChip<F> {
     ) -> Result<EccPoint<F>, Error> {
         point_double(&&self.fp_chip.config.range, layouter, P, b)
     }
+
+    pub fn scalar_mult(
+	&self,
+	layouter: &mut impl Layouter<F>,
+	P: &EccPoint<F>,
+	x: &AssignedCell<F, F>,
+	b: F,
+	max_bits: usize,
+    ) -> Result<EccPoint<F>, Error> {
+	scalar_multiply(&&self.fp_chip.config.range, layouter, P, x, b, max_bits)
+    }
 }
 
 #[cfg(test)]
@@ -353,6 +409,7 @@ pub(crate) mod tests {
     struct MyCircuit<F> {
         P: Option<(Fp, Fp)>,
         Q: Option<(Fp, Fp)>,
+	x: Option<F>,
         _marker: PhantomData<F>,
     }
 
@@ -364,6 +421,7 @@ pub(crate) mod tests {
             Self {
                 P: None,
                 Q: None,
+		x: None,
                 _marker: PhantomData,
             }
         }
@@ -379,11 +437,22 @@ pub(crate) mod tests {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
-            let chip = EccChip::construct(config);
+            let chip = EccChip::construct(config.clone());
             chip.load_lookup_table(&mut layouter)?;
 
             let P_assigned = chip.load_private(layouter.namespace(|| "input point P"), self.P)?;
             let Q_assigned = chip.load_private(layouter.namespace(|| "input point Q"), self.Q)?;
+	    let x_assigned = layouter.assign_region(
+		|| "input scalar x",
+		|mut region| {
+		    region.assign_advice(
+			|| "assign x",
+			config.value,
+			0,
+			|| self.x.ok_or(Error::Synthesis)
+		    )
+		}
+	    )?;
 
             /*
             // test add_unequal
@@ -403,8 +472,7 @@ pub(crate) mod tests {
                     &P_assigned,
                     F::from(3),
                 )?;
-            }
-            */
+            }            
 
             // test double
             {
@@ -414,6 +482,18 @@ pub(crate) mod tests {
                     F::from(3),
                 )?;
             }
+	     */
+
+	    // test scalar mult
+	    {
+		let scalar_mult = chip.scalar_mult(
+		    &mut layouter.namespace(|| "scalar_mult"),
+		    &P_assigned,
+		    &x_assigned,
+		    F::from(3),
+		    5
+		)?;
+	    }
 
             Ok(())
         }
@@ -431,6 +511,7 @@ pub(crate) mod tests {
         let circuit = MyCircuit::<Fn> {
             P: Some((P.x, P.y)),
             Q: Some((Q.x, Q.y)),
+	    x: Some(Fn::from(11)),
             _marker: PhantomData,
         };
 
@@ -442,16 +523,17 @@ pub(crate) mod tests {
     #[cfg(feature = "dev-graph")]
     #[test]
     fn plot_ecc() {
-        let k = 12;
+        let k = 15;
         use plotters::prelude::*;
 
-        let root = BitMapBackend::new("layout.png", (2048, 2048)).into_drawing_area();
+        let root = BitMapBackend::new("layout.png", (512, 8192)).into_drawing_area();
         root.fill(&WHITE).unwrap();
         let root = root.titled("Ecc Layout", ("sans-serif", 60)).unwrap();
 
         let circuit = MyCircuit::<Fn> {
             P: None,
             Q: None,
+	    x: None,
             _marker: PhantomData,
         };
         halo2_proofs::dev::CircuitLayout::default()
@@ -459,3 +541,4 @@ pub(crate) mod tests {
             .unwrap();
     }
 }
+
