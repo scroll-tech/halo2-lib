@@ -1,10 +1,20 @@
 use std::str::FromStr;
 
-use num_bigint::BigUint;
+use crate::bigint::OverflowInteger;
+use crate::fields::fp::{FpChip, FpConfig};
+use crate::utils::{
+    bigint_to_fp, decompose_bigint_option, fp_to_bigint, modulus as native_modulus,
+};
+use halo2_proofs::arithmetic::Field;
+use halo2_proofs::{
+    arithmetic::FieldExt,
+    circuit::*,
+    pairing::bn256::Fq as Fp,
+    plonk::{Advice, Column, ConstraintSystem, Error, Fixed},
+};
 use num_bigint::BigInt;
-
-use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
-use halo2_proofs::pairing::bn256::Fq as Fp;
+use num_bigint::BigUint;
+use num_traits::{One, Zero};
 
 use crate::bigint::*;
 use crate::gates::qap_gate::QuantumCell;
@@ -16,10 +26,7 @@ pub mod add_unequal;
 
 use lazy_static::lazy_static;
 lazy_static! {
-    static ref FP_MODULUS: BigUint = BigUint::from_str(
-        "21888242871839275222246405745257275088696311157297823662689037894645226208583",
-    )
-    .unwrap();
+    static ref FP_MODULUS: BigUint = native_modulus::<Fp>();
 }
 
 #[derive(Clone, Debug)]
@@ -36,10 +43,11 @@ impl<F: FieldExt> EccPoint<F> {
 
 // Implements:
 //   Check that x^3 + b - y^2 = 0 mod p
-// Assume: b in [0, 2^n) 
+// Assume: b in [0, 2^n)
 // committing to prime field F_p with
 // p = 21888242871839275222246405745257275088696311157297823662689037894645226208583
 //   = 0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47
+#[allow(non_snake_case)]
 pub fn point_on_curve<F: FieldExt>(
     range: &range::RangeConfig<F>,
     layouter: &mut impl Layouter<F>,
@@ -58,29 +66,43 @@ pub fn point_on_curve<F: FieldExt>(
     let x_cu_minus_y_sq = sub_no_carry::assign(&range.qap_config, layouter, &x_cu, &y_sq)?;
 
     let mut carry_limbs = x_cu_minus_y_sq.limbs.clone();
+    // x^3 - y^2 + b
     layouter.assign_region(
-	|| "limb 0 add",
-	|mut region| {
-	    let cells = vec![
-		Existing(&x_cu_minus_y_sq.limbs[0]),
-		Constant(b),
-		Constant(F::from(1)),
-		Witness(x_cu_minus_y_sq.limbs[0].clone().value().map(|x| *x + F::from(1)))];	   
-	    let assigned_cells = range.qap_config.assign_region(cells, 0, &mut region)?;
-	    carry_limbs[0] = assigned_cells.last().unwrap().clone();
-	    Ok(())
-	}
+        || "limb 0 add",
+        |mut region| {
+            let cells = vec![
+                Existing(&x_cu_minus_y_sq.limbs[0]),
+                Constant(b),
+                Constant(F::from(1)),
+                Witness(
+                    x_cu_minus_y_sq.limbs[0]
+                        .clone()
+                        .value()
+                        .map(|x| *x + F::from(b)),
+                ),
+            ];
+            let assigned_cells = range.qap_config.assign_region(cells, 0, &mut region)?;
+            carry_limbs[0] = assigned_cells.last().unwrap().clone();
+            Ok(())
+        },
     )?;
 
     let carry_int = OverflowInteger::construct(
-	carry_limbs,
-	x_cu_minus_y_sq.max_limb_size + fe_to_biguint(&b),
-	n
+        carry_limbs,
+        x_cu_minus_y_sq.max_limb_size + fe_to_biguint(&b),
+        n,
     );
 
-    let carry_int_mod = mod_reduce::assign(&range.qap_config, layouter, &carry_int, k, FP_MODULUS.clone())?;
-    let check_zero = check_carry_mod_to_zero::assign(range, layouter, &carry_int_mod, &*FP_MODULUS)?;
-    
+    let carry_int_mod = mod_reduce::assign(
+        &range.qap_config,
+        layouter,
+        &carry_int,
+        k,
+        FP_MODULUS.clone(),
+    )?;
+    let check_zero =
+        check_carry_mod_to_zero::assign(range, layouter, &carry_int_mod, &*FP_MODULUS)?;
+
     Ok(())
 }
 
@@ -88,6 +110,7 @@ pub fn point_on_curve<F: FieldExt>(
 // elliptic curve at P (for y^2 = x^3 + b)
 // Checks:
 // 2 * P.y (P.y + Q.y) = 3 * P.x^2 * (P.x - Q.x)
+#[allow(non_snake_case)]
 pub fn point_on_tangent<F: FieldExt>(
     range: &range::RangeConfig<F>,
     layouter: &mut impl Layouter<F>,
@@ -113,26 +136,34 @@ pub fn point_on_tangent<F: FieldExt>(
     let py_plus_qy = add_no_carry::assign(&range.qap_config, layouter, &P.y, &Q.y)?;
     let lhs = mul_no_carry::assign(&range.qap_config, layouter, &two_py, &py_plus_qy)?;
 
-    let carry_int = sub_no_carry::assign(&range.qap_config, layouter, &lhs, &rhs)?;
-    let carry_int_mod = mod_reduce::assign(&range.qap_config, layouter, &carry_int, k, FP_MODULUS.clone())?;
-    let check_zero = check_carry_mod_to_zero::assign(range, layouter, &carry_int_mod, &*FP_MODULUS)?;
-    
+    let carry_int = sub_no_carry::assign(&range.qap_config, layouter, &rhs, &lhs)?;
+    let carry_int_mod = mod_reduce::assign(
+        &range.qap_config,
+        layouter,
+        &carry_int,
+        k,
+        FP_MODULUS.clone(),
+    )?;
+    let check_zero =
+        check_carry_mod_to_zero::assign(range, layouter, &carry_int_mod, &*FP_MODULUS)?;
+
     Ok(())
-}    
+}
 
 // Implements:
 // computing 2P on elliptic curve E for P = (x, y)
 // formula from https://crypto.stanford.edu/pbc/notes/elliptic/explicit.html
 // assume y != 0 (otherwise 2P = O)
 
-// lamb =  (3x^2 + a) / (2 y) % p
+// lamb =  3x^2 / (2 y) % p
 // x_3 = out[0] = lambda^2 - 2 x % p
 // y_3 = out[1] = lambda (x - x_3) - y % p
 
 // We precompute (x_3, y_3) and then constrain by showing that:
-// * (x_3, y_3) is a valid point on the curve 
-// * (x_3, y_3) is on the tangent line to E at (x, y) 
+// * (x_3, y_3) is a valid point on the curve
+// * (x_3, y_3) is on the tangent line to E at (x, y)
 // * x != x_3
+#[allow(non_snake_case)]
 pub fn point_double<F: FieldExt>(
     range: &range::RangeConfig<F>,
     layouter: &mut impl Layouter<F>,
@@ -148,62 +179,283 @@ pub fn point_double<F: FieldExt>(
     let x = P.x.to_bigint();
     let y = P.y.to_bigint();
     let (x_3, y_3) = if let (Some(x), Some(y)) = (x, y) {
-	let x = bigint_to_fp(x);
-	let y = bigint_to_fp(y);
-	let lambda = bigint_to_fp(BigInt::from(3)) * x * x;
-	let x_3 = lambda * lambda - bigint_to_fp(BigInt::from(2)) * x;
-	let y_3 = lambda * (x - x_3) - y;
-	(Some(fp_to_bigint(&x_3)), Some(fp_to_bigint(&y_3)))
+        assert_ne!(y, BigInt::zero());
+        let x = bigint_to_fp(x);
+        let y = bigint_to_fp(y);
+        let lambda = Fp::from(3) * x * x * (Fp::from(2) * y).invert().unwrap();
+        let x_3 = lambda * lambda - Fp::from(2) * x;
+        let y_3 = lambda * (x - x_3) - y;
+        (Some(fp_to_bigint(&x_3)), Some(fp_to_bigint(&y_3)))
     } else {
-	(None, None)
+        (None, None)
     };
 
     let x_3_limbs = decompose_bigint_option::<F>(&x_3, k, n);
     let y_3_limbs = decompose_bigint_option::<F>(&y_3, k, n);
-    
+
     let Q = layouter.assign_region(
-	|| "point double",
-	|mut region| {
-	    let x_3_cells = x_3_limbs.iter().map(|x| Witness(*x)).collect();
-	    let y_3_cells = y_3_limbs.iter().map(|x| Witness(*x)).collect();
+        || "point double",
+        |mut region| {
+            let x_3_cells = x_3_limbs.iter().map(|x| Witness(*x)).collect();
+            let y_3_cells = y_3_limbs.iter().map(|x| Witness(*x)).collect();
             let x_3_bigint_limbs = range.qap_config.assign_region(x_3_cells, 0, &mut region)?;
-	    let y_3_bigint_limbs = range.qap_config.assign_region(y_3_cells, 0, &mut region)?;
-	    Ok(EccPoint::construct(OverflowInteger::construct(x_3_bigint_limbs, BigUint::from(1u64) << n, n),
-				   OverflowInteger::construct(y_3_bigint_limbs, BigUint::from(1u64) << n, n)))	     
-	}
+            let y_3_bigint_limbs = range.qap_config.assign_region(y_3_cells, k, &mut region)?;
+            Ok(EccPoint::construct(
+                OverflowInteger::construct(x_3_bigint_limbs, BigUint::from(1u64) << n, n),
+                OverflowInteger::construct(y_3_bigint_limbs, BigUint::from(1u64) << n, n),
+            ))
+        },
     )?;
 
     for limb in &Q.x.limbs {
-	range.range_check(layouter, &limb, n)?;
+        range.range_check(layouter, &limb, n)?;
     }
     for limb in &Q.y.limbs {
-	range.range_check(layouter, &limb, n)?;
+        range.range_check(layouter, &limb, n)?;
     }
     point_on_curve(range, layouter, &Q, b)?;
     point_on_tangent(range, layouter, &P, &Q)?;
 
     let mod_limbs = decompose_biguint::<F>(&*FP_MODULUS, k, n);
     let fp_mod = layouter.assign_region(
-	|| "const modulus",
-	|mut region| {
-	    let mod_cells = mod_limbs.iter().map(|x| Constant(*x)).collect();
-	    let mod_bigint_limbs = range.qap_config.assign_region(mod_cells, 0, &mut region)?;
-	    Ok(OverflowInteger::construct(mod_bigint_limbs, BigUint::from(1u64) << n, n))
-	}
+        || "const modulus",
+        |mut region| {
+            let mod_cells = mod_limbs.iter().map(|x| Constant(*x)).collect();
+            let mod_bigint_limbs = range.qap_config.assign_region(mod_cells, 0, &mut region)?;
+            Ok(OverflowInteger::construct(
+                mod_bigint_limbs,
+                BigUint::from(1u64) << n,
+                n,
+            ))
+        },
     )?;
 
     let px_less_than = big_less_than::assign(range, layouter, &P.x, &fp_mod)?;
     let qx_less_than = big_less_than::assign(range, layouter, &Q.x, &fp_mod)?;
     let px_equals_qx = big_is_equal::assign(range, layouter, &P.x, &Q.x)?;
     let check_answer = layouter.assign_region(
-	|| "fp inequality check",
-	|mut region| {
-	    region.constrain_constant(px_less_than.cell(), F::from(1))?;
-	    region.constrain_constant(qx_less_than.cell(), F::from(1))?;
-	    region.constrain_constant(px_equals_qx.cell(), F::from(0))?;
-	    Ok(())
-	}
+        || "fp inequality check",
+        |mut region| {
+            region.constrain_constant(px_less_than.cell(), F::from(1))?;
+            region.constrain_constant(qx_less_than.cell(), F::from(1))?;
+            region.constrain_constant(px_equals_qx.cell(), F::from(0))?;
+            Ok(())
+        },
     )?;
 
     Ok(Q)
+}
+
+pub struct EccChip<F: FieldExt> {
+    fp_chip: FpChip<F>,
+}
+
+#[allow(non_snake_case)]
+impl<F: FieldExt> EccChip<F> {
+    pub fn construct(config: FpConfig<F>) -> Self {
+        Self {
+            fp_chip: FpChip::construct(config),
+        }
+    }
+
+    pub fn configure(
+        meta: &mut ConstraintSystem<F>,
+        value: Column<Advice>,
+        constant: Column<Fixed>,
+        lookup_bits: usize,
+        limb_bits: usize,
+        num_limbs: usize,
+    ) -> FpConfig<F> {
+        FpChip::configure(
+            meta,
+            value,
+            constant,
+            lookup_bits,
+            limb_bits,
+            num_limbs,
+            FP_MODULUS.clone(),
+        )
+    }
+
+    pub fn load_lookup_table(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
+        self.fp_chip.load_lookup_table(layouter)
+    }
+
+    pub fn load_private(
+        &self,
+        mut layouter: impl Layouter<F>,
+        point: Option<(Fp, Fp)>,
+    ) -> Result<EccPoint<F>, Error> {
+        let (x, y) = if let Some((x, y)) = point {
+            (Some(fp_to_bigint(&x)), Some(fp_to_bigint(&y)))
+        } else {
+            (None, None)
+        };
+        let x_vec = decompose_bigint_option::<F>(
+            &x,
+            self.fp_chip.config.num_limbs,
+            self.fp_chip.config.limb_bits,
+        );
+        let y_vec = decompose_bigint_option::<F>(
+            &y,
+            self.fp_chip.config.num_limbs,
+            self.fp_chip.config.limb_bits,
+        );
+
+        let x_assigned = self.fp_chip.load_private(
+            layouter.namespace(|| "x"),
+            x_vec,
+            BigUint::one() << self.fp_chip.config.limb_bits,
+        )?;
+        let y_assigned = self.fp_chip.load_private(
+            layouter.namespace(|| "y"),
+            y_vec,
+            BigUint::one() << self.fp_chip.config.limb_bits,
+        )?;
+
+        Ok(EccPoint::construct(x_assigned, y_assigned))
+    }
+
+    pub fn add_unequal(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        P: &EccPoint<F>,
+        Q: &EccPoint<F>,
+    ) -> Result<EccPoint<F>, Error> {
+        add_unequal::assign(&self.fp_chip.config.range, layouter, P, Q)
+    }
+
+    pub fn double(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        P: &EccPoint<F>,
+        b: F,
+    ) -> Result<EccPoint<F>, Error> {
+        point_double(&&self.fp_chip.config.range, layouter, P, b)
+    }
+}
+
+#[cfg(test)]
+#[allow(non_snake_case)]
+pub(crate) mod tests {
+    use std::marker::PhantomData;
+
+    use super::*;
+    use halo2_proofs::circuit::floor_planner::V1;
+    use halo2_proofs::pairing::group::Group;
+    use halo2_proofs::{
+        arithmetic::FieldExt, circuit::*, dev::MockProver, pairing::bn256::Fq as Fp,
+        pairing::bn256::Fr as Fn, plonk::*,
+    };
+    use num_bigint::{BigInt, RandBigInt};
+
+    #[derive(Default)]
+    struct MyCircuit<F> {
+        P: Option<(Fp, Fp)>,
+        Q: Option<(Fp, Fp)>,
+        _marker: PhantomData<F>,
+    }
+
+    impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
+        type Config = FpConfig<F>;
+        type FloorPlanner = V1;
+
+        fn without_witnesses(&self) -> Self {
+            Self {
+                P: None,
+                Q: None,
+                _marker: PhantomData,
+            }
+        }
+
+        fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+            let value = meta.advice_column();
+            let constant = meta.fixed_column();
+            EccChip::configure(meta, value, constant, 17, 51, 5)
+        }
+
+        fn synthesize(
+            &self,
+            config: Self::Config,
+            mut layouter: impl Layouter<F>,
+        ) -> Result<(), Error> {
+            let chip = EccChip::construct(config);
+            chip.load_lookup_table(&mut layouter)?;
+
+            let P_assigned = chip.load_private(layouter.namespace(|| "input point P"), self.P)?;
+            let Q_assigned = chip.load_private(layouter.namespace(|| "input point Q"), self.Q)?;
+
+            /*
+            // test add_unequal
+            {
+                let sum = chip.add_unequal(
+                    &mut layouter.namespace(|| "add_unequal"),
+                    &P_assigned,
+                    &Q_assigned,
+                )?;
+            }
+
+            // test point on curve
+            {
+                point_on_curve(
+                    &chip.fp_chip.config.range,
+                    &mut layouter,
+                    &P_assigned,
+                    F::from(3),
+                )?;
+            }
+            */
+
+            // test double
+            {
+                let doub = chip.double(
+                    &mut layouter.namespace(|| "double"),
+                    &P_assigned,
+                    F::from(3),
+                )?;
+            }
+
+            Ok(())
+        }
+    }
+
+    use halo2_proofs::pairing::bn256::G1Affine;
+    #[test]
+    fn test_ecc() {
+        let k = 18;
+        let mut rng = rand::thread_rng();
+
+        let P = G1Affine::random(&mut rng);
+        let Q = G1Affine::random(&mut rng);
+
+        let circuit = MyCircuit::<Fn> {
+            P: Some((P.x, P.y)),
+            Q: Some((Q.x, Q.y)),
+            _marker: PhantomData,
+        };
+
+        let prover = MockProver::run(k, &circuit, vec![]).unwrap();
+        //prover.assert_satisfied();
+        assert_eq!(prover.verify(), Ok(()));
+    }
+
+    #[cfg(feature = "dev-graph")]
+    #[test]
+    fn plot_ecc() {
+        let k = 12;
+        use plotters::prelude::*;
+
+        let root = BitMapBackend::new("layout.png", (2048, 2048)).into_drawing_area();
+        root.fill(&WHITE).unwrap();
+        let root = root.titled("Ecc Layout", ("sans-serif", 60)).unwrap();
+
+        let circuit = MyCircuit::<Fn> {
+            P: None,
+            Q: None,
+            _marker: PhantomData,
+        };
+        halo2_proofs::dev::CircuitLayout::default()
+            .render(k, &circuit, &root)
+            .unwrap();
+    }
 }

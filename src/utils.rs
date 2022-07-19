@@ -166,8 +166,14 @@ pub fn bigint_to_fp(x: big_int) -> Fp {
     if x < big_int::zero() {
         x += &p;
     }
-    let x_bytes: &[u8; 32] = &x.to_bytes_le().1[0..32].try_into().unwrap();
-    Fp::from_bytes(x_bytes).unwrap()
+    let mut x_bytes = [0u8; 32];
+    let x_bytes_vec = x.to_bytes_le().1;
+    for i in 0..32 {
+        if i < x_bytes_vec.len() {
+            x_bytes[i] = x_bytes_vec[i];
+        }
+    }
+    Fp::from_bytes(&x_bytes).unwrap()
 }
 
 pub fn fp_to_bigint(x: &Fp) -> big_int {

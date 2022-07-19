@@ -35,7 +35,15 @@ pub(crate) mod tests {
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
             let value = meta.advice_column();
             let constant = meta.fixed_column();
-            FpChip::configure(meta, value, constant, 16, 64, 4, modulus::<Fn>())
+            FpChip::configure(
+                meta,
+                value,
+                constant,
+                16,
+                64,
+                4,
+                modulus::<halo2_proofs::pairing::bn256::Fq>(),
+            )
         }
 
         fn synthesize(

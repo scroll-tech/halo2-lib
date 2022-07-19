@@ -30,6 +30,7 @@ use crate::{gates::*, utils::*};
 //  (x_1 + x_2 + x_3)*(x_2 - x_1)^2 = (y_2 - y_1)^2 mod p
 //  (y_1 + y_3)*(x_2 - x_1) = (y_2 - y_1)*(x_1 - x_3) mod p
 
+#[allow(non_snake_case)]
 pub fn assign<F: FieldExt>(
     range: &range::RangeConfig<F>,
     layouter: &mut impl Layouter<F>,
@@ -61,7 +62,7 @@ pub fn assign<F: FieldExt>(
         let lambda = (y_2 - y_1) * (x_2 - x_1).invert().unwrap();
         let x_3 = lambda * lambda - x_1 - x_2;
         let y_3 = lambda * (x_1 - x_3) - y_1;
-	(Some(fp_to_bigint(&x_3)), Some(fp_to_bigint(&y_3)))
+        (Some(fp_to_bigint(&x_3)), Some(fp_to_bigint(&y_3)))
     } else {
         (None, None)
     };
@@ -169,6 +170,12 @@ pub fn assign<F: FieldExt>(
     let y_3_cells = point_on_line()?;
     let out_y = OverflowInteger::construct(y_3_cells, P.y.max_limb_size.clone(), n);
 
+    for limb in &out_x.limbs {
+        range.range_check(layouter, &limb, n)?;
+    }
+    for limb in &out_y.limbs {
+        range.range_check(layouter, &limb, n)?;
+    }
+
     Ok(EccPoint::construct(out_x, out_y))
 }
-

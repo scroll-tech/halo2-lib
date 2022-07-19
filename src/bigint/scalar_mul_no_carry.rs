@@ -19,7 +19,7 @@ pub fn assign<F: FieldExt>(
     let mut out_limbs = Vec::with_capacity(k);
 
     for i in 0..k {
-	let out_cell = gate.mul_constant(layouter, &&a.limbs[i], b)?;
+        let out_cell = gate.mul_constant(layouter, &a.limbs[i], b)?;
         out_limbs.push(out_cell);
     }
     Ok(OverflowInteger::construct(

@@ -7,20 +7,20 @@ use crate::gates::range;
 
 #[derive(Clone, Debug)]
 pub struct FpConfig<F: FieldExt> {
-    value: Column<Advice>,
-    constant: Column<Fixed>,
-    lookup: TableColumn,
-    lookup_bits: usize,
-    q_lookup: Selector,
-    gate: qap_gate::Config<F>,
-    range: range::RangeConfig<F>,
-    limb_bits: usize,
-    num_limbs: usize,
-    p: BigUint,
+    pub value: Column<Advice>,
+    pub constant: Column<Fixed>,
+    pub lookup: TableColumn,
+    pub lookup_bits: usize,
+    pub q_lookup: Selector,
+    pub gate: qap_gate::Config<F>,
+    pub range: range::RangeConfig<F>,
+    pub limb_bits: usize,
+    pub num_limbs: usize,
+    pub p: BigUint,
 }
 
 pub struct FpChip<F: FieldExt> {
-    config: FpConfig<F>,
+    pub config: FpConfig<F>,
 }
 
 impl<F: FieldExt> FpChip<F> {
