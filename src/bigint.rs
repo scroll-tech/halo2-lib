@@ -1,7 +1,9 @@
 use crate::utils::*;
-use halo2_proofs::{arithmetic::FieldExt, circuit::*};
-use num_bigint::BigInt as big_int;
-use num_bigint::BigUint as big_uint;
+use halo2_proofs::{
+    arithmetic::{Field, FieldExt},
+    circuit::*,
+};
+use num_bigint::{BigInt, BigUint};
 use num_traits::Zero;
 
 pub mod add_no_carry;
@@ -22,14 +24,14 @@ pub mod sub_no_carry;
 #[derive(Clone, Debug)]
 pub struct OverflowInteger<F: FieldExt> {
     pub limbs: Vec<AssignedCell<F, F>>,
-    pub max_limb_size: big_uint, // max absolute value of integer value of a limb
+    pub max_limb_size: BigUint, // max absolute value of integer value of a limb
     pub limb_bits: usize,
 }
 
 impl<F: FieldExt> OverflowInteger<F> {
     pub fn construct(
         limbs: Vec<AssignedCell<F, F>>,
-        max_limb_size: big_uint,
+        max_limb_size: BigUint,
         limb_bits: usize,
     ) -> Self {
         Self {
@@ -39,14 +41,49 @@ impl<F: FieldExt> OverflowInteger<F> {
         }
     }
 
-    pub fn to_bigint(&self) -> Option<big_int> {
+    pub fn to_bigint(&self) -> Option<BigInt> {
         self.limbs
             .iter()
             .rev()
-            .fold(Some(big_int::zero()), |acc, acell| {
+            .fold(Some(BigInt::zero()), |acc, acell| {
                 acc.zip(acell.value())
                     .map(|(acc, x)| (acc << self.limb_bits) + fe_to_bigint(x))
             })
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct CRTInteger<F: FieldExt> {
+    // keep track of an integer `a` using CRT as `a mod 2^t` and `a mod n`
+    // where `t = truncation.limbs.len() * truncation.limb_bits`
+    //       `n = modulus::<Fn>`
+    // `value` is the actual integer value we want to keep track of
+
+    // we allow `value` to be a signed BigInt
+    // however `value` is really an element of Z/(2^t * n), so signs are only meaningful if:
+    // ASSUME `abs(value) < 2^t * n / 2`
+
+    // the IMPLICIT ASSUMPTION: `value (mod 2^t) = truncation` && `value (mod n) = native`
+    // this struct should only be used if the implicit assumption above is satisfied
+    pub truncation: OverflowInteger<F>,
+    pub native: AssignedCell<F, F>,
+    pub value: Option<BigInt>,
+    pub max_size: BigUint, // theoretical max absolute value of `value` allowed. This needs to be < 2^t * n / 2
+}
+
+impl<F: FieldExt> CRTInteger<F> {
+    pub fn construct(
+        truncation: OverflowInteger<F>,
+        native: AssignedCell<F, F>,
+        value: Option<BigInt>,
+        max_size: BigUint,
+    ) -> Self {
+        Self {
+            truncation,
+            native,
+            value,
+            max_size,
+        }
     }
 }
 
@@ -62,7 +99,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::fields::fp::{FpChip, FpConfig};
     use crate::utils::*;
-    use num_bigint::BigUint as big_uint;
+    use num_bigint::BigUint;
 
     #[derive(Default)]
     struct MyCircuit<F> {
@@ -108,17 +145,17 @@ pub(crate) mod tests {
             let a_assigned = chip.load_private(
                 layouter.namespace(|| "input a"),
                 self.a.clone(),
-                big_uint::one() << 64 - 1usize,
+                BigUint::one() << 64 - 1usize,
             )?;
             let b_assigned = chip.load_private(
                 layouter.namespace(|| "input b"),
                 self.b.clone(),
-                big_uint::one() << 64 - 1usize,
+                BigUint::one() << 64 - 1usize,
             )?;
             let c_assigned = chip.load_private(
                 layouter.namespace(|| "input c"),
                 self.c.clone(),
-                big_uint::one() << 64 - 1usize,
+                BigUint::one() << 64 - 1usize,
             )?;
 
             // test mul_no_carry
@@ -141,7 +178,7 @@ pub(crate) mod tests {
 
             // test mod_reduce
             {
-                let modulus = big_uint::from(17u32);
+                let modulus = BigUint::from(17u32);
                 let out = chip.mod_reduce(
                     &mut layouter.namespace(|| "mod reduce"),
                     &a_assigned,
@@ -149,7 +186,7 @@ pub(crate) mod tests {
                     modulus.clone(),
                 )?;
 
-                let mut a_big = Some(big_uint::from(0u32));
+                let mut a_big = Some(BigUint::from(0u32));
                 for (i, val) in self.a.iter().enumerate() {
                     a_big = a_big
                         .zip(*val)
@@ -157,7 +194,7 @@ pub(crate) mod tests {
                 }
                 a_big = a_big.map(|a| a % &modulus);
 
-                let mut out_val = Some(big_uint::from(0u32));
+                let mut out_val = Some(BigUint::from(0u32));
                 let mut is_none = false;
                 for (i, cell) in out.limbs.iter().enumerate() {
                     out_val = out_val
@@ -214,17 +251,17 @@ pub(crate) mod tests {
         let circuit = MyCircuit::<Fn> {
             a: (vec![50, -3, 11, -(1 << 30)])
                 .iter()
-                .map(|a| Some(bigint_to_fe(&big_int::from(*a as i64))))
+                .map(|a| Some(bigint_to_fe(&BigInt::from(*a as i64))))
                 .collect(),
             b: vec![
-                Some(biguint_to_fe(&(big_uint::from(1u64) << 65))),
-                Some(bigint_to_fe(&big_int::from(-2i64))),
+                Some(biguint_to_fe(&(BigUint::from(1u64) << 65))),
+                Some(bigint_to_fe(&BigInt::from(-2i64))),
                 Some(Fn::from(0)),
                 Some(Fn::from(0)),
             ],
             c: (vec![(1i64 << 31), 2i64, 0, 0])
                 .iter()
-                .map(|a| Some(bigint_to_fe(&big_int::from(*a as i64))))
+                .map(|a| Some(bigint_to_fe(&BigInt::from(*a as i64))))
                 .collect(),
         };
 

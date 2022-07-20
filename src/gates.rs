@@ -127,12 +127,6 @@ pub(crate) mod tests {
                 config.gate.mul(&mut layouter, &c_cell, &b_cell)?;
             }
 
-            // test linear
-            {
-                let signals = vec![a_cell, b_cell, c_cell];
-                let constants = vec![F::from(1), F::from(2), F::from(3)];
-                config.gate.linear(&mut layouter, &constants, &signals)?;
-            }
             Ok(())
         }
     }

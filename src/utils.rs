@@ -73,7 +73,7 @@ pub fn decompose_biguint<F: FieldExt>(
             biguint_to_fe(&limb)
         })
         .collect();
-    assert_eq!(e, big_uint::zero());
+    // assert_eq!(e, big_uint::zero());
     limbs
 }
 
@@ -100,7 +100,7 @@ pub fn decompose_bigint<F: FieldExt>(
             }
         })
         .collect();
-    assert_eq!(e, big_uint::zero());
+    // assert_eq!(e, big_uint::zero());
     limbs
 }
 

@@ -914,7 +914,7 @@ pub(crate) mod tests {
     use halo2_proofs::pairing::bn256::G1Affine;
     #[test]
     fn test_ecc() {
-        let k = 22;
+        let k = 21;
         let mut rng = rand::thread_rng();
 
         let P = G1Affine::random(&mut rng);
