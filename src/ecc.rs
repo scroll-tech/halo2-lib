@@ -473,12 +473,13 @@ pub fn scalar_multiply<F: FieldExt>(
     let mut is_zero_window = Vec::with_capacity(num_windows);
     let mut ones_vec = Vec::with_capacity(window_bits);
     for idx in 0..window_bits {
-	ones_vec.push(F::from(1));
+	ones_vec.push(Constant(F::from(1)));
     }
-    for idx in 0..num_windows {	
-	let bit_sum = range.qap_config.linear(layouter, &ones_vec,
-					      &rounded_bits[rounded_bitlen - window_bits * (idx + 1)..rounded_bitlen - window_bits * idx].to_vec())?;
-	let is_zero = range.is_zero(layouter, &bit_sum)?;
+    for idx in 0..num_windows {
+	let temp_bits = rounded_bits[rounded_bitlen - window_bits * (idx + 1)..rounded_bitlen - window_bits * idx]
+	    .iter().map(|x| Existing(&x)).collect();
+	let bit_sum = range.qap_config.inner_product(layouter, &ones_vec, &temp_bits)?;
+	let is_zero = range.is_zero(layouter, &bit_sum.2)?;
 	is_zero_window.push(is_zero.clone());
     }
 
@@ -554,14 +555,15 @@ pub fn multi_scalar_multiply<F: FieldExt>(
     let mut is_zero_window_vec = Vec::with_capacity(k);
     let mut ones_vec = Vec::with_capacity(window_bits);
     for idx in 0..window_bits {
-	ones_vec.push(F::from(1));
+	ones_vec.push(Constant(F::from(1)));
     }
     for idx in 0..k {
 	let mut is_zero_window = Vec::with_capacity(num_windows);
-	for window_idx in 0..num_windows {	    
-	    let bit_sum = range.qap_config.linear(layouter, &ones_vec,
-						  &rounded_bits_vec[idx][rounded_bitlen - window_bits * (window_idx + 1)..rounded_bitlen - window_bits * window_idx].to_vec())?;
-	    let is_zero = range.is_zero(layouter, &bit_sum)?;
+	for window_idx in 0..num_windows {
+	    let temp_bits = rounded_bits_vec[idx][rounded_bitlen - window_bits * (window_idx + 1)..rounded_bitlen - window_bits * window_idx]
+		.iter().map(|x| Existing(&x)).collect();
+	    let bit_sum = range.qap_config.inner_product(layouter, &ones_vec, &temp_bits)?;
+	    let is_zero = range.is_zero(layouter, &bit_sum.2)?;
 	    is_zero_window.push(is_zero.clone());
 	}
 	is_zero_window_vec.push(is_zero_window);
@@ -784,7 +786,7 @@ pub(crate) mod tests {
                 P: None,
                 Q: None,
                 x: None,
-		batch_size: 16,
+		batch_size: 4,
                 _marker: PhantomData,
             }
         }
@@ -947,7 +949,7 @@ pub(crate) mod tests {
             P: None,
             Q: None,
             x: None,
-	    batch_size: 16,
+	    batch_size: 4,
             _marker: PhantomData,
         };
 

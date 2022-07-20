@@ -73,6 +73,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
             &x_assigned,
             F::from(3),
             254,
+	    4
         )?;
 
         Ok(())
