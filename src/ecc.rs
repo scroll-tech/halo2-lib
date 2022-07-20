@@ -344,6 +344,7 @@ pub fn point_double_2<F: FieldExt>(
         FP_MODULUS.clone(),
     )?;
     check_carry_mod_to_zero::assign(range, layouter, &lambda_constraint_red, &*FP_MODULUS)?;
+    check_carry_mod_to_zero::assign(range, layouter, &lambda_constraint, &*FP_MODULUS)?;
 
     // x_3 = lambda^2 - 2 x % p
     let lambda_sq = mul_no_carry::assign(&range.qap_config, layouter, &lambda, &lambda)?;
@@ -357,6 +358,7 @@ pub fn point_double_2<F: FieldExt>(
         FP_MODULUS.clone(),
     )?;
     let x_3 = carry_mod::assign(range, layouter, &x_3_red, &*FP_MODULUS)?;
+    //let x_3 = carry_mod::assign(range, layouter, &x_3_no_carry, &*FP_MODULUS)?;
 
     // y_3 = lambda (x - x_3) - y % p
     let dx = sub_no_carry::assign(&range.qap_config, layouter, &P.x, &x_3)?;
@@ -370,6 +372,7 @@ pub fn point_double_2<F: FieldExt>(
         FP_MODULUS.clone(),
     )?;
     let y_3 = carry_mod::assign(range, layouter, &y_3_red, &*FP_MODULUS)?;
+    //let y_3 = carry_mod::assign(range, layouter, &y_3_no_carry, &*FP_MODULUS)?;
 
     Ok(EccPoint::construct(x_3, y_3))
 }
@@ -843,7 +846,6 @@ pub(crate) mod tests {
                     &Q_assigned,
                 )?;
             }
-            */
 
             /*
             // test point on curve
@@ -857,7 +859,6 @@ pub(crate) mod tests {
             }
             */
 
-            /*
             // test double
             {
                 let doub = chip.double(
@@ -882,6 +883,19 @@ pub(crate) mod tests {
 	    }
 	     */
 
+            /*
+            // test scalar mult
+            {
+                let scalar_mult = chip.scalar_mult(
+                    &mut layouter.namespace(|| "scalar_mult"),
+                    &P_assigned,
+                    &x_assigned,
+                    F::from(3),
+                    12,
+                )?;
+            }
+            */
+
 	    // test multi scalar mult
 	    {
 		let multi_scalar_mult = chip.multi_scalar_mult(
@@ -900,7 +914,7 @@ pub(crate) mod tests {
     use halo2_proofs::pairing::bn256::G1Affine;
     #[test]
     fn test_ecc() {
-        let k = 20;
+        let k = 22;
         let mut rng = rand::thread_rng();
 
         let P = G1Affine::random(&mut rng);

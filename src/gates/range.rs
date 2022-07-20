@@ -70,7 +70,7 @@ impl<F: FieldExt> RangeConfig<F> {
         a: &AssignedCell<F, F>,
         range_bits: usize,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
-        println!("Calling range_check on {} bits.", range_bits);
+        // println!("Calling range_check on {} bits.", range_bits);
         let k = (range_bits + self.lookup_bits - 1) / self.lookup_bits;
         let rem_bits = range_bits % self.lookup_bits;
 
@@ -381,56 +381,56 @@ impl<F: FieldExt> RangeConfig<F> {
 
     // returns little-endian bit vectors
     pub fn num_to_bits(
-	&self,
-	layouter: &mut impl Layouter<F>,
-	a: &AssignedCell<F, F>,
-	range_bits: usize,
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &AssignedCell<F, F>,
+        range_bits: usize,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
-	let bits = decompose_option(&a.value().map(|x| *x), range_bits, 1usize);
-	let bit_cells = layouter.assign_region(
-	    || "range check",
-	    |mut region| {
-		let mut cells = Vec::with_capacity(3 * range_bits - 2);
-		let mut running_sum = bits[0];
-		let mut running_pow = F::from(1u64);
-		cells.push(Witness(bits[0]));
-		let mut offset = 1;
-		for idx in 1..range_bits {
-		    running_pow = running_pow * F::from(2u64);
-		    running_sum = running_sum.zip(bits[idx]).map(|(x, b)| x + b * running_pow );
-		    cells.push(Constant(running_pow));
-		    cells.push(Witness(bits[idx]));
-		    cells.push(Witness(running_sum));
-		    self.qap_config.q_enable.enable(&mut region, offset - 1);
-		    offset = offset + 3;
-		}
-		let assigned_cells = self.qap_config.assign_region(cells, 0, &mut region)?;
-		region.constrain_equal(a.cell(), assigned_cells.last().unwrap().clone().cell())?;
-		let mut assigned_bits = Vec::with_capacity(range_bits);
-		assigned_bits.push(assigned_cells[0].clone());
-		for idx in 1..range_bits {
-		    assigned_bits.push(assigned_cells[3 * idx - 1].clone());
-		}
-		Ok(assigned_bits)
-	    }
-	)?;
-	
-	for idx in 0..range_bits {
-	    layouter.assign_region(
-		|| "bit check",
-		|mut region| {
-		    self.qap_config.q_enable.enable(&mut region, 0);
-		    let cells = vec![
-			Constant(F::from(0)),
-			Existing(&bit_cells[idx]),
-			Existing(&bit_cells[idx]),
-			Existing(&bit_cells[idx])];
-		    let assigned_cells = self.qap_config.assign_region(cells, 0, &mut region)?;
-		    Ok(())
-		}
-	    )?;
-	}
-	Ok(bit_cells)
-    }    
-}
+        let bits = decompose_option(&a.value().map(|x| *x), range_bits, 1usize);
+        let bit_cells = layouter.assign_region(
+            || "range check",
+            |mut region| {
+                let mut cells = Vec::with_capacity(3 * range_bits - 2);
+                let mut running_sum = bits[0];
+                let mut running_pow = F::from(1u64);
+                cells.push(Witness(bits[0]));
+                let mut offset = 1;
+                for idx in 1..range_bits {
+                    running_pow = running_pow * F::from(2u64);
+                    running_sum = running_sum.zip(bits[idx]).map(|(x, b)| x + b * running_pow);
+                    cells.push(Constant(running_pow));
+                    cells.push(Witness(bits[idx]));
+                    cells.push(Witness(running_sum));
+                    self.qap_config.q_enable.enable(&mut region, offset - 1);
+                    offset = offset + 3;
+                }
+                let assigned_cells = self.qap_config.assign_region(cells, 0, &mut region)?;
+                region.constrain_equal(a.cell(), assigned_cells.last().unwrap().clone().cell())?;
+                let mut assigned_bits = Vec::with_capacity(range_bits);
+                assigned_bits.push(assigned_cells[0].clone());
+                for idx in 1..range_bits {
+                    assigned_bits.push(assigned_cells[3 * idx - 1].clone());
+                }
+                Ok(assigned_bits)
+            },
+        )?;
 
+        for idx in 0..range_bits {
+            layouter.assign_region(
+                || "bit check",
+                |mut region| {
+                    self.qap_config.q_enable.enable(&mut region, 0);
+                    let cells = vec![
+                        Constant(F::from(0)),
+                        Existing(&bit_cells[idx]),
+                        Existing(&bit_cells[idx]),
+                        Existing(&bit_cells[idx]),
+                    ];
+                    let assigned_cells = self.qap_config.assign_region(cells, 0, &mut region)?;
+                    Ok(())
+                },
+            )?;
+        }
+        Ok(bit_cells)
+    }
+}
