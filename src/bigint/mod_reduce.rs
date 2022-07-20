@@ -22,7 +22,7 @@ pub fn assign<F: FieldExt>(
     assert!(modulus.bits() <= (n * k).try_into().unwrap());
 
     let m = a.limbs.len() - k;
-    println!("a.overflow_bits: {:?}, n: {:?}", a.max_limb_size.bits(), n);
+    // println!("a.overflow_bits: {:?}, n: {:?}", a.max_limb_size.bits(), n);
     assert!(&a.max_limb_size * (1usize + (big_uint::from(m) << n)) <= native_modulus::<F>() / 2u32);
 
     let limb_base = big_uint::one() << n;
