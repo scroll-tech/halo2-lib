@@ -1,4 +1,5 @@
 use std::str::FromStr;
+use rand_core::OsRng;
 
 use crate::bigint::OverflowInteger;
 use crate::fields::fp::{FpChip, FpConfig};
@@ -10,6 +11,7 @@ use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::*,
     pairing::bn256::Fq as Fp,
+    pairing::bn256::{G1, G1Affine},
     plonk::{Advice, Column, ConstraintSystem, Error, Fixed},
 };
 use num_bigint::{BigInt, BigUint};
@@ -22,6 +24,7 @@ use crate::gates::*;
 use crate::utils::*;
 
 pub mod add_unequal;
+pub mod sub_unequal;
 
 // committing to prime field F_p with
 // p = 21888242871839275222246405745257275088696311157297823662689037894645226208583
@@ -150,6 +153,15 @@ pub fn point_on_tangent<F: FieldExt>(
         check_carry_mod_to_zero::assign(range, layouter, &carry_int_mod, &*FP_MODULUS)?;
 
     Ok(())
+}
+
+pub fn point_negative<F: FieldExt>(
+    range: &range::RangeConfig<F>,
+    layouter: &mut impl Layouter<F>,
+    P: &EccPoint<F>,
+) -> Result<EccPoint<F>, Error> {
+    let Ry = negative::assign(&range.qap_config, layouter, &P.y)?;
+    Ok(EccPoint::<F>::construct(P.x.clone(), Ry))
 }
 
 // Implements:
@@ -375,6 +387,38 @@ pub fn select<F: FieldExt>(
     Ok(EccPoint::<F>::construct(Rx, Ry))
 }
 
+// takes the dot product of points with sel, where each is intepreted as
+// a _vector_
+pub fn inner_product<F: FieldExt>(
+    range: &range::RangeConfig<F>,
+    layouter: &mut impl Layouter<F>,
+    points: &Vec<EccPoint<F>>,
+    coeffs: &Vec<AssignedCell<F, F>>,
+) -> Result<EccPoint<F>, Error> {
+    let length = coeffs.len();
+    assert_eq!(length, points.len());
+
+    let x_coords = points.iter().map(|P| P.x.clone()).collect();
+    let y_coords = points.iter().map(|P| P.x.clone()).collect();
+    let Rx = inner_product::assign(&range.qap_config, layouter, &x_coords, coeffs)?;
+    let Ry = inner_product::assign(&range.qap_config, layouter, &y_coords, coeffs)?;
+    Ok(EccPoint::<F>::construct(Rx, Ry))
+}
+    
+// sel is little-endian binary
+pub fn select_from_bits<F: FieldExt>(
+    range: &range::RangeConfig<F>,
+    layouter: &mut impl Layouter<F>,
+    points: &Vec<EccPoint<F>>,
+    sel: &Vec<AssignedCell<F, F>>,
+) -> Result<EccPoint<F>, Error> {
+    let w = sel.len();
+    let num_points = points.len();
+    assert_eq!(1 << w, num_points);
+    let coeffs = range.qap_config.bits_to_indicator(layouter, sel)?;    
+    inner_product(range, layouter, points, &coeffs)
+}
+
 // computes x * P on y^2 = x^3 + b
 // assumes:
 //   * 0 < x < scalar field modulus
@@ -387,11 +431,33 @@ pub fn scalar_multiply<F: FieldExt>(
     x: &AssignedCell<F, F>,
     b: F,
     max_bits: usize,
+    window_bits: usize,
 ) -> Result<EccPoint<F>, Error> {
-    let bits = range.num_to_bits(layouter, x, max_bits)?;
+    let num_windows = (max_bits + window_bits - 1) / window_bits;
+    let rounded_bitlen = num_windows * window_bits;
 
-    // is_started[idx] holds whether there is a 1 in bits with index at least (max_bits - idx)
-    let mut is_started = Vec::with_capacity(max_bits);
+    let mut rounded_bits = Vec::with_capacity(rounded_bitlen);
+    let bits = range.num_to_bits(layouter, x, max_bits)?;
+    for cell in bits.iter() {
+	rounded_bits.push(cell.clone());
+    }
+    let zero_cell = layouter.assign_region(
+	|| "constant 0",
+	|mut region| {
+	    let zero_cells = vec![Constant(F::from(0))];
+	    let zero_cells_assigned = range.qap_config.assign_region(zero_cells, 0, &mut region)?;
+	    Ok(zero_cells_assigned[0].clone())
+	}
+    )?;
+    for idx in 0..(rounded_bitlen - max_bits) {
+	rounded_bits.push(zero_cell.clone());
+    }
+    
+    // is_started[idx] holds whether there is a 1 in bits with index at least (rounded_bitlen - idx)
+    let mut is_started = Vec::with_capacity(rounded_bitlen);
+    for idx in 0..(rounded_bitlen - max_bits) {
+	rounded_bits.push(zero_cell.clone());
+    }
     is_started.push(bits[max_bits - 1].clone());
     for idx in 1..max_bits {
         let or = range
@@ -400,20 +466,172 @@ pub fn scalar_multiply<F: FieldExt>(
         is_started.push(or.clone());
     }
 
-    let mut curr_point = P.clone();
-    for idx in 1..max_bits {
-        let double = point_double_2(range, layouter, &curr_point /*, b*/)?;
-        let double_and_add = add_unequal::assign_2(range, layouter, &double, &P)?;
-
-        let is_started_point = select(
-            range,
-            layouter,
-            &double_and_add,
-            &double,
-            &bits[max_bits - 1 - idx],
-        )?;
-        curr_point = select(range, layouter, &is_started_point, &P, &is_started[idx - 1])?;
+    // is_zero_window[idx] is 0/1 depending on whether bits [rounded_bitlen - window_bits * (idx + 1), rounded_bitlen - window_bits * idx) are all 0
+    let mut is_zero_window = Vec::with_capacity(num_windows);
+    let mut ones_vec = Vec::with_capacity(window_bits);
+    for idx in 0..window_bits {
+	ones_vec.push(F::from(1));
     }
+    for idx in 0..num_windows {	
+	let bit_sum = range.qap_config.linear(layouter, &ones_vec,
+					      &rounded_bits[rounded_bitlen - window_bits * (idx + 1)..rounded_bitlen - window_bits * idx].to_vec())?;
+	let is_zero = range.is_zero(layouter, &bit_sum)?;
+	is_zero_window.push(is_zero.clone());
+    }
+
+    // cached_points[idx] stores idx * P, with cached_points[0] = P
+    let cache_size = 1usize << window_bits;
+    let mut cached_points = Vec::with_capacity(cache_size);
+    cached_points.push(P.clone());
+    cached_points.push(P.clone());
+    for idx in 1..(cache_size - 1) {
+	if idx == 1 {
+	    let double = point_double_2(range, layouter, &P /*, b*/)?;
+	    cached_points.push(double.clone());	   
+	} else {
+	    let new_point = add_unequal::assign_2(range, layouter, &cached_points[idx], &P)?;
+	    cached_points.push(new_point.clone());
+	}
+    }
+
+    // if all the starting window bits are 0, get start_point = P
+    let mut curr_point = select_from_bits(range, layouter, &cached_points,
+					  &rounded_bits[rounded_bitlen - window_bits..rounded_bitlen].to_vec())?;
+    for idx in 1..num_windows {
+	let mut mult_point = curr_point.clone();
+	for double_idx in 0..window_bits {
+	    mult_point = point_double_2(range, layouter, &mult_point)?;
+	}
+	let add_point = select_from_bits(range, layouter, &cached_points,
+					 &rounded_bits[rounded_bitlen - window_bits * (idx + 1)..rounded_bitlen - window_bits * idx].to_vec())?;	
+	let mult_and_add = add_unequal::assign_2(range, layouter, &mult_point, &add_point)?;
+	let is_started_point = select(range, layouter, &mult_and_add, &mult_point, &is_zero_window[idx])?;
+	
+	curr_point = select(range, layouter, &is_started_point, &P, &is_started[window_bits * idx - 1])?;
+    }
+    Ok(curr_point.clone())
+}
+
+#[allow(non_snake_case)]
+pub fn multi_scalar_multiply<F: FieldExt>(
+    range: &range::RangeConfig<F>,
+    layouter: &mut impl Layouter<F>,
+    P: &Vec<EccPoint<F>>,
+    x: &Vec<AssignedCell<F, F>>,
+    b: F,
+    max_bits: usize,
+    window_bits: usize,
+) -> Result<EccPoint<F>, Error> {      
+    let k = P.len();
+    assert_eq!(k, x.len());
+    let num_windows = (max_bits + window_bits - 1) / window_bits;
+    let rounded_bitlen = num_windows * window_bits;
+
+    let zero_cell = layouter.assign_region(
+	|| "constant 0",
+	|mut region| {
+	    let zero_cells = vec![Constant(F::from(0))];
+	    let zero_cells_assigned = range.qap_config.assign_region(zero_cells, 0, &mut region)?;
+	    Ok(zero_cells_assigned[0].clone())
+	}
+    )?;    
+    let mut rounded_bits_vec = Vec::with_capacity(k);
+    for idx in 0..k {
+	let mut rounded_bits = Vec::with_capacity(rounded_bitlen);
+	let bits = range.num_to_bits(layouter, &x[idx], max_bits)?;
+	for cell in bits.iter() {
+	    rounded_bits.push(cell.clone());
+	}
+	for idx in 0..(rounded_bitlen - max_bits) {
+	    rounded_bits.push(zero_cell.clone());
+	}
+	rounded_bits_vec.push(rounded_bits);
+    }
+    
+    let mut is_zero_window_vec = Vec::with_capacity(k);
+    let mut ones_vec = Vec::with_capacity(window_bits);
+    for idx in 0..window_bits {
+	ones_vec.push(F::from(1));
+    }
+    for idx in 0..k {
+	let mut is_zero_window = Vec::with_capacity(num_windows);
+	for window_idx in 0..num_windows {	    
+	    let bit_sum = range.qap_config.linear(layouter, &ones_vec,
+						  &rounded_bits_vec[idx][rounded_bitlen - window_bits * (window_idx + 1)..rounded_bitlen - window_bits * window_idx].to_vec())?;
+	    let is_zero = range.is_zero(layouter, &bit_sum)?;
+	    is_zero_window.push(is_zero.clone());
+	}
+	is_zero_window_vec.push(is_zero_window);
+    }
+
+    let base_point = G1Affine::random(OsRng);
+    let pt_x = fe_to_biguint(&base_point.x);
+    let pt_y = fe_to_biguint(&base_point.y);
+    let base = layouter.assign_region(
+	|| "base point",
+	|mut region| {
+	    let num_limbs = P[0].x.limbs.len();
+	    let limb_bits = P[0].x.limb_bits;
+	    let max_limb_size = BigUint::from(1u64) << limb_bits;
+	    
+	    let x_vec = decompose_biguint(&pt_x, num_limbs, limb_bits);
+	    let x_limbs = x_vec.iter().map(|a| Witness(Some(*a))).collect();
+	    let x_limbs_assigned = range.qap_config.assign_region(x_limbs, 0, &mut region)?;
+	    let x_overflow = OverflowInteger::construct(x_limbs_assigned, max_limb_size.clone(), limb_bits);
+
+	    let y_vec = decompose_biguint(&pt_y, num_limbs, limb_bits);
+	    let y_limbs = y_vec.iter().map(|a| Witness(Some(*a))).collect();
+	    let y_limbs_assigned = range.qap_config.assign_region(y_limbs, 0, &mut region)?;
+	    let y_overflow = OverflowInteger::construct(y_limbs_assigned, max_limb_size.clone(), limb_bits);
+
+	    Ok(EccPoint::construct(x_overflow, y_overflow))
+	}
+    )?;
+	
+    // contains random base points [A, ..., 2^k * A, ..., 2^{w + k} * A] 
+    let mut rand_start_vec = Vec::with_capacity(k);
+    rand_start_vec.push(base.clone());
+    for idx in 1..(k + window_bits) {
+	let base_mult = point_double_2(range, layouter, &rand_start_vec[idx - 1])?;
+	rand_start_vec.push(base_mult.clone());
+    }
+
+    // contains (1 - 2^w) * [A, ..., 2^k * A]
+    let mut neg_mult_rand_start_vec = Vec::with_capacity(k);
+    for idx in 0..k {
+	let diff = sub_unequal::assign_2(range, layouter, &rand_start_vec[idx], &rand_start_vec[idx + window_bits])?;
+	neg_mult_rand_start_vec.push(diff.clone());
+    }
+    
+    let cache_size = 1usize << window_bits;
+    let mut cached_points_vec = Vec::with_capacity(k);
+    for idx in 0..k {
+	let mut cached_points = Vec::with_capacity(cache_size);
+	cached_points.push(neg_mult_rand_start_vec[idx].clone());
+	for cache_idx in 0..(cache_size - 1) {
+	    let new_point = add_unequal::assign_2(range, layouter, &cached_points[cache_idx], &P[idx])?;
+	    cached_points.push(new_point.clone());
+	}
+	cached_points_vec.push(cached_points);
+    }
+
+    // initialize at (2^{k + 1} - 1) * A
+    let start_point = sub_unequal::assign_2(range, layouter, &rand_start_vec[k], &rand_start_vec[0])?;
+    let mut curr_point = start_point.clone();
+    
+    // compute \sum_i x_i P_i + (2^{k + 1} - 1) * A
+    for idx in 0..num_windows {	
+	for double_idx in 0..window_bits {
+	    curr_point = point_double_2(range, layouter, &curr_point)?;	   
+	}
+	for base_idx in 0..k {
+	    let add_point = select_from_bits(range, layouter, &cached_points_vec[base_idx],
+					     &rounded_bits_vec[base_idx][rounded_bitlen - window_bits * (idx + 1)..rounded_bitlen - window_bits * idx].to_vec())?;
+	    curr_point = add_unequal::assign_2(range, layouter, &curr_point, &add_point)?;
+	}
+    }
+    curr_point = sub_unequal::assign_2(range, layouter, &curr_point, &start_point)?;
+    
     Ok(curr_point.clone())
 }
 
@@ -507,14 +725,27 @@ impl<F: FieldExt> EccChip<F> {
     }
 
     pub fn scalar_mult(
-        &self,
-        layouter: &mut impl Layouter<F>,
-        P: &EccPoint<F>,
-        x: &AssignedCell<F, F>,
-        b: F,
-        max_bits: usize,
+	&self,
+	layouter: &mut impl Layouter<F>,
+	P: &EccPoint<F>,
+	x: &AssignedCell<F, F>,
+	b: F,
+	max_bits: usize,
+	window_bits: usize,
     ) -> Result<EccPoint<F>, Error> {
-        scalar_multiply(&&self.fp_chip.config.range, layouter, P, x, b, max_bits)
+	scalar_multiply(&&self.fp_chip.config.range, layouter, P, x, b, max_bits, window_bits)
+    }
+
+    pub fn multi_scalar_mult(
+	&self,
+	layouter: &mut impl Layouter<F>,
+	P: &Vec<EccPoint<F>>,
+	x: &Vec<AssignedCell<F, F>>,
+	b: F,
+	max_bits: usize,
+	window_bits: usize,
+    ) -> Result<EccPoint<F>, Error> {
+	multi_scalar_multiply(&&self.fp_chip.config.range, layouter, P, x, b, max_bits, window_bits)
     }
 }
 
@@ -537,6 +768,7 @@ pub(crate) mod tests {
         P: Option<(Fp, Fp)>,
         Q: Option<(Fp, Fp)>,
         x: Option<F>,
+	batch_size: usize,
         _marker: PhantomData<F>,
     }
 
@@ -549,6 +781,7 @@ pub(crate) mod tests {
                 P: None,
                 Q: None,
                 x: None,
+		batch_size: 16,
                 _marker: PhantomData,
             }
         }
@@ -556,7 +789,7 @@ pub(crate) mod tests {
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
             let value = meta.advice_column();
             let constant = meta.fixed_column();
-            EccChip::configure(meta, value, constant, 16, 64, 4)
+            EccChip::configure(meta, value, constant, 22, 66, 4)
         }
 
         fn synthesize(
@@ -580,6 +813,26 @@ pub(crate) mod tests {
                     )
                 },
             )?;
+
+	    let mut P_batch_assigned = Vec::with_capacity(self.batch_size);
+	    let mut x_batch_assigned = Vec::with_capacity(self.batch_size);
+	    for _ in 0..self.batch_size {
+		let assigned = chip.load_private(layouter.namespace(|| "input point P"), self.P)?;
+		P_batch_assigned.push(assigned);
+
+		let xb_assigned = layouter.assign_region(
+                    || "input scalar x",
+                    |mut region| {
+			region.assign_advice(
+                            || "assign x",
+                            config.value,
+                            0,
+                            || self.x.ok_or(Error::Synthesis),
+			)
+                    },
+		)?;
+		x_batch_assigned.push(xb_assigned);
+	    }
 
             /*
             // test add_unequal
@@ -613,19 +866,33 @@ pub(crate) mod tests {
                     F::from(3),
                 )?;
             }
-            */
+	     */
 
-            // test scalar mult
-            {
-                let scalar_mult = chip.scalar_mult(
-                    &mut layouter.namespace(|| "scalar_mult"),
-                    &P_assigned,
-                    &x_assigned,
-                    F::from(3),
-                    12,
-                )?;
-            }
+	    /*
+	    // test scalar mult
+	    {
+		let scalar_mult = chip.scalar_mult(
+		    &mut layouter.namespace(|| "scalar_mult"),
+		    &P_assigned,
+		    &x_assigned,
+		    F::from(3),
+		    254,
+		    4
+		)?;
+	    }
+	     */
 
+	    // test multi scalar mult
+	    {
+		let multi_scalar_mult = chip.multi_scalar_mult(
+		    &mut layouter.namespace(|| "multi_scalar_mult"),
+		    &P_batch_assigned,
+		    &x_batch_assigned,
+		    F::from(3),
+		    254,
+		    4
+		)?;
+	    }	    
             Ok(())
         }
     }
@@ -633,7 +900,7 @@ pub(crate) mod tests {
     use halo2_proofs::pairing::bn256::G1Affine;
     #[test]
     fn test_ecc() {
-        let k = 17;
+        let k = 20;
         let mut rng = rand::thread_rng();
 
         let P = G1Affine::random(&mut rng);
@@ -643,6 +910,7 @@ pub(crate) mod tests {
             P: Some((P.x, P.y)),
             Q: Some((Q.x, Q.y)),
             x: Some(Fn::from(11)),
+	    batch_size: 1,
             _marker: PhantomData,
         };
 
@@ -654,7 +922,7 @@ pub(crate) mod tests {
     #[cfg(feature = "dev-graph")]
     #[test]
     fn plot_ecc() {
-        let k = 15;
+        let k = 21;
         use plotters::prelude::*;
 
         let root = BitMapBackend::new("layout.png", (512, 8192)).into_drawing_area();
@@ -665,6 +933,7 @@ pub(crate) mod tests {
             P: None,
             Q: None,
             x: None,
+	    batch_size: 16,
             _marker: PhantomData,
         };
 

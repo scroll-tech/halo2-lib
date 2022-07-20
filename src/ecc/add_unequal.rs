@@ -243,6 +243,18 @@ pub fn assign_2<F: FieldExt>(
         range.range_check(layouter, limb, n)?;
     }
 
+    // (x_2 - x_1) * lambda - (y_2 - y_1) == 0 (mod p)
+    let lambda_dx = mul_no_carry::assign(&range.qap_config, layouter, &lambda, &dx)?;
+    let lambda_dx_minus_dy = sub_no_carry::assign(&range.qap_config, layouter, &lambda_dx, &dy)?;
+    let lambda_dx_minus_dy_red = mod_reduce::assign(
+	&range.qap_config,
+	layouter,
+	&lambda_dx_minus_dy,
+	k,
+	FP_MODULUS.clone(),
+    )?;
+    check_carry_mod_to_zero::assign(&range, layouter, &lambda_dx_minus_dy_red, &*FP_MODULUS)?;
+
     //  x_3 = lambda^2 - x_1 - x_2 (mod p)
     let lambda_sq = mul_no_carry::assign(&range.qap_config, layouter, &lambda, &lambda)?;
     let lambda_sq_minus_px = sub_no_carry::assign(&range.qap_config, layouter, &lambda_sq, &P.x)?;
