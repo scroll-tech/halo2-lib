@@ -12,6 +12,16 @@ pub enum QuantumCell<'a, F: FieldExt> {
     Constant(F),
 }
 
+impl<F: FieldExt> QuantumCell<'_, F> {
+    pub fn value(&self) -> Option<&F> {
+        match self {
+            Self::Existing(a) => a.value(),
+            Self::Witness(a) => a.as_ref(),
+            Self::Constant(a) => Some(a),
+        }
+    }
+}
+
 // Gate to perform `a + b * c - out = 0`
 // We chose `a + b * c` instead of `a * b + c` to allow "chaining" of gates, i.e., the output of one gate because `a` in the next gate
 #[derive(Clone, Debug)]
@@ -204,49 +214,20 @@ impl<F: FieldExt> Config<F> {
         )
     }
 
-    // Layouter takes in vector `constants` of "constant" values, and a same-length vector `signals` of `AssignedCell` and constrains a witness output to the inner product of `<constants, signals>`
-    pub fn linear(
-        &self,
-        layouter: &mut impl Layouter<F>,
-        constants: &Vec<F>,
-        signals: &Vec<AssignedCell<F, F>>,
-    ) -> Result<AssignedCell<F, F>, Error> {
-        assert_eq!(constants.len(), signals.len());
-        // don't try to call this function with empty inputs!
-        if constants.len() == 0 {
-            return Err(Error::Synthesis);
-        }
-        layouter.assign_region(
-            || "inner product with constants",
-            |mut region| {
-                let mut cells: Vec<QuantumCell<F>> = Vec::with_capacity(3 * constants.len() + 1);
-                cells.push(QuantumCell::Constant(F::from(0)));
-
-                let mut sum = Some(F::zero());
-                let mut offset = 0;
-
-                for (constant, signal) in constants.iter().zip(signals.iter()) {
-                    sum = sum.zip(signal.value()).map(|(sum, c)| sum + *constant * *c);
-
-                    self.q_enable.enable(&mut region, offset)?;
-                    cells.push(QuantumCell::Constant(*constant));
-                    cells.push(QuantumCell::Existing(&signal));
-                    cells.push(QuantumCell::Witness(sum));
-                    offset += 3;
-                }
-                let assigned_cells = self.assign_region(cells, 0, &mut region)?;
-                Ok(assigned_cells.last().unwrap().clone())
-            },
-        )
-    }
-
-    // Layouter takes two vectors of `AssignedCell` and constrains a witness output to the inner product of `<vec_a, vec_b>`
+    // Layouter takes two vectors of `QuantumCell` and constrains a witness output to the inner product of `<vec_a, vec_b>`
     pub fn inner_product(
         &self,
         layouter: &mut impl Layouter<F>,
-        vec_a: &Vec<AssignedCell<F, F>>,
-        vec_b: &Vec<AssignedCell<F, F>>,
-    ) -> Result<AssignedCell<F, F>, Error> {
+        vec_a: &Vec<QuantumCell<F>>,
+        vec_b: &Vec<QuantumCell<F>>,
+    ) -> Result<
+        (
+            Vec<AssignedCell<F, F>>,
+            Vec<AssignedCell<F, F>>,
+            AssignedCell<F, F>,
+        ),
+        Error,
+    > {
         assert_eq!(vec_a.len(), vec_b.len());
         // don't try to call this function with empty inputs!
         if vec_a.len() == 0 {
@@ -267,13 +248,24 @@ impl<F: FieldExt> Config<F> {
                         .map(|((sum, a), b)| sum + *a * *b);
 
                     self.q_enable.enable(&mut region, offset)?;
-                    cells.push(QuantumCell::Existing(&a));
-                    cells.push(QuantumCell::Existing(&b));
+                    cells.push(a.clone());
+                    cells.push(b.clone());
                     cells.push(QuantumCell::Witness(sum));
                     offset += 3;
                 }
                 let assigned_cells = self.assign_region(cells, 0, &mut region)?;
-                Ok(assigned_cells.last().unwrap().clone())
+                let mut a_assigned = Vec::with_capacity(vec_a.len());
+                let mut b_assigned = Vec::with_capacity(vec_a.len());
+                for i in 0..vec_a.len() {
+                    a_assigned.push(assigned_cells[3 * i + 1].clone());
+                    b_assigned.push(assigned_cells[3 * i + 1].clone());
+                }
+
+                Ok((
+                    a_assigned,
+                    b_assigned,
+                    assigned_cells.last().unwrap().clone(),
+                ))
             },
         )
     }
@@ -341,33 +333,37 @@ impl<F: FieldExt> Config<F> {
     // returns
     //   a * sel + b * (1 - sel)
     pub fn select(
-	&self,
-	layouter: &mut impl Layouter<F>,
-	a: &AssignedCell<F, F>,
-	b: &AssignedCell<F, F>,
-	sel: &AssignedCell<F, F>
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &AssignedCell<F, F>,
+        b: &AssignedCell<F, F>,
+        sel: &AssignedCell<F, F>,
     ) -> Result<AssignedCell<F, F>, Error> {
-	layouter.assign_region(
-	    || "sel",
-	    |mut region| {
-		self.q_enable.enable(&mut region, 0)?;
-		self.q_enable.enable(&mut region, 4)?;
-		let cells = vec![
-		    QuantumCell::Witness(a.value().zip(b.value()).map(|(av, bv)| (*av) - (*bv))),
-		    QuantumCell::Constant(F::from(1)),
-		    QuantumCell::Existing(&b),
-		    QuantumCell::Existing(&a),
-		    QuantumCell::Existing(&b),
-		    QuantumCell::Existing(&sel),
-		    QuantumCell::Witness(a.value().zip(b.value()).map(|(av, bv)| (*av) - (*bv))),
-		    QuantumCell::Witness(a.value().zip(b.value()).zip(sel.value())
-					 .map(|((av, bv), sv)| (*av) * (*sv) + (*bv) * (F::from(1) - *sv))),
-		];
-		let assigned_cells = self.assign_region(cells, 0, &mut region)?;
-		region.constrain_equal(assigned_cells[0].cell(), assigned_cells[6].cell())?;
-		Ok(assigned_cells.last().unwrap().clone())
-	    },
-	)
+        layouter.assign_region(
+            || "sel",
+            |mut region| {
+                self.q_enable.enable(&mut region, 0)?;
+                self.q_enable.enable(&mut region, 4)?;
+                let cells = vec![
+                    QuantumCell::Witness(a.value().zip(b.value()).map(|(av, bv)| (*av) - (*bv))),
+                    QuantumCell::Constant(F::from(1)),
+                    QuantumCell::Existing(&b),
+                    QuantumCell::Existing(&a),
+                    QuantumCell::Existing(&b),
+                    QuantumCell::Existing(&sel),
+                    QuantumCell::Witness(a.value().zip(b.value()).map(|(av, bv)| (*av) - (*bv))),
+                    QuantumCell::Witness(
+                        a.value()
+                            .zip(b.value())
+                            .zip(sel.value())
+                            .map(|((av, bv), sv)| (*av) * (*sv) + (*bv) * (F::from(1) - *sv)),
+                    ),
+                ];
+                let assigned_cells = self.assign_region(cells, 0, &mut region)?;
+                region.constrain_equal(assigned_cells[0].cell(), assigned_cells[6].cell())?;
+                Ok(assigned_cells.last().unwrap().clone())
+            },
+        )
     }
 
     // returns: a || (b && c)
