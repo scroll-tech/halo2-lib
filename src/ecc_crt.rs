@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 use halo2_proofs::{
     arithmetic::{Field, FieldExt},
     circuit::*,
@@ -56,7 +57,6 @@ impl<F: FieldExt> EccPoint<F> {
 //  lambda * (x_2 - x_1) = y_2 - y_1
 //  x_3 = lambda^2 - x_1 - x_2 (mod p)
 //  y_3 = lambda (x_1 - x_3) - y_1 mod p
-#[allow(non_snake_case)]
 pub fn point_add_unequal<F: FieldExt>(
     chip: &FpChip<F>,
     layouter: &mut impl Layouter<F>,
@@ -121,7 +121,6 @@ pub fn point_add_unequal<F: FieldExt>(
 //  Given P = (x_1, y_1) and Q = (x_2, y_2), ecc points over the field F_p
 //  Find ecc addition P - Q = (x_3, y_3)
 //  Assumes that P !=Q and Q != (P - Q)
-#[allow(non_snake_case)]
 pub fn point_sub_unequal<F: FieldExt>(
     chip: &FpChip<F>,
     layouter: &mut impl Layouter<F>,
@@ -194,7 +193,6 @@ pub fn point_sub_unequal<F: FieldExt>(
 // we precompute lambda and constrain (2y) * lambda = 3 x^2 (mod p)
 // then we compute x_3 = lambda^2 - 2 x (mod p)
 //                 y_3 = lambda (x - x_3) - y (mod p)
-#[allow(non_snake_case)]
 pub fn point_double<F: FieldExt>(
     chip: &FpChip<F>,
     layouter: &mut impl Layouter<F>,
@@ -298,7 +296,6 @@ pub fn point_double<F: FieldExt>(
     Ok(EccPoint::construct(x_3, y_3))
 }
 
-#[allow(non_snake_case)]
 pub fn select<F: FieldExt>(
     range: &range::RangeConfig<F>,
     layouter: &mut impl Layouter<F>,
@@ -347,7 +344,6 @@ pub fn select_from_bits<F: FieldExt>(
 // assumes:
 //   * 0 < x < scalar field modulus
 //   * P has order given by the scalar field modulus
-#[allow(non_snake_case)]
 pub fn scalar_multiply<F: FieldExt>(
     chip: &FpChip<F>,
     layouter: &mut impl Layouter<F>,
@@ -472,7 +468,6 @@ pub fn scalar_multiply<F: FieldExt>(
     Ok(curr_point.clone())
 }
 
-#[allow(non_snake_case)]
 pub fn multi_scalar_multiply<F: FieldExt>(
     chip: &FpChip<F>,
     layouter: &mut impl Layouter<F>,
@@ -617,7 +612,6 @@ pub struct EccChip<F: FieldExt> {
     fp_chip: FpChip<F>,
 }
 
-#[allow(non_snake_case)]
 impl<F: FieldExt> EccChip<F> {
     pub fn construct(config: FpConfig<F>) -> Self {
         Self {
@@ -716,7 +710,6 @@ impl<F: FieldExt> EccChip<F> {
 }
 
 #[cfg(test)]
-#[allow(non_snake_case)]
 pub(crate) mod tests {
     use std::marker::PhantomData;
 
@@ -740,7 +733,7 @@ pub(crate) mod tests {
 
     impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         type Config = FpConfig<F>;
-        type FloorPlanner = V1;
+        type FloorPlanner = SimpleFloorPlanner;
 
         fn without_witnesses(&self) -> Self {
             Self {
@@ -799,7 +792,6 @@ pub(crate) mod tests {
                 x_batch_assigned.push(xb_assigned);
             }
 
-            /*
             // test add_unequal
             {
                 let sum = chip.add_unequal(
@@ -807,7 +799,7 @@ pub(crate) mod tests {
                     &P_assigned,
                     &Q_assigned,
                 )?;
-            } */
+            }
 
             /*
             // test double
@@ -815,6 +807,7 @@ pub(crate) mod tests {
                 let doub = chip.double(&mut layouter.namespace(|| "double"), &P_assigned)?;
             } */
 
+            /*
             // test scalar mult
             {
                 let scalar_mult = chip.scalar_mult(
@@ -826,6 +819,7 @@ pub(crate) mod tests {
                     4,
                 )?;
             }
+            */
 
             /*
             // test multi scalar mult
@@ -847,7 +841,7 @@ pub(crate) mod tests {
     use halo2_proofs::pairing::bn256::G1Affine;
     #[test]
     fn test_ecc_crt() {
-        let k = 21;
+        let k = 18;
         let mut rng = rand::thread_rng();
 
         let P = G1Affine::random(&mut rng);

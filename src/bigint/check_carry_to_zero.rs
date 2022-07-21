@@ -160,10 +160,10 @@ pub fn truncate<F: FieldExt>(
         carries.push(carry);
     }
 
-    let mut neg_carry_assignments = Vec::with_capacity(k);
-    layouter.assign_region(
+    let neg_carry_assignments = layouter.assign_region(
         || "carry consistency",
         |mut region| {
+            let mut neg_carry_assignments = Vec::with_capacity(k);
             let mut cells = Vec::with_capacity(4 * k);
             for idx in 0..k {
                 range.qap_config.q_enable.enable(&mut region, 4 * idx)?;
@@ -184,7 +184,7 @@ pub fn truncate<F: FieldExt>(
             for idx in 0..k {
                 neg_carry_assignments.push(assigned_cells[4 * idx + 1].clone());
             }
-            Ok(())
+            Ok(neg_carry_assignments)
         },
     )?;
 
@@ -203,7 +203,7 @@ pub fn truncate<F: FieldExt>(
     for i in 0..num_windows {
         let idx = std::cmp::min(window * i + window - 1, k - 1);
         let carry_cell = &neg_carry_assignments[idx];
-        layouter.assign_region(
+        let shift_cell = layouter.assign_region(
             || "shift carries",
             |mut region| {
                 range.qap_config.q_enable.enable(&mut region, 0)?;
@@ -215,10 +215,10 @@ pub fn truncate<F: FieldExt>(
                     Witness(shift_carry_val),
                 ];
                 let assigned_cells = range.qap_config.assign_region(cells, 0, &mut region)?;
-                shifted_carry_assignments.push(assigned_cells.last().unwrap().clone());
-                Ok(())
+                Ok(assigned_cells.last().unwrap().clone())
             },
         )?;
+        shifted_carry_assignments.push(shift_cell);
     }
 
     for shifted_carry in shifted_carry_assignments.iter() {

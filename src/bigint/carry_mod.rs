@@ -331,7 +331,7 @@ pub fn crt<F: FieldExt>(
     let mut check_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(k);
 
     for i in 0..k {
-        layouter.assign_region(
+        let (mod_cell, quot_cell, out_cell, check_cell) = layouter.assign_region(
             || format!("carry_mod_{}", i),
             |mut region| {
                 let mut offset = 0;
@@ -370,13 +370,6 @@ pub fn crt<F: FieldExt>(
                         .qap_config
                         .assign_region(prod_computation, 0, &mut region)?;
 
-                // get new assigned cells and store them
-                // offset at j = i
-                mod_assigned.push(prod_computation_assignments[3 * i + 1].clone());
-
-                // offset at j = 0
-                quot_assigned.push(prod_computation_assignments[2].clone());
-
                 // perform step 2: compute prod - a + out
                 // transpose of:
                 // | prod | -1 | a | prod - a | 1 | out | prod - a + out
@@ -402,12 +395,24 @@ pub fn crt<F: FieldExt>(
                     &mut region,
                 )?;
 
-                out_assigned.push(acells[4].clone());
-                check_assigned.push(acells[5].clone());
-
-                Ok(())
+                Ok((
+                    // new mod_assigned cells is at
+                    // offset at j = i
+                    prod_computation_assignments[3 * i + 1].clone(),
+                    // new quot_assigned is at
+                    // offset at j = 0
+                    prod_computation_assignments[2].clone(),
+                    // out_assigned
+                    acells[4].clone(),
+                    // check_assigned
+                    acells[5].clone(),
+                ))
             },
         )?;
+        mod_assigned.push(mod_cell);
+        quot_assigned.push(quot_cell);
+        out_assigned.push(out_cell);
+        check_assigned.push(check_cell);
     }
 
     let out_max_limb_size = (BigUint::one() << n) - 1usize;

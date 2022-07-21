@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 use std::marker::PhantomData;
 
 use halo2_pairing::ecc_crt::*;
@@ -16,7 +17,6 @@ use halo2_proofs::{
 use std::time::{Duration, Instant};
 
 #[derive(Default)]
-#[allow(non_snake_case)]
 struct MyCircuit<F> {
     P: Option<(Fp, Fp)>,
     Q: Option<(Fp, Fp)>,
@@ -35,7 +35,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
             P: None,
             Q: None,
             x: None,
-            batch_size: 1,
+            batch_size: 4,
             _marker: PhantomData,
         }
     }
@@ -43,8 +43,8 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         let value = meta.advice_column();
         let constant = meta.fixed_column();
+        // EccChip::configure(meta, value, constant, 22, 88, 3)
         EccChip::configure(meta, value, constant, 17, 86, 3)
-        // EccChip::configure(meta, value, constant, 16, 64, 4)
     }
 
     fn synthesize(
@@ -89,14 +89,49 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
             x_batch_assigned.push(xb_assigned);
         }
 
-        let _scalar_mult = chip.scalar_mult(
-            &mut layouter.namespace(|| "scalar_mult"),
-            &P_assigned,
-            &x_assigned,
-            F::from(3),
-            254,
-            4,
-        )?;
+        /*
+        // test add_unequal
+        {
+            let sum = chip.add_unequal(
+                &mut layouter.namespace(|| "add_unequal"),
+                &P_assigned,
+                &Q_assigned,
+            )?;
+        }
+        */
+
+        /*
+        // test double
+        {
+            let doub = chip.double(&mut layouter.namespace(|| "double"), &P_assigned)?;
+        }
+        */
+
+        /*
+        // test scalar mult
+        {
+            let scalar_mult = chip.scalar_mult(
+                &mut layouter.namespace(|| "scalar_mult"),
+                &P_assigned,
+                &x_assigned,
+                F::from(3),
+                254,
+                4,
+            )?;
+        }
+        */
+
+        // test multi scalar mult
+        {
+            let multi_scalar_mult = chip.multi_scalar_mult(
+                &mut layouter.namespace(|| "multi_scalar_mult"),
+                &P_batch_assigned,
+                &x_batch_assigned,
+                F::from(3),
+                254,
+                4,
+            )?;
+        }
 
         Ok(())
     }
@@ -105,7 +140,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
 #[allow(non_snake_case)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("At top of run function");
-    const K: u32 = 20;
+    const K: u32 = 21;
     let params = Params::<G1Affine>::unsafe_setup::<Bn256>(K);
 
     let mut rng = rand::thread_rng();
@@ -119,7 +154,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         P: None,
         Q: None,
         x: None,
-        batch_size: 1,
+        batch_size: 4,
         _marker: PhantomData,
     };
 
@@ -132,7 +167,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         P: Some((P.x, P.y)),
         Q: Some((Q.x, Q.y)),
         x: Some(Fn::from(11)),
-        batch_size: 1,
+        batch_size: 4,
         _marker: PhantomData,
     };
     let duration = start.elapsed();
@@ -144,8 +179,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _proof = transcript.finalize();
 
     println!("Done generating proof");
-    let duration = start.elapsed();
-    println!("Time elapsed in finalizing proof: {:?}", duration);
+    let proof_duration = start.elapsed();
+    let proof_time = proof_duration - duration;
+    println!("Proving time: {:?}", proof_time);
 
     Ok(())
 }
