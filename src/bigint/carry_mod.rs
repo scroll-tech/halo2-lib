@@ -3,6 +3,7 @@ use std::ops::Shl;
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
 use num_bigint::Sign;
 use num_bigint::{BigInt, BigUint};
+use num_traits::ops::overflowing;
 use num_traits::{One, Signed, Zero};
 
 use super::*;
@@ -492,24 +493,12 @@ pub fn crt<F: FieldExt>(
         },
     )?;
 
-    let mut pows = Vec::with_capacity(k);
-    let mut running_pow = F::from(1);
-    for i in 0..k {
-        pows.push(Constant(running_pow));
-        running_pow = running_pow * &limb_base;
-    }
     // Constrain `out_native = sum_i out_assigned[i] * 2^{n*i}` in `F`
-    let (_, _, out_native_consistency) = range.qap_config.inner_product(
-        layouter,
-        &out_assigned.iter().map(|a| Existing(a)).collect(),
-        &pows,
-    )?;
+    let out_native_consistency =
+        OverflowInteger::evaluate(&range.qap_config, layouter, &out_assigned, n)?;
     // Constrain `quot_native = sum_i out_assigned[i] * 2^{n*i}` in `F`
-    let (_, _, quot_native_consistency) = range.qap_config.inner_product(
-        layouter,
-        &quot_assigned.iter().map(|a| Existing(a)).collect(),
-        &pows,
-    )?;
+    let quot_native_consistency =
+        OverflowInteger::evaluate(&range.qap_config, layouter, &quot_assigned, n)?;
     layouter.assign_region(
         || "native consistency equals",
         |mut region| {

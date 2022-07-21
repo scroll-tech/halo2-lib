@@ -132,6 +132,15 @@ impl<F: FieldExt> FpChip<F> {
         sub_no_carry::crt(&self.config.gate, layouter, a, b)
     }
 
+    pub fn scalar_mul_no_carry(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &CRTInteger<F>,
+        b: F,
+    ) -> Result<CRTInteger<F>, Error> {
+        scalar_mul_no_carry::crt(&self.config.gate, layouter, a, b)
+    }
+
     pub fn mul_no_carry(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -141,12 +150,39 @@ impl<F: FieldExt> FpChip<F> {
         mul_no_carry::crt(&self.config.gate, layouter, a, b)
     }
 
+    pub fn check_carry_mod_to_zero(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &CRTInteger<F>,
+    ) -> Result<(), Error> {
+        check_carry_mod_to_zero::crt(&self.config.range, layouter, a, &self.config.p)
+    }
+
     pub fn carry_mod(
         &self,
         layouter: &mut impl Layouter<F>,
         a: &CRTInteger<F>,
     ) -> Result<CRTInteger<F>, Error> {
         carry_mod::crt(&self.config.range, layouter, a, &self.config.p)
+    }
+
+    pub fn range_check(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &CRTInteger<F>,
+    ) -> Result<(), Error> {
+        let n = a.truncation.limb_bits;
+        let k = a.truncation.limbs.len();
+        assert!(a.max_size.bits() as usize <= n * k);
+        let last_limb_bits = a.max_size.bits() as usize - n * (k - 1);
+        // range check limbs of `a` are in [0, 2^n) except last limb should be in [0, 2^last_limb_bits)
+        let mut index: usize = 0;
+        for cell in a.truncation.limbs.iter() {
+            let limb_bits = if index == k - 1 { last_limb_bits } else { n };
+            self.config.range.range_check(layouter, cell, limb_bits)?;
+            index = index + 1;
+        }
+        Ok(())
     }
 
     // F_p functions

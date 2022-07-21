@@ -1,7 +1,12 @@
+use std::io::ErrorKind;
+
+use crate::gates::qap_gate;
+use crate::gates::qap_gate::QuantumCell::{Constant, Existing};
 use crate::utils::*;
 use halo2_proofs::{
     arithmetic::{Field, FieldExt},
     circuit::*,
+    plonk::Error,
 };
 use num_bigint::{BigInt, BigUint};
 use num_traits::Zero;
@@ -49,6 +54,30 @@ impl<F: FieldExt> OverflowInteger<F> {
                 acc.zip(acell.value())
                     .map(|(acc, x)| (acc << self.limb_bits) + fe_to_bigint(x))
             })
+    }
+
+    pub fn evaluate(
+        config: &qap_gate::Config<F>,
+        layouter: &mut impl Layouter<F>,
+        limbs: &Vec<AssignedCell<F, F>>,
+        limb_bits: usize,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        let k = limbs.len();
+        let n = limb_bits;
+        let mut pows = Vec::with_capacity(k);
+        let mut running_pow = F::from(1);
+        let limb_base: F = biguint_to_fe(&(BigUint::from(1u32) << n));
+        for i in 0..k {
+            pows.push(Constant(running_pow));
+            running_pow = running_pow * &limb_base;
+        }
+        // Constrain `out_native = sum_i out_assigned[i] * 2^{n*i}` in `F`
+        let (_, _, native) = config.inner_product(
+            layouter,
+            &limbs.iter().map(|a| Existing(a)).collect(),
+            &pows,
+        )?;
+        Ok(native)
     }
 }
 
