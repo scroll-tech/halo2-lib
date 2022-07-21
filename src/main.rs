@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
-use halo2_pairing::ecc::*;
-use halo2_pairing::fields::fp::FpConfig;
+use halo2_pairing::ecc_crt::*;
+use halo2_pairing::fields::fp_crt::FpConfig;
 use halo2_proofs::circuit::floor_planner::V1;
 use halo2_proofs::pairing::bn256::{Bn256, G1Affine};
 use halo2_proofs::poly::commitment::Params;
@@ -41,7 +41,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         let value = meta.advice_column();
         let constant = meta.fixed_column();
-        EccChip::configure(meta, value, constant, 22, 66, 4)
+        EccChip::configure(meta, value, constant, 17, 86, 3)
         // EccChip::configure(meta, value, constant, 16, 64, 4)
     }
 
@@ -73,7 +73,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
             &x_assigned,
             F::from(3),
             254,
-	    4
+            4,
         )?;
 
         Ok(())
@@ -83,7 +83,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
 #[allow(non_snake_case)]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("At top of run function");
-    const K: u32 = 23;
+    const K: u32 = 20;
     let params = Params::<G1Affine>::unsafe_setup::<Bn256>(K);
 
     let mut rng = rand::thread_rng();

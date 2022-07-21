@@ -71,6 +71,7 @@ impl<F: FieldExt> RangeConfig<F> {
         range_bits: usize,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
         // println!("Calling range_check on {} bits.", range_bits);
+        assert_ne!(range_bits, 0);
         let k = (range_bits + self.lookup_bits - 1) / self.lookup_bits;
         let rem_bits = range_bits % self.lookup_bits;
 
@@ -401,7 +402,7 @@ impl<F: FieldExt> RangeConfig<F> {
                     cells.push(Constant(running_pow));
                     cells.push(Witness(bits[idx]));
                     cells.push(Witness(running_sum));
-                    self.qap_config.q_enable.enable(&mut region, offset - 1);
+                    self.qap_config.q_enable.enable(&mut region, offset - 1)?;
                     offset = offset + 3;
                 }
                 let assigned_cells = self.qap_config.assign_region(cells, 0, &mut region)?;
@@ -419,7 +420,7 @@ impl<F: FieldExt> RangeConfig<F> {
             layouter.assign_region(
                 || "bit check",
                 |mut region| {
-                    self.qap_config.q_enable.enable(&mut region, 0);
+                    self.qap_config.q_enable.enable(&mut region, 0)?;
                     let cells = vec![
                         Constant(F::from(0)),
                         Existing(&bit_cells[idx]),
