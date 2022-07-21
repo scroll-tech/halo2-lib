@@ -78,7 +78,7 @@ impl<F: FieldExt> FpChip<F> {
         let config = &self.config;
 
         let a_vec = decompose_bigint_option(&a, num_limbs, self.config.limb_bits);
-        let (limbs, a_native) = layouter.assign_region(
+        let limbs = layouter.assign_region(
             || "load private",
             |mut region| {
                 let mut limbs = Vec::with_capacity(num_limbs);
@@ -91,16 +91,17 @@ impl<F: FieldExt> FpChip<F> {
                     )?;
                     limbs.push(limb);
                 }
-
-                let a_native = region.assign_advice(
-                    || "native value",
-                    config.value,
-                    num_limbs,
-                    || a.as_ref().map(|a| bigint_to_fe(a)).ok_or(Error::Synthesis),
-                )?;
-                Ok((limbs, a_native))
+                Ok(limbs)
             },
         )?;
+
+        let a_native = OverflowInteger::evaluate(
+            &self.config.range.qap_config,
+            &mut layouter,
+            &limbs,
+            self.config.limb_bits,
+        )?;
+
         Ok(CRTInteger::construct(
             OverflowInteger::construct(
                 limbs,
@@ -175,6 +176,7 @@ impl<F: FieldExt> FpChip<F> {
         let k = a.truncation.limbs.len();
         assert!(a.max_size.bits() as usize <= n * k);
         let last_limb_bits = a.max_size.bits() as usize - n * (k - 1);
+        assert!(last_limb_bits > 0);
         // range check limbs of `a` are in [0, 2^n) except last limb should be in [0, 2^last_limb_bits)
         let mut index: usize = 0;
         for cell in a.truncation.limbs.iter() {

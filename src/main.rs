@@ -21,6 +21,7 @@ struct MyCircuit<F> {
     P: Option<(Fp, Fp)>,
     Q: Option<(Fp, Fp)>,
     x: Option<F>,
+    batch_size: usize,
     _marker: PhantomData<F>,
 }
 
@@ -34,6 +35,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
             P: None,
             Q: None,
             x: None,
+            batch_size: 1,
             _marker: PhantomData,
         }
     }
@@ -67,6 +69,26 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
             },
         )?;
 
+        let mut P_batch_assigned = Vec::with_capacity(self.batch_size);
+        let mut x_batch_assigned = Vec::with_capacity(self.batch_size);
+        for _ in 0..self.batch_size {
+            let assigned = chip.load_private(layouter.namespace(|| "input point P"), self.P)?;
+            P_batch_assigned.push(assigned);
+
+            let xb_assigned = layouter.assign_region(
+                || "input scalar x",
+                |mut region| {
+                    region.assign_advice(
+                        || "assign x",
+                        config.value,
+                        0,
+                        || self.x.ok_or(Error::Synthesis),
+                    )
+                },
+            )?;
+            x_batch_assigned.push(xb_assigned);
+        }
+
         let _scalar_mult = chip.scalar_mult(
             &mut layouter.namespace(|| "scalar_mult"),
             &P_assigned,
@@ -97,6 +119,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         P: None,
         Q: None,
         x: None,
+        batch_size: 1,
         _marker: PhantomData,
     };
 
@@ -109,6 +132,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         P: Some((P.x, P.y)),
         Q: Some((Q.x, Q.y)),
         x: Some(Fn::from(11)),
+        batch_size: 1,
         _marker: PhantomData,
     };
     let duration = start.elapsed();
