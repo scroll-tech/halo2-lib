@@ -387,7 +387,7 @@ impl<F: FieldExt> RangeConfig<F> {
         a: &AssignedCell<F, F>,
         range_bits: usize,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
-        let bits = decompose_option(&a.value().map(|x| *x), range_bits, 1usize);
+        let bits = decompose_biguint_option(&a.value().map(|x| *x), range_bits, 1usize);
         let bit_cells = layouter.assign_region(
             || "range check",
             |mut region| {
@@ -427,7 +427,7 @@ impl<F: FieldExt> RangeConfig<F> {
                         Existing(&bit_cells[idx]),
                         Existing(&bit_cells[idx]),
                     ];
-                    let assigned_cells = self.qap_config.assign_region(cells, 0, &mut region)?;
+                    self.qap_config.assign_region(cells, 0, &mut region)?;
                     Ok(())
                 },
             )?;

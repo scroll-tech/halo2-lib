@@ -419,44 +419,49 @@ impl<F: FieldExt> Config<F> {
     // assume bits has boolean values
     // returns vec[idx] with vec[idx] = 1 if and only if bits == idx as a binary number
     pub fn bits_to_indicator(
-	&self,
-	layouter: &mut impl Layouter<F>,
-	bits: &Vec<AssignedCell<F, F>>,
+        &self,
+        layouter: &mut impl Layouter<F>,
+        bits: &Vec<AssignedCell<F, F>>,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
-	let k = bits.len();
+        let k = bits.len();
 
-	let mut inv_bits = Vec::with_capacity(k);
-	for idx in 0..k {
-	    let inv_bit = layouter.assign_region(
-		|| "inv_bits",
-		|mut region| {
-		    self.q_enable.enable(&mut region, 0)?;
-		    let cells = vec![
-			QuantumCell::Witness(bits[idx].value().map(|x| F::from(1) - x)),
-			QuantumCell::Existing(&bits[idx]),
-			QuantumCell::Constant(F::from(1)),
-			QuantumCell::Constant(F::from(1))];
-		    let assigned_cells = self.assign_region(cells, 0, &mut region)?;
-		    Ok(assigned_cells[0].clone())
-		}
-	    )?;
-	    inv_bits.push(inv_bit.clone());
-	}
+        let mut inv_bits = Vec::with_capacity(k);
+        for idx in 0..k {
+            let inv_bit = layouter.assign_region(
+                || "inv_bits",
+                |mut region| {
+                    self.q_enable.enable(&mut region, 0)?;
+                    let cells = vec![
+                        QuantumCell::Witness(bits[idx].value().map(|x| F::from(1) - x)),
+                        QuantumCell::Existing(&bits[idx]),
+                        QuantumCell::Constant(F::from(1)),
+                        QuantumCell::Constant(F::from(1)),
+                    ];
+                    let assigned_cells = self.assign_region(cells, 0, &mut region)?;
+                    Ok(assigned_cells[0].clone())
+                },
+            )?;
+            inv_bits.push(inv_bit.clone());
+        }
 
-	let mut indicator = Vec::with_capacity(2 * (1 << k) - 2);
-	let mut offset = 0;
-	indicator.push(inv_bits[0].clone());
-	indicator.push(bits[0].clone());
-	for idx in 1..k {
-	    for old_idx in 0..(1 << idx) {
-		let inv_prod = self.mul(layouter, &indicator[offset + old_idx], &inv_bits[idx])?;
-		indicator.push(inv_prod);
+        let mut indicator = Vec::with_capacity(2 * (1 << k) - 2);
+        let mut offset = 0;
+        indicator.push(inv_bits[k - 1].clone());
+        indicator.push(bits[k - 1].clone());
+        for idx in 1..k {
+            for old_idx in 0..(1 << idx) {
+                let inv_prod = self.mul(
+                    layouter,
+                    &indicator[offset + old_idx],
+                    &inv_bits[k - 1 - idx],
+                )?;
+                indicator.push(inv_prod);
 
-		let prod = self.mul(layouter, &indicator[offset + old_idx], &bits[idx])?;
-		indicator.push(prod);
-	    }
-	    offset = offset + (1 << idx);
-	}
-	Ok(indicator[2 * (1 << k) - 2 - (1 << k)..].to_vec())
+                let prod = self.mul(layouter, &indicator[offset + old_idx], &bits[k - 1 - idx])?;
+                indicator.push(prod);
+            }
+            offset = offset + (1 << idx);
+        }
+        Ok(indicator[2 * (1 << k) - 2 - (1 << k)..].to_vec())
     }
 }

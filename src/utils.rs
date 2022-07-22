@@ -137,9 +137,23 @@ pub fn decompose_bigint_option<F: FieldExt>(
                     })
                 })
                 .collect();
-            assert_eq!(e, big_uint::zero());
+            // assert_eq!(e, big_uint::zero());
             limbs
         }
+        None => vec![None; number_of_limbs],
+    }
+}
+
+pub fn decompose_biguint_option<F: FieldExt>(
+    value: &Option<F>,
+    number_of_limbs: usize,
+    bit_len: usize,
+) -> Vec<Option<F>> {
+    match value.as_ref() {
+        Some(v) => decompose_biguint(&fe_to_biguint(v), number_of_limbs, bit_len)
+            .iter()
+            .map(|&x| Some(x))
+            .collect(),
         None => vec![None; number_of_limbs],
     }
 }

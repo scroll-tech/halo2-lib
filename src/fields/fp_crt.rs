@@ -177,6 +177,11 @@ impl<F: FieldExt> FpChip<F> {
         assert!(a.max_size.bits() as usize <= n * k);
         let last_limb_bits = a.max_size.bits() as usize - n * (k - 1);
         assert!(last_limb_bits > 0);
+
+        if a.value != None {
+            assert!(a.value.clone().unwrap().bits() <= a.max_size.bits());
+        }
+
         // range check limbs of `a` are in [0, 2^n) except last limb should be in [0, 2^last_limb_bits)
         let mut index: usize = 0;
         for cell in a.truncation.limbs.iter() {

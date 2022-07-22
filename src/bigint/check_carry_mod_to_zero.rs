@@ -206,8 +206,8 @@ pub fn crt<F: FieldExt>(
     let k = a.truncation.limbs.len();
     let trunc_len = n * k;
 
-    // in order for CRT method to work, we need `abs(out + modulus * quotient - a) < 2^{trunc_len - 1} * native_modulus::<F>`
-    // this is ensured if `0 <= out < 2^{n*k}` and
+    // in order for CRT method to work, we need `abs(modulus * quotient - a) < 2^{trunc_len - 1} * native_modulus::<F>`
+    // this is ensured if
     // `modulus * quotient` < 2^{trunc_len - 1} * native_modulus::<F> - a.max_size
     let quot_max_bits = ((BigUint::one().shl(trunc_len - 1) * native_modulus::<F>() - &a.max_size)
         / modulus)
@@ -227,7 +227,7 @@ pub fn crt<F: FieldExt>(
         let (out_val, quot_val) = get_carry_witness(a_big, modulus);
         assert_eq!(out_val, BigUint::zero());
 
-        assert!(quot_val < (BigInt::one() << quot_max_bits));
+        assert!((quot_val.bits() as usize) < quot_max_bits);
         (
             Some(quot_val.clone()),
             // decompose_bigint_option just throws away signed limbs in index >= k
