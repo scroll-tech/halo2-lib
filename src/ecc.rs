@@ -966,8 +966,8 @@ pub(crate) mod tests {
 
     use halo2_proofs::pairing::bn256::G1Affine;
     #[test]
-    fn test_ecc() {
-        let k = 21;
+    fn test_ecc_std() {
+        let k = 23;
         let mut rng = rand::thread_rng();
 
         let P = G1Affine::random(&mut rng);
@@ -977,7 +977,7 @@ pub(crate) mod tests {
             P: Some((P.x, P.y)),
             Q: Some((Q.x, Q.y)),
             x: Some(Fn::from(11)),
-            batch_size: 1,
+            batch_size: 4,
             _marker: PhantomData,
         };
 

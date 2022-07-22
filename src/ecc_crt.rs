@@ -2,7 +2,8 @@
 use halo2_proofs::{
     arithmetic::{Field, FieldExt},
     circuit::*,
-    pairing::bn256::{Fq as Fp, G1Affine},
+    pairing::bn256::{Fq as Fp, G1Affine, Fr},
+    pairing::group::ff::PrimeField,
     plonk::{Advice, Column, ConstraintSystem, Error, Fixed},
 };
 use num_bigint::{BigInt, BigUint};
@@ -20,7 +21,7 @@ use crate::utils::{
 use crate::{
     bigint::{
         add_no_carry, inner_product, mul_no_carry, scalar_mul_no_carry, select, sub_no_carry,
-        CRTInteger, OverflowInteger,
+        CRTInteger, FixedCRTInteger, OverflowInteger,
     },
     utils::fe_to_biguint,
 };
@@ -42,6 +43,39 @@ pub struct EccPoint<F: FieldExt> {
 impl<F: FieldExt> EccPoint<F> {
     pub fn construct(x: CRTInteger<F>, y: CRTInteger<F>) -> Self {
         Self { x, y }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct FixedEccPoint<F: FieldExt> {
+    x: FixedCRTInteger<F>,
+    y: FixedCRTInteger<F>,
+}
+
+impl<F: FieldExt> FixedEccPoint<F> {
+    pub fn construct(x: FixedCRTInteger<F>, y: FixedCRTInteger<F>) -> Self {
+        Self { x, y }
+    }
+
+    pub fn from_g1(
+	P: &G1Affine,
+	num_limbs: usize,
+	limb_bits: usize,
+    ) -> Self {
+	let x_pt = FixedCRTInteger::from_native(fp_to_bigint(&P.x), num_limbs, limb_bits);
+	let y_pt = FixedCRTInteger::from_native(fp_to_bigint(&P.y), num_limbs, limb_bits);
+	Self { x: x_pt, y: y_pt }	
+    }
+    
+    pub fn assign(
+	&self,
+	chip: &FpChip<F>,
+	layouter: &mut impl Layouter<F>,
+    ) -> Result<EccPoint<F>, Error> {
+	let assigned_x = self.x.assign(&chip.config.range.qap_config, layouter)?;
+	let assigned_y = self.y.assign(&chip.config.range.qap_config, layouter)?;
+	let point = EccPoint::construct(assigned_x, assigned_y);
+	Ok(point)
     }
 }
 
@@ -466,6 +500,136 @@ pub fn scalar_multiply<F: FieldExt>(
     Ok(curr_point.clone())
 }
 
+// computes x * P on y^2 = x^3 + b
+// assumes:
+//   * 0 < x < scalar field modulus
+//   * P has order given by the scalar field modulus
+pub fn fixed_base_scalar_multiply<F: FieldExt>(
+    chip: &FpChip<F>,
+    layouter: &mut impl Layouter<F>,
+    P: &FixedEccPoint<F>,
+    x: &AssignedCell<F, F>,
+    b: F,
+    max_bits: usize,
+    window_bits: usize,
+) -> Result<EccPoint<F>, Error> {
+    let num_windows = (max_bits + window_bits - 1) / window_bits;
+    let rounded_bitlen = num_windows * window_bits;
+
+    // cached_points[i][j] holds j * 2^(i * w) for j in {0, ..., 2^w - 1}
+    let mut cached_points = Vec::with_capacity(num_windows);
+    let mut base_pt = G1Affine::default();
+    base_pt.x = bigint_to_fp(P.x.value.clone());
+    base_pt.y = bigint_to_fp(P.y.value.clone());
+    let base_pt_assigned = P.assign(&chip, layouter)?;
+    let mut increment = base_pt;    
+    for i in 0..num_windows {
+	let mut cache_vec = Vec::with_capacity(1usize << window_bits);
+	let mut curr = increment;
+
+	let increment_fixed = FixedEccPoint::from_g1(&increment, P.x.truncation.limbs.len(), P.x.truncation.limb_bits);
+	let increment_assigned = increment_fixed.assign(&chip, layouter)?;
+	cache_vec.push(increment_assigned.clone());
+	cache_vec.push(increment_assigned.clone());
+	for j in 2..(1usize << window_bits) {
+	    curr = G1Affine::from(curr + increment);	    
+	    let curr_fixed = FixedEccPoint::from_g1(&curr, P.x.truncation.limbs.len(), P.x.truncation.limb_bits);
+	    let curr_assigned = curr_fixed.assign(&chip, layouter)?;
+	    cache_vec.push(curr_assigned);
+	}
+	increment = G1Affine::from(curr + increment);
+	cached_points.push(cache_vec);
+    }    
+
+    let mut rounded_bits = Vec::with_capacity(rounded_bitlen);
+    let bits = chip.config.range.num_to_bits(layouter, x, max_bits)?;
+    for cell in bits.iter() {
+        rounded_bits.push(cell.clone());
+    }
+    let zero_cell = layouter.assign_region(
+        || "constant 0",
+        |mut region| {
+            let zero_cells = vec![Constant(F::from(0))];
+            let zero_cells_assigned =
+                chip.config
+                    .range
+                    .qap_config
+                    .assign_region(zero_cells, 0, &mut region)?;
+            Ok(zero_cells_assigned[0].clone())
+        },
+    )?;
+    for idx in 0..(rounded_bitlen - max_bits) {
+        rounded_bits.push(zero_cell.clone());
+    }
+
+    // is_started[idx] holds whether there is a 1 in bits with index at least (rounded_bitlen - idx)
+    let mut is_started = Vec::with_capacity(rounded_bitlen);
+    is_started.push(zero_cell.clone());
+    for idx in 1..rounded_bitlen {
+        let or = chip.config.range.qap_config.or(
+            layouter,
+            &is_started[idx - 1],
+            &rounded_bits[rounded_bitlen - idx],
+        )?;
+        is_started.push(or.clone());
+    }
+
+    // is_zero_window[idx] is 0/1 depending on whether bits [rounded_bitlen - window_bits * (idx + 1), rounded_bitlen - window_bits * idx) are all 0
+    let mut is_zero_window = Vec::with_capacity(num_windows);
+    let mut ones_vec = Vec::with_capacity(window_bits);
+    for idx in 0..window_bits {
+        ones_vec.push(Constant(F::from(1)));
+    }
+    for idx in 0..num_windows {
+        let temp_bits = rounded_bits
+            [rounded_bitlen - window_bits * (idx + 1)..rounded_bitlen - window_bits * idx]
+            .iter()
+            .map(|x| Existing(&x))
+            .collect();
+        let bit_sum = chip
+            .config
+            .range
+            .qap_config
+            .inner_product(layouter, &ones_vec, &temp_bits)?;
+        let is_zero = chip.config.range.is_zero(layouter, &bit_sum.2)?;
+        is_zero_window.push(is_zero.clone());
+    }
+    
+    // if all the starting window bits are 0, get start_point = P
+    let mut curr_point = select_from_bits(
+        &chip.config.range,
+        layouter,
+        &cached_points[num_windows - 1],
+        &rounded_bits[rounded_bitlen - window_bits..rounded_bitlen].to_vec(),
+    )?;
+    for idx in 1..num_windows {
+        let add_point = select_from_bits(
+            &chip.config.range,
+            layouter,
+            &cached_points[num_windows - idx - 1],
+            &rounded_bits
+                [rounded_bitlen - window_bits * (idx + 1)..rounded_bitlen - window_bits * idx]
+                .to_vec(),
+        )?;
+        let sum = point_add_unequal(chip, layouter, &curr_point, &add_point)?;
+	let zero_sum = select(
+	    &chip.config.range,
+	    layouter,
+	    &curr_point,
+	    &sum,
+	    &is_zero_window[idx]
+	)?;
+        curr_point = select(
+            &chip.config.range,
+            layouter,
+            &zero_sum,
+            &add_point,
+            &is_started[window_bits * idx],
+        )?;
+    }
+    Ok(curr_point.clone())
+}
+
 pub fn multi_scalar_multiply<F: FieldExt>(
     chip: &FpChip<F>,
     layouter: &mut impl Layouter<F>,
@@ -548,7 +712,7 @@ pub fn multi_scalar_multiply<F: FieldExt>(
         EccPoint::construct(x_overflow, y_overflow)
     };
 
-    // contains random base points [A, ..., 2^k * A, ..., 2^{w + k} * A]
+    // contains random base points [A, ..., 2^{w + k - 1} * A]
     let mut rand_start_vec = Vec::with_capacity(k);
     rand_start_vec.push(base.clone());
     for idx in 1..(k + window_bits) {
@@ -556,7 +720,7 @@ pub fn multi_scalar_multiply<F: FieldExt>(
         rand_start_vec.push(base_mult.clone());
     }
 
-    // contains (1 - 2^w) * [A, ..., 2^k * A]
+    // contains (1 - 2^w) * [A, ..., 2^(k - 1) * A]
     let mut neg_mult_rand_start_vec = Vec::with_capacity(k);
     for idx in 0..k {
         let diff = point_sub_unequal(
@@ -705,6 +869,18 @@ impl<F: FieldExt> EccChip<F> {
     ) -> Result<EccPoint<F>, Error> {
         multi_scalar_multiply(&self.fp_chip, layouter, P, x, b, max_bits, window_bits)
     }
+
+    pub fn fixed_base_scalar_mult(
+	&self,
+	layouter: &mut impl Layouter<F>,
+        P: &FixedEccPoint<F>,
+        x: &AssignedCell<F, F>,
+        b: F,
+        max_bits: usize,
+        window_bits: usize,
+    ) -> Result<EccPoint<F>, Error> {
+        fixed_base_scalar_multiply(&self.fp_chip, layouter, P, x, b, max_bits, window_bits)
+    }	
 }
 
 #[cfg(test)]
@@ -715,6 +891,7 @@ pub(crate) mod tests {
     use halo2_proofs::arithmetic::BaseExt;
     use halo2_proofs::circuit::floor_planner::V1;
     use halo2_proofs::pairing::group::ff::PrimeField;
+    use halo2_proofs::circuit::floor_planner::*;
     use halo2_proofs::pairing::group::Group;
     use halo2_proofs::{
         arithmetic::FieldExt, circuit::*, dev::MockProver, pairing::bn256::Fq as Fp,
@@ -745,7 +922,7 @@ pub(crate) mod tests {
                 P: None,
                 Q: None,
                 P_batch: vec![None; batch_size],
-                x: None,
+                x: Some(F::from(23232)),
                 x_batch: vec![None; batch_size],
                 batch_size,
                 _marker: PhantomData,
@@ -755,7 +932,7 @@ pub(crate) mod tests {
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
             let value = meta.advice_column();
             let constant = meta.fixed_column();
-            EccChip::configure(meta, value, constant, 17, 88, 3)
+            EccChip::configure(meta, value, constant, 22, 88, 3)
         }
 
         fn synthesize(
@@ -774,6 +951,13 @@ pub(crate) mod tests {
                 layouter.namespace(|| "input point Q"),
                 self.Q.map(|P| (P.x, P.y)),
             )?;
+
+	    let mut pt = G1Affine::default();	    
+	    let mut P_fixed = FixedEccPoint::from_g1(&pt, 3, 88);
+	    if let Some(P_point) = &self.P {
+		pt = P_point.clone();
+		P_fixed = FixedEccPoint::from_g1(&P_point, 3, 88);
+	    }
             let x_assigned = layouter.assign_region(
                 || "input scalar x",
                 |mut region| {
@@ -838,7 +1022,7 @@ pub(crate) mod tests {
                     assert_eq!(sum.y.value.unwrap(), fp_to_bigint(&actual_sum.y));
                 }
             }
-            */
+	     */
 
             /*
             // test double
@@ -852,7 +1036,7 @@ pub(crate) mod tests {
             }
             */
 
-            /*
+	    /*
             // test scalar mult
             {
                 let scalar_mult = chip.scalar_mult(
@@ -880,6 +1064,30 @@ pub(crate) mod tests {
             }
             */
 
+            // test fixed base scalar mult
+            {
+                let fixed_base_scalar_mult = chip.fixed_base_scalar_mult(
+                    &mut layouter.namespace(|| "fixed_base_scalar_mult"),
+                    &P_fixed,
+                    &x_assigned,
+                    F::from(3),
+                    254,
+                    4,
+                )?;
+		if let Some(xv) = &self.x {
+		    println!("answer {:?}", G1Affine::from(pt * Fr::from_repr(
+			(*xv).to_repr().as_ref()[..32].try_into().unwrap()).unwrap()));
+		    let xx = fixed_base_scalar_mult.x.value;
+		    let yy = fixed_base_scalar_mult.y.value;
+		    if let Some(xxx) = &xx {
+			if let Some(yyy) = &yy {
+			    println!("result {:#01x} {:#01x}", xxx, yyy);
+			}
+		    }
+		}
+            }
+
+	    /*
             // test multi scalar mult
             {
                 let multi_scalar_mult = chip.multi_scalar_mult(
@@ -915,7 +1123,7 @@ pub(crate) mod tests {
                     assert_eq!(fp_to_bigint(&actual.y), multi_scalar_mult.y.value.unwrap());
                 }
             }
-
+	     */
             Ok(())
         }
     }
@@ -923,7 +1131,7 @@ pub(crate) mod tests {
     use halo2_proofs::pairing::bn256::{G1Affine, G1};
     #[test]
     fn test_ecc_crt() {
-        let k = 20;
+        let k = 23;
         let mut rng = rand::thread_rng();
 
         let batch_size = BATCH_SIZE;
@@ -956,10 +1164,10 @@ pub(crate) mod tests {
     #[cfg(feature = "dev-graph")]
     #[test]
     fn plot_ecc_crt() {
-        let k = 20;
+        let k = 9;
         use plotters::prelude::*;
 
-        let root = BitMapBackend::new("layout.png", (512, 8192)).into_drawing_area();
+        let root = BitMapBackend::new("layout.png", (512, 16384)).into_drawing_area();
         root.fill(&WHITE).unwrap();
         let root = root.titled("Ecc Layout", ("sans-serif", 60)).unwrap();
 

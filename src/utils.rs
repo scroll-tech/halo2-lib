@@ -10,6 +10,7 @@ use std::ops::Neg;
 use std::ops::Shl;
 
 use halo2_proofs::pairing::bn256::Fq as Fp;
+use halo2_proofs::pairing::bn256::Fr;
 
 // utils modified from halo2wrong
 
@@ -189,6 +190,7 @@ pub fn bigint_to_fp(x: big_int) -> Fp {
     }
     Fp::from_bytes(&x_bytes).unwrap()
 }
+
 
 pub fn fp_to_bigint(x: &Fp) -> big_int {
     big_int::from_bytes_le(Sign::Plus, &x.to_bytes())
