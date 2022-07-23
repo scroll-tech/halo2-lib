@@ -62,14 +62,8 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         let chip = EccChip::construct(config.clone());
         chip.load_lookup_table(&mut layouter)?;
 
-        let P_assigned = chip.load_private(
-            layouter.namespace(|| "input point P"),
-            self.P.map(|P| (P.x, P.y)),
-        )?;
-        let Q_assigned = chip.load_private(
-            layouter.namespace(|| "input point Q"),
-            self.Q.map(|P| (P.x, P.y)),
-        )?;
+        let P_assigned = chip.load_private(&mut layouter, self.P.map(|P| (P.x, P.y)))?;
+        let Q_assigned = chip.load_private(&mut layouter, self.Q.map(|P| (P.x, P.y)))?;
         let x_assigned = layouter.assign_region(
             || "input scalar x",
             |mut region| {
@@ -84,10 +78,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         let mut P_batch_assigned = Vec::with_capacity(self.batch_size);
         let mut x_batch_assigned = Vec::with_capacity(self.batch_size);
         for i in 0..self.batch_size {
-            let assigned = chip.load_private(
-                layouter.namespace(|| format!("input point P_{}", i)),
-                self.P_batch[i].map(|P| (P.x, P.y)),
-            )?;
+            let assigned = chip.load_private(&mut layouter, self.P_batch[i].map(|P| (P.x, P.y)))?;
             P_batch_assigned.push(assigned);
 
             let xb_assigned = layouter.assign_region(

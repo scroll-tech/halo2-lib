@@ -1,4 +1,4 @@
-use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
+use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::{Column,Advice,Fixed,TableColumn,Selector,Error, ConstraintSystem}, pairing::bn256::Fq};
 use num_bigint::{BigInt, BigUint};
 
 use crate::bigint::*;
@@ -6,6 +6,8 @@ use crate::gates::qap_gate;
 use crate::gates::range;
 use crate::utils::bigint_to_fe;
 use crate::utils::decompose_bigint_option;
+
+use super::FieldChip;
 
 #[derive(Clone, Debug)]
 pub struct FpConfig<F: FieldExt> {
@@ -65,23 +67,28 @@ impl<F: FieldExt> FpChip<F> {
         }
     }
 
-    pub fn load_lookup_table(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
+    fn load_lookup_table(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         self.config.range.load_lookup_table(layouter)
     }
+}
 
-    pub fn load_private(
+impl<F: FieldExt> FieldChip<F> for FpChip<F> {
+    type WitnessType = Option<BigInt>;
+    type FieldPoint = CRTInteger<F>;
+    type FieldType = ;
+
+    fn load_private(
         &self,
-        mut layouter: impl Layouter<F>,
+        layouter: &mut impl Layouter<F>,
         a: Option<BigInt>,
-        num_limbs: usize,
     ) -> Result<CRTInteger<F>, Error> {
         let config = &self.config;
 
-        let a_vec = decompose_bigint_option(&a, num_limbs, self.config.limb_bits);
+        let a_vec = decompose_bigint_option(&a, self.config.num_limbs, self.config.limb_bits);
         let limbs = layouter.assign_region(
             || "load private",
             |mut region| {
-                let mut limbs = Vec::with_capacity(num_limbs);
+                let mut limbs = Vec::with_capacity(self.config.num_limbs);
                 for (i, a_val) in a_vec.iter().enumerate() {
                     let limb = region.assign_advice(
                         || "private value",
@@ -97,7 +104,7 @@ impl<F: FieldExt> FpChip<F> {
 
         let a_native = OverflowInteger::evaluate(
             &self.config.range.qap_config,
-            &mut layouter,
+            layouter,
             &limbs,
             self.config.limb_bits,
         )?;
@@ -115,7 +122,7 @@ impl<F: FieldExt> FpChip<F> {
     }
 
     // signed overflow BigInt functions
-    pub fn add_no_carry(
+    fn add_no_carry(
         &self,
         layouter: &mut impl Layouter<F>,
         a: &CRTInteger<F>,
@@ -124,7 +131,7 @@ impl<F: FieldExt> FpChip<F> {
         add_no_carry::crt(&self.config.gate, layouter, a, b)
     }
 
-    pub fn sub_no_carry(
+    fn sub_no_carry(
         &self,
         layouter: &mut impl Layouter<F>,
         a: &CRTInteger<F>,
@@ -133,7 +140,7 @@ impl<F: FieldExt> FpChip<F> {
         sub_no_carry::crt(&self.config.gate, layouter, a, b)
     }
 
-    pub fn scalar_mul_no_carry(
+    fn scalar_mul_no_carry(
         &self,
         layouter: &mut impl Layouter<F>,
         a: &CRTInteger<F>,
@@ -142,7 +149,7 @@ impl<F: FieldExt> FpChip<F> {
         scalar_mul_no_carry::crt(&self.config.gate, layouter, a, b)
     }
 
-    pub fn mul_no_carry(
+    fn mul_no_carry(
         &self,
         layouter: &mut impl Layouter<F>,
         a: &CRTInteger<F>,
@@ -151,7 +158,7 @@ impl<F: FieldExt> FpChip<F> {
         mul_no_carry::crt(&self.config.gate, layouter, a, b)
     }
 
-    pub fn check_carry_mod_to_zero(
+    fn check_carry_mod_to_zero(
         &self,
         layouter: &mut impl Layouter<F>,
         a: &CRTInteger<F>,
@@ -159,7 +166,7 @@ impl<F: FieldExt> FpChip<F> {
         check_carry_mod_to_zero::crt(&self.config.range, layouter, a, &self.config.p)
     }
 
-    pub fn carry_mod(
+    fn carry_mod(
         &self,
         layouter: &mut impl Layouter<F>,
         a: &CRTInteger<F>,
@@ -167,11 +174,7 @@ impl<F: FieldExt> FpChip<F> {
         carry_mod::crt(&self.config.range, layouter, a, &self.config.p)
     }
 
-    pub fn range_check(
-        &self,
-        layouter: &mut impl Layouter<F>,
-        a: &CRTInteger<F>,
-    ) -> Result<(), Error> {
+    fn range_check(&self, layouter: &mut impl Layouter<F>, a: &CRTInteger<F>) -> Result<(), Error> {
         let n = a.truncation.limb_bits;
         let k = a.truncation.limbs.len();
         assert!(a.max_size.bits() as usize <= n * k);
@@ -192,20 +195,26 @@ impl<F: FieldExt> FpChip<F> {
         Ok(())
     }
 
-    // F_p functions
-    pub fn mul(
-        &self,
-        layouter: &mut impl Layouter<F>,
-        a: &CRTInteger<F>,
-        b: &CRTInteger<F>,
-    ) -> Result<CRTInteger<F>, Error> {
-        let k_a = a.truncation.limbs.len();
-        let k_b = b.truncation.limbs.len();
-        assert_eq!(k_a, k_b);
-        let k = k_a;
+    fn divide(
+            &self,
+            layouter: &mut impl Layouter<F>,
+            a: &CRTInteger<F>,
+            b: &CRTInteger<F>,
+        ) -> Result<CRTInteger<F>, Error> {
+        
+    let quot_witness = if let (Some(a_val), Some(b_val)) = (a.value, b.value) {
+        let x_1 = bigint_to_fp(x_1);
+        let y_1 = bigint_to_fp(y_1);
+        let x_2 = bigint_to_fp(x_2);
+        let y_2 = bigint_to_fp(y_2);
 
-        let no_carry = self.mul_no_carry(layouter, a, b)?;
-        self.carry_mod(layouter, &no_carry)
+        assert_ne!(x_1, x_2);
+        let lambda = (y_2 - y_1) * ((x_2 - x_1).invert().unwrap());
+        Some(fp_to_bigint(&lambda))
+    } else {
+        None
+    };
+
     }
 }
 
@@ -254,16 +263,10 @@ pub(crate) mod tests {
             let chip = FpChip::construct(config);
             chip.load_lookup_table(&mut layouter)?;
 
-            let a_assigned = chip.load_private(
-                layouter.namespace(|| "input a"),
-                self.a.as_ref().map(|x| fp_to_bigint(x)),
-                chip.config.num_limbs,
-            )?;
-            let b_assigned = chip.load_private(
-                layouter.namespace(|| "input b"),
-                self.b.as_ref().map(|x| fp_to_bigint(x)),
-                chip.config.num_limbs,
-            )?;
+            let a_assigned =
+                chip.load_private(&mut layouter, self.a.as_ref().map(|x| fp_to_bigint(x)))?;
+            let b_assigned =
+                chip.load_private(&mut layouter, self.b.as_ref().map(|x| fp_to_bigint(x)))?;
 
             // test fp_multiply
             {

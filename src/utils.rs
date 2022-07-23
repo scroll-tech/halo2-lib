@@ -171,31 +171,6 @@ pub fn compose(input: Vec<big_uint>, bit_len: usize) -> big_uint {
         .fold(big_uint::zero(), |acc, val| (acc << bit_len) + val)
 }
 
-pub fn bigint_to_fp(x: big_int) -> Fp {
-    let p: big_int = big_int::from_str_radix(
-        "21888242871839275222246405745257275088696311157297823662689037894645226208583",
-        10,
-    )
-    .unwrap();
-    let mut x = x % &p;
-    if x < big_int::zero() {
-        x += &p;
-    }
-    let mut x_bytes = [0u8; 32];
-    let x_bytes_vec = x.to_bytes_le().1;
-    for i in 0..32 {
-        if i < x_bytes_vec.len() {
-            x_bytes[i] = x_bytes_vec[i];
-        }
-    }
-    Fp::from_bytes(&x_bytes).unwrap()
-}
-
-
-pub fn fp_to_bigint(x: &Fp) -> big_int {
-    big_int::from_bytes_le(Sign::Plus, &x.to_bytes())
-}
-
 #[cfg(test)]
 #[test]
 fn test_signed_roundtrip() {
