@@ -6,6 +6,7 @@ use halo2_proofs::{
 };
 
 pub mod fp2;
+pub mod fp12;
 pub mod fp_crt;
 // pub mod fp_crt_vec;
 

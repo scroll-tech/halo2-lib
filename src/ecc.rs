@@ -1,4 +1,7 @@
 #![allow(non_snake_case)]
+
+use std::marker::PhantomData;
+
 use halo2_proofs::{
     arithmetic::{Field, FieldExt},
     circuit::*,
@@ -161,7 +164,7 @@ pub fn ecc_sub_unequal<F: FieldExt, FC: FieldChip<F>>(
 // we precompute lambda and constrain (2y) * lambda = 3 x^2 (mod p)
 // then we compute x_3 = lambda^2 - 2 x (mod p)
 //                 y_3 = lambda (x - x_3) - y (mod p)
-pub fn point_double<F: FieldExt, FC: FieldChip<F>>(
+pub fn ecc_double<F: FieldExt, FC: FieldChip<F>>(
     chip: &FC,
     layouter: &mut impl Layouter<F>,
     P: &EccPoint<F, FC>,
@@ -312,7 +315,7 @@ pub fn scalar_multiply<F: FieldExt, FC: FieldChip<F> + Selectable<F>>(
     cached_points.push(P.clone());
     for idx in 2..cache_size {
         if idx == 2 {
-            let double = point_double(chip, layouter, &P /*, b*/)?;
+            let double = ecc_double(chip, layouter, &P /*, b*/)?;
             cached_points.push(double.clone());
         } else {
             let new_point = ecc_add_unequal(chip, layouter, &cached_points[idx - 1], &P)?;
@@ -332,7 +335,7 @@ pub fn scalar_multiply<F: FieldExt, FC: FieldChip<F> + Selectable<F>>(
     for idx in 1..num_windows {
         let mut mult_point = curr_point.clone();
         for double_idx in 0..window_bits {
-            mult_point = point_double(chip, layouter, &mult_point)?;
+            mult_point = ecc_double(chip, layouter, &mult_point)?;
         }
         let add_point = select_from_bits(
             chip,
@@ -575,7 +578,7 @@ pub fn multi_scalar_multiply<F: FieldExt, FC: FieldChip<F> + Selectable<F>>(
     let mut rand_start_vec = Vec::with_capacity(k);
     rand_start_vec.push(base.clone());
     for idx in 1..(k + window_bits) {
-        let base_mult = point_double(chip, layouter, &rand_start_vec[idx - 1])?;
+        let base_mult = ecc_double(chip, layouter, &rand_start_vec[idx - 1])?;
         rand_start_vec.push(base_mult.clone());
     }
 
@@ -610,7 +613,7 @@ pub fn multi_scalar_multiply<F: FieldExt, FC: FieldChip<F> + Selectable<F>>(
     // compute \sum_i x_i P_i + (2^{k + 1} - 1) * A
     for idx in 0..num_windows {
         for double_idx in 0..window_bits {
-            curr_point = point_double(chip, layouter, &curr_point)?;
+            curr_point = ecc_double(chip, layouter, &curr_point)?;
         }
         for base_idx in 0..k {
             let add_point = select_from_bits(
@@ -631,6 +634,7 @@ pub fn multi_scalar_multiply<F: FieldExt, FC: FieldChip<F> + Selectable<F>>(
 
 pub struct EccChip<F: FieldExt, FC: FieldChip<F>> {
     field_chip: FC,
+    _marker:PhantomData<F>
 }
 
 impl<F: FieldExt, FC: FieldChip<F>> EccChip<F, FC> {
@@ -665,9 +669,9 @@ impl<F: FieldExt, FC: FieldChip<F>> EccChip<F, FC> {
         &self,
         layouter: &mut impl Layouter<F>,
         point: Option<(Fp, Fp)>,
-    ) -> Result<EccPoint<F>, Error> {
+    ) -> Result<EccPoint<F, FC>, Error> {
         let (x, y) = if let Some((x, y)) = point {
-            (Some(fp_to_bigint(&x)), Some(fp_to_bigint(&y)))
+            (Some(fe_to_bigint(&x)), Some(fe_to_bigint(&y)))
         } else {
             (None, None)
         };
@@ -681,41 +685,41 @@ impl<F: FieldExt, FC: FieldChip<F>> EccChip<F, FC> {
     pub fn add_unequal(
         &self,
         layouter: &mut impl Layouter<F>,
-        P: &EccPoint<F>,
-        Q: &EccPoint<F>,
-    ) -> Result<EccPoint<F>, Error> {
-        point_add_unequal(&self.fp_chip, layouter, P, Q)
+        P: &EccPoint<F, FC>,
+        Q: &EccPoint<F, FC>,
+    ) -> Result<EccPoint<F, FC>, Error> {
+        ecc_add_unequal(&self.fp_chip, layouter, P, Q)
     }
 
     pub fn double(
         &self,
         layouter: &mut impl Layouter<F>,
-        P: &EccPoint<F>,
-    ) -> Result<EccPoint<F>, Error> {
-        point_double(&self.fp_chip, layouter, P)
+        P: &EccPoint<F, FC>,
+    ) -> Result<EccPoint<F, FC>, Error> {
+        ecc_double(&self.fp_chip, layouter, P)
     }
 
     pub fn scalar_mult(
         &self,
         layouter: &mut impl Layouter<F>,
-        P: &EccPoint<F>,
+        P: &EccPoint<F, FC>,
         x: &AssignedCell<F, F>,
         b: F,
         max_bits: usize,
         window_bits: usize,
-    ) -> Result<EccPoint<F>, Error> {
+    ) -> Result<EccPoint<F, FC>, Error> {
         scalar_multiply(&self.fp_chip, layouter, P, x, b, max_bits, window_bits)
     }
 
     pub fn multi_scalar_mult(
         &self,
         layouter: &mut impl Layouter<F>,
-        P: &Vec<EccPoint<F>>,
+        P: &Vec<EccPoint<F, FC>>,
         x: &Vec<AssignedCell<F, F>>,
         b: F,
         max_bits: usize,
         window_bits: usize,
-    ) -> Result<EccPoint<F>, Error> {
+    ) -> Result<EccPoint<F, FC>, Error> {
         multi_scalar_multiply(&self.fp_chip, layouter, P, x, b, max_bits, window_bits)
     }
 
@@ -727,7 +731,7 @@ impl<F: FieldExt, FC: FieldChip<F>> EccChip<F, FC> {
         b: F,
         max_bits: usize,
         window_bits: usize,
-    ) -> Result<EccPoint<F>, Error> {
+    ) -> Result<EccPoint<F, FC>, Error> {
         fixed_base_scalar_multiply(&self.fp_chip, layouter, P, x, b, max_bits, window_bits)
     }
 }
