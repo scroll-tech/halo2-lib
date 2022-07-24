@@ -10,8 +10,11 @@ use num_bigint::{BigInt, BigUint};
 use num_traits::{One, Zero};
 use rand_core::OsRng;
 
-use crate::fields::fp_crt::{FpChip, FpConfig};
 use crate::fields::FieldChip;
+use crate::fields::{
+    fp_crt::{FpChip, FpConfig},
+    Selectable,
+};
 use crate::gates::qap_gate::QuantumCell;
 use crate::gates::qap_gate::QuantumCell::*;
 use crate::gates::{qap_gate, range};
@@ -35,14 +38,15 @@ lazy_static! {
     static ref FP_MODULUS: BigUint = native_modulus::<Fp>();
 }
 
+// EccPoint and EccChip take in a generic `FieldChip` to implement generic elliptic curve operations on arbitrary field extensions (provided chip exists) for short Weierstrass curves (currently further assuming a4 = 0 for optimization purposes)
 #[derive(Clone, Debug)]
-pub struct EccPoint<F: FieldExt> {
-    pub x: CRTInteger<F>,
-    pub y: CRTInteger<F>,
+pub struct EccPoint<F: FieldExt, FC: FieldChip<F>> {
+    pub x: FC::FieldPoint,
+    pub y: FC::FieldPoint,
 }
 
-impl<F: FieldExt> EccPoint<F> {
-    pub fn construct(x: CRTInteger<F>, y: CRTInteger<F>) -> Self {
+impl<F: FieldExt, FC: FieldChip<F>> EccPoint<F, FC> {
+    pub fn construct(x: FC::FieldPoint, y: FC::FieldPoint) -> Self {
         Self { x, y }
     }
 }
@@ -59,8 +63,8 @@ impl<F: FieldExt> FixedEccPoint<F> {
     }
 
     pub fn from_g1(P: &G1Affine, num_limbs: usize, limb_bits: usize) -> Self {
-        let x_pt = FixedCRTInteger::from_native(fp_to_bigint(&P.x), num_limbs, limb_bits);
-        let y_pt = FixedCRTInteger::from_native(fp_to_bigint(&P.y), num_limbs, limb_bits);
+        let x_pt = FixedCRTInteger::from_native(fe_to_bigint(&P.x), num_limbs, limb_bits);
+        let y_pt = FixedCRTInteger::from_native(fe_to_bigint(&P.y), num_limbs, limb_bits);
         Self { x: x_pt, y: y_pt }
     }
 
@@ -68,7 +72,7 @@ impl<F: FieldExt> FixedEccPoint<F> {
         &self,
         chip: &FpChip<F>,
         layouter: &mut impl Layouter<F>,
-    ) -> Result<EccPoint<F>, Error> {
+    ) -> Result<EccPoint<F, FpChip<F>>, Error> {
         let assigned_x = self.x.assign(&chip.config.range.qap_config, layouter)?;
         let assigned_y = self.y.assign(&chip.config.range.qap_config, layouter)?;
         let point = EccPoint::construct(assigned_x, assigned_y);
@@ -85,50 +89,15 @@ impl<F: FieldExt> FixedEccPoint<F> {
 //  lambda * (x_2 - x_1) = y_2 - y_1
 //  x_3 = lambda^2 - x_1 - x_2 (mod p)
 //  y_3 = lambda (x_1 - x_3) - y_1 mod p
-pub fn point_add_unequal<F: FieldExt>(
-    chip: &FpChip<F>,
+pub fn ecc_add_unequal<F: FieldExt, FC: FieldChip<F>>(
+    chip: &FC,
     layouter: &mut impl Layouter<F>,
-    P: &EccPoint<F>,
-    Q: &EccPoint<F>,
-) -> Result<EccPoint<F>, Error> {
-    let k = P.x.truncation.limbs.len();
-    let n = P.x.truncation.limb_bits;
-    assert!(k > 0);
-    assert_eq!(k, P.y.truncation.limbs.len());
-    assert_eq!(k, Q.x.truncation.limbs.len());
-    assert_eq!(k, Q.y.truncation.limbs.len());
-    assert_eq!(n, P.y.truncation.limb_bits);
-    assert_eq!(n, Q.x.truncation.limb_bits);
-    assert_eq!(n, Q.y.truncation.limb_bits);
-
-    let x_1 = P.x.value.clone();
-    let y_1 = P.y.value.clone();
-    let x_2 = Q.x.value.clone();
-    let y_2 = Q.y.value.clone();
-
-    let lambda = if let (Some(x_1), Some(y_1), Some(x_2), Some(y_2)) = (x_1, y_1, x_2, y_2) {
-        let x_1 = bigint_to_fp(x_1);
-        let y_1 = bigint_to_fp(y_1);
-        let x_2 = bigint_to_fp(x_2);
-        let y_2 = bigint_to_fp(y_2);
-
-        assert_ne!(x_1, x_2);
-        let lambda = (y_2 - y_1) * ((x_2 - x_1).invert().unwrap());
-        Some(fp_to_bigint(&lambda))
-    } else {
-        None
-    };
-
+    P: &EccPoint<F, FC>,
+    Q: &EccPoint<F, FC>,
+) -> Result<EccPoint<F, FC>, Error> {
     let dx = chip.sub_no_carry(layouter, &Q.x, &P.x)?;
     let dy = chip.sub_no_carry(layouter, &Q.y, &P.y)?;
-
-    let lambda = chip.load_private(layouter, lambda)?;
-    chip.range_check(layouter, &lambda)?;
-
-    // constrain lambda * dx - dy
-    let lambda_dx = chip.mul_no_carry(layouter, &lambda, &dx)?;
-    let lambda_constraint = chip.sub_no_carry(layouter, &lambda_dx, &dy)?;
-    chip.check_carry_mod_to_zero(layouter, &lambda_constraint)?;
+    let lambda = chip.divide(layouter, &dy, &dx)?;
 
     //  x_3 = lambda^2 - x_1 - x_2 (mod p)
     let lambda_sq = chip.mul_no_carry(layouter, &lambda, &lambda)?;
@@ -147,49 +116,20 @@ pub fn point_add_unequal<F: FieldExt>(
 
 // Implements:
 //  Given P = (x_1, y_1) and Q = (x_2, y_2), ecc points over the field F_p
-//  Find ecc addition P - Q = (x_3, y_3)
+//  Find ecc subtraction P - Q = (x_3, y_3)
 //  Assumes that P !=Q and Q != (P - Q)
-pub fn point_sub_unequal<F: FieldExt>(
-    chip: &FpChip<F>,
+pub fn ecc_sub_unequal<F: FieldExt, FC: FieldChip<F>>(
+    chip: &FC,
     layouter: &mut impl Layouter<F>,
-    P: &EccPoint<F>,
-    Q: &EccPoint<F>,
-) -> Result<EccPoint<F>, Error> {
-    let k = P.x.truncation.limbs.len();
-    let n = P.x.truncation.limb_bits;
-    assert!(k > 0);
-    assert_eq!(k, P.y.truncation.limbs.len());
-    assert_eq!(k, Q.x.truncation.limbs.len());
-    assert_eq!(k, Q.y.truncation.limbs.len());
-    assert_eq!(n, P.y.truncation.limb_bits);
-    assert_eq!(n, Q.x.truncation.limb_bits);
-    assert_eq!(n, Q.y.truncation.limb_bits);
-
-    let x_1 = P.x.value.clone();
-    let y_1 = P.y.value.clone();
-    let x_2 = Q.x.value.clone();
-    let y_2 = Q.y.value.clone();
-
-    let lambda = if let (Some(x_1), Some(y_1), Some(x_2), Some(y_2)) = (x_1, y_1, x_2, y_2) {
-        let x_1 = bigint_to_fp(x_1);
-        let y_1 = bigint_to_fp(y_1);
-        let x_2 = bigint_to_fp(x_2);
-        let y_2 = bigint_to_fp(y_2);
-
-        assert_ne!(x_1, x_2);
-        let lambda = (-y_2 - y_1) * (x_2 - x_1).invert().unwrap();
-        Some(fp_to_bigint(&lambda))
-    } else {
-        None
-    };
-
+    P: &EccPoint<F, FC>,
+    Q: &EccPoint<F, FC>,
+) -> Result<EccPoint<F, FC>, Error> {
     let dx = chip.sub_no_carry(layouter, &Q.x, &P.x)?;
     let dy = chip.add_no_carry(layouter, &Q.y, &P.y)?;
 
-    let lambda = chip.load_private(layouter, lambda)?;
-    chip.range_check(layouter, &lambda)?;
+    let lambda = chip.neg_divide(layouter, &dy, &dx)?;
 
-    // (x_2 - x_1) * lambda + y_2 + y_1 (mod p)
+    // (x_2 - x_1) * lambda + y_2 + y_1 = 0 (mod p)
     let lambda_dx = chip.mul_no_carry(layouter, &lambda, &dx)?;
     let lambda_dx_plus_dy = chip.add_no_carry(layouter, &lambda_dx, &dy)?;
     chip.check_carry_mod_to_zero(layouter, &lambda_dx_plus_dy)?;
@@ -221,93 +161,16 @@ pub fn point_sub_unequal<F: FieldExt>(
 // we precompute lambda and constrain (2y) * lambda = 3 x^2 (mod p)
 // then we compute x_3 = lambda^2 - 2 x (mod p)
 //                 y_3 = lambda (x - x_3) - y (mod p)
-pub fn point_double<F: FieldExt>(
-    chip: &FpChip<F>,
+pub fn point_double<F: FieldExt, FC: FieldChip<F>>(
+    chip: &FC,
     layouter: &mut impl Layouter<F>,
-    P: &EccPoint<F>,
-) -> Result<EccPoint<F>, Error> {
-    let k = P.x.truncation.limbs.len();
-    let n = P.x.truncation.limb_bits;
-    assert!(k > 0);
-    assert_eq!(k, P.y.truncation.limbs.len());
-    assert_eq!(n, P.y.truncation.limb_bits);
-
-    let x = P.x.value.clone();
-    let y = P.y.value.clone();
-    let lambda = if let (Some(x), Some(y)) = (x, y) {
-        assert_ne!(y, BigInt::zero());
-        let x = bigint_to_fp(x);
-        let y = bigint_to_fp(y);
-        let lambda = Fp::from(3) * x * x * (Fp::from(2) * y).invert().unwrap();
-        Some(fp_to_bigint(&lambda))
-    } else {
-        None
-    };
-
-    let lambda_limbs = decompose_bigint_option::<F>(&lambda, k, n);
-    // assign lambda and compute 2 * lambda simultaneously
-    let (lambda_trunc, two_lambda_trunc) = layouter.assign_region(
-        || "2 * lambda",
-        |mut region| {
-            let mut offset = 0;
-            let mut lambda_cells = Vec::with_capacity(k);
-            let mut two_lambda_limbs = Vec::with_capacity(k);
-            for limb in lambda_limbs.iter() {
-                let cells = chip.config.range.qap_config.assign_region(
-                    vec![
-                        Constant(F::from(0)),
-                        Constant(F::from(2)),
-                        Witness(limb.clone()),
-                        Witness(limb.map(|a| F::from(2) * a)),
-                    ],
-                    offset,
-                    &mut region,
-                )?;
-                lambda_cells.push(cells[2].clone());
-                two_lambda_limbs.push(cells[3].clone());
-                offset = offset + 4;
-            }
-            Ok((
-                OverflowInteger::construct(lambda_cells, BigUint::from(1u64) << n, n),
-                OverflowInteger::construct(two_lambda_limbs, BigUint::from(1u64) << (n + 1), n),
-            ))
-        },
-    )?;
-    let lambda_native = OverflowInteger::evaluate(
-        &chip.config.range.qap_config,
-        layouter,
-        &lambda_trunc.limbs,
-        n,
-    )?;
-    let lambda = CRTInteger::construct(
-        lambda_trunc,
-        lambda_native,
-        lambda.clone(),
-        BigUint::from(1u64) << chip.config.p.bits(),
-    );
-    let two_lambda_native =
-        chip.config
-            .range
-            .qap_config
-            .mul_constant(layouter, &lambda.native, F::from(2))?;
-    let two_lambda = CRTInteger::construct(
-        two_lambda_trunc,
-        two_lambda_native,
-        lambda.value.as_ref().map(|a| BigInt::from(2u64) * a),
-        BigUint::from(2u64) << chip.config.p.bits(),
-    );
-
-    // range check lambda
-    chip.range_check(layouter, &lambda)?;
-
-    // constrain lambda by 2 y * lambda - 3 x^2 = 0 mod p
-    let two_y_lambda = chip.mul_no_carry(layouter, &two_lambda, &P.y)?;
+    P: &EccPoint<F, FC>,
+) -> Result<EccPoint<F, FC>, Error> {
+    // removed optimization that computes `2 * lambda` while assigning witness to `lambda` simultaneously, in favor of readability. The difference is just copying `lambda` once
+    let two_y = chip.scalar_mul_no_carry(layouter, &P.y, F::from(2))?;
     let three_x = chip.scalar_mul_no_carry(layouter, &P.x, F::from(3))?;
     let three_x_sq = chip.mul_no_carry(layouter, &three_x, &P.x)?;
-
-    // 2 y * lambda - 3 x^2
-    let lambda_constraint = chip.sub_no_carry(layouter, &two_y_lambda, &three_x_sq)?;
-    chip.check_carry_mod_to_zero(layouter, &lambda_constraint)?;
+    let lambda = chip.divide(layouter, &three_x_sq, &two_y)?;
 
     // x_3 = lambda^2 - 2 x % p
     let lambda_sq = chip.mul_no_carry(layouter, &lambda, &lambda)?;
@@ -324,63 +187,64 @@ pub fn point_double<F: FieldExt>(
     Ok(EccPoint::construct(x_3, y_3))
 }
 
-pub fn select<F: FieldExt>(
-    range: &range::RangeConfig<F>,
+pub fn select<F: FieldExt, FC: FieldChip<F> + Selectable<F>>(
+    chip: &FC,
     layouter: &mut impl Layouter<F>,
-    P: &EccPoint<F>,
-    Q: &EccPoint<F>,
+    P: &EccPoint<F, FC>,
+    Q: &EccPoint<F, FC>,
     sel: &AssignedCell<F, F>,
-) -> Result<EccPoint<F>, Error> {
-    let Rx = select::crt(&range.qap_config, layouter, &P.x, &Q.x, sel)?;
-    let Ry = select::crt(&range.qap_config, layouter, &P.y, &Q.y, sel)?;
-    Ok(EccPoint::<F>::construct(Rx, Ry))
+) -> Result<EccPoint<F, FC>, Error> {
+    let Rx = chip.select(layouter, &P.x, &Q.x, sel)?;
+    let Ry = chip.select(layouter, &P.y, &Q.y, sel)?;
+    Ok(EccPoint::construct(Rx, Ry))
 }
 
 // takes the dot product of points with sel, where each is intepreted as
 // a _vector_
-pub fn inner_product<F: FieldExt>(
-    range: &range::RangeConfig<F>,
+pub fn inner_product<F: FieldExt, FC: FieldChip<F> + Selectable<F>>(
+    chip: &FC,
     layouter: &mut impl Layouter<F>,
-    points: &Vec<EccPoint<F>>,
+    points: &Vec<EccPoint<F, FC>>,
     coeffs: &Vec<AssignedCell<F, F>>,
-) -> Result<EccPoint<F>, Error> {
+) -> Result<EccPoint<F, FC>, Error> {
     let length = coeffs.len();
     assert_eq!(length, points.len());
 
     let x_coords = points.iter().map(|P| P.x.clone()).collect();
     let y_coords = points.iter().map(|P| P.y.clone()).collect();
-    let Rx = inner_product::crt(&range.qap_config, layouter, &x_coords, coeffs)?;
-    let Ry = inner_product::crt(&range.qap_config, layouter, &y_coords, coeffs)?;
-    Ok(EccPoint::<F>::construct(Rx, Ry))
+    let Rx = chip.inner_product(layouter, &x_coords, coeffs)?;
+    let Ry = chip.inner_product(layouter, &y_coords, coeffs)?;
+    Ok(EccPoint::construct(Rx, Ry))
 }
 
 // sel is little-endian binary
-pub fn select_from_bits<F: FieldExt>(
+pub fn select_from_bits<F: FieldExt, FC: FieldChip<F> + Selectable<F>>(
+    chip: &FC,
     range: &range::RangeConfig<F>,
     layouter: &mut impl Layouter<F>,
-    points: &Vec<EccPoint<F>>,
+    points: &Vec<EccPoint<F, FC>>,
     sel: &Vec<AssignedCell<F, F>>,
-) -> Result<EccPoint<F>, Error> {
+) -> Result<EccPoint<F, FC>, Error> {
     let w = sel.len();
     let num_points = points.len();
     assert_eq!(1 << w, num_points);
     let coeffs = range.qap_config.bits_to_indicator(layouter, sel)?;
-    inner_product(range, layouter, points, &coeffs)
+    inner_product(chip, layouter, points, &coeffs)
 }
 
 // computes x * P on y^2 = x^3 + b
 // assumes:
 //   * 0 < x < scalar field modulus
 //   * P has order given by the scalar field modulus
-pub fn scalar_multiply<F: FieldExt>(
+pub fn scalar_multiply<F: FieldExt, FC: FieldChip<F> + Selectable<F>>(
     chip: &FpChip<F>,
     layouter: &mut impl Layouter<F>,
-    P: &EccPoint<F>,
+    P: &EccPoint<F, FC>,
     x: &AssignedCell<F, F>,
     b: F,
     max_bits: usize,
     window_bits: usize,
-) -> Result<EccPoint<F>, Error> {
+) -> Result<EccPoint<F, FC>, Error> {
     let num_windows = (max_bits + window_bits - 1) / window_bits;
     let rounded_bitlen = num_windows * window_bits;
 
@@ -451,13 +315,14 @@ pub fn scalar_multiply<F: FieldExt>(
             let double = point_double(chip, layouter, &P /*, b*/)?;
             cached_points.push(double.clone());
         } else {
-            let new_point = point_add_unequal(chip, layouter, &cached_points[idx - 1], &P)?;
+            let new_point = ecc_add_unequal(chip, layouter, &cached_points[idx - 1], &P)?;
             cached_points.push(new_point.clone());
         }
     }
 
     // if all the starting window bits are 0, get start_point = P
     let mut curr_point = select_from_bits(
+        chip,
         &chip.config.range,
         layouter,
         &cached_points,
@@ -470,6 +335,7 @@ pub fn scalar_multiply<F: FieldExt>(
             mult_point = point_double(chip, layouter, &mult_point)?;
         }
         let add_point = select_from_bits(
+            chip,
             &chip.config.range,
             layouter,
             &cached_points,
@@ -477,7 +343,7 @@ pub fn scalar_multiply<F: FieldExt>(
                 [rounded_bitlen - window_bits * (idx + 1)..rounded_bitlen - window_bits * idx]
                 .to_vec(),
         )?;
-        let mult_and_add = point_add_unequal(chip, layouter, &mult_point, &add_point)?;
+        let mult_and_add = ecc_add_unequal(chip, layouter, &mult_point, &add_point)?;
         let is_started_point = select(
             &chip.config.range,
             layouter,
@@ -509,15 +375,15 @@ pub fn fixed_base_scalar_multiply<F: FieldExt>(
     b: F,
     max_bits: usize,
     window_bits: usize,
-) -> Result<EccPoint<F>, Error> {
+) -> Result<EccPoint<F, FpChip<F>>, Error> {
     let num_windows = (max_bits + window_bits - 1) / window_bits;
     let rounded_bitlen = num_windows * window_bits;
 
     // cached_points[i][j] holds j * 2^(i * w) for j in {0, ..., 2^w - 1}
     let mut cached_points = Vec::with_capacity(num_windows);
     let mut base_pt = G1Affine::default();
-    base_pt.x = bigint_to_fp(P.x.value.clone());
-    base_pt.y = bigint_to_fp(P.y.value.clone());
+    base_pt.x = bigint_to_fe(&P.x.value);
+    base_pt.y = bigint_to_fe(&P.y.value);
     let base_pt_assigned = P.assign(&chip, layouter)?;
     let mut increment = base_pt;
     for i in 0..num_windows {
@@ -599,21 +465,21 @@ pub fn fixed_base_scalar_multiply<F: FieldExt>(
 
     // if all the starting window bits are 0, get start_point = P
     let mut curr_point = select_from_bits(
+        chip,
         &chip.config.range,
         layouter,
         &cached_points[num_windows - 1],
         &rounded_bits[rounded_bitlen - window_bits..rounded_bitlen].to_vec(),
     )?;
     for idx in 1..num_windows {
-        let add_point = select_from_bits(
-            &chip.config.range,
+        let add_point = chip.select_from_bits(
             layouter,
             &cached_points[num_windows - idx - 1],
             &rounded_bits
                 [rounded_bitlen - window_bits * (idx + 1)..rounded_bitlen - window_bits * idx]
                 .to_vec(),
         )?;
-        let sum = point_add_unequal(chip, layouter, &curr_point, &add_point)?;
+        let sum = ecc_add_unequal(chip, layouter, &curr_point, &add_point)?;
         let zero_sum = select(
             &chip.config.range,
             layouter,
@@ -632,15 +498,15 @@ pub fn fixed_base_scalar_multiply<F: FieldExt>(
     Ok(curr_point.clone())
 }
 
-pub fn multi_scalar_multiply<F: FieldExt>(
+pub fn multi_scalar_multiply<F: FieldExt, FC: FieldChip<F> + Selectable<F>>(
     chip: &FpChip<F>,
     layouter: &mut impl Layouter<F>,
-    P: &Vec<EccPoint<F>>,
+    P: &Vec<EccPoint<F, FC>>,
     x: &Vec<AssignedCell<F, F>>,
     b: F,
     max_bits: usize,
     window_bits: usize,
-) -> Result<EccPoint<F>, Error> {
+) -> Result<EccPoint<F, FC>, Error> {
     let k = P.len();
     assert_eq!(k, x.len());
     let num_windows = (max_bits + window_bits - 1) / window_bits;
@@ -716,7 +582,7 @@ pub fn multi_scalar_multiply<F: FieldExt>(
     // contains (1 - 2^w) * [A, ..., 2^(k - 1) * A]
     let mut neg_mult_rand_start_vec = Vec::with_capacity(k);
     for idx in 0..k {
-        let diff = point_sub_unequal(
+        let diff = ecc_sub_unequal(
             chip,
             layouter,
             &rand_start_vec[idx],
@@ -731,14 +597,14 @@ pub fn multi_scalar_multiply<F: FieldExt>(
         let mut cached_points = Vec::with_capacity(cache_size);
         cached_points.push(neg_mult_rand_start_vec[idx].clone());
         for cache_idx in 0..(cache_size - 1) {
-            let new_point = point_add_unequal(chip, layouter, &cached_points[cache_idx], &P[idx])?;
+            let new_point = ecc_add_unequal(chip, layouter, &cached_points[cache_idx], &P[idx])?;
             cached_points.push(new_point.clone());
         }
         cached_points_vec.push(cached_points);
     }
 
     // initialize at (2^{k + 1} - 1) * A
-    let start_point = point_sub_unequal(chip, layouter, &rand_start_vec[k], &rand_start_vec[0])?;
+    let start_point = ecc_sub_unequal(chip, layouter, &rand_start_vec[k], &rand_start_vec[0])?;
     let mut curr_point = start_point.clone();
 
     // compute \sum_i x_i P_i + (2^{k + 1} - 1) * A
@@ -755,23 +621,21 @@ pub fn multi_scalar_multiply<F: FieldExt>(
                     [rounded_bitlen - window_bits * (idx + 1)..rounded_bitlen - window_bits * idx]
                     .to_vec(),
             )?;
-            curr_point = point_add_unequal(chip, layouter, &curr_point, &add_point)?;
+            curr_point = ecc_add_unequal(chip, layouter, &curr_point, &add_point)?;
         }
     }
-    curr_point = point_sub_unequal(chip, layouter, &curr_point, &start_point)?;
+    curr_point = ecc_sub_unequal(chip, layouter, &curr_point, &start_point)?;
 
     Ok(curr_point.clone())
 }
 
-pub struct EccChip<F: FieldExt> {
-    fp_chip: FpChip<F>,
+pub struct EccChip<F: FieldExt, FC: FieldChip<F>> {
+    field_chip: FC,
 }
 
-impl<F: FieldExt> EccChip<F> {
-    pub fn construct(config: FpConfig<F>) -> Self {
-        Self {
-            fp_chip: FpChip::construct(config),
-        }
+impl<F: FieldExt, FC: FieldChip<F>> EccChip<F, FC> {
+    pub fn construct(field_chip: FC) -> Self {
+        Self { field_chip }
     }
 
     pub fn configure(

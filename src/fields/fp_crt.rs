@@ -1,13 +1,19 @@
-use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::{Column,Advice,Fixed,TableColumn,Selector,Error, ConstraintSystem}, pairing::bn256::Fq};
+use halo2_proofs::{
+    arithmetic::{Field, FieldExt},
+    circuit::{AssignedCell, Layouter},
+    pairing::bn256::Fq,
+    plonk::{Advice, Column, ConstraintSystem, Error, Fixed, Selector, TableColumn},
+};
 use num_bigint::{BigInt, BigUint};
 
-use crate::bigint::*;
+use super::{FieldChip, Selectable};
+use crate::bigint::{
+    add_no_carry, carry_mod, check_carry_mod_to_zero, inner_product, mul_no_carry,
+    scalar_mul_no_carry, select, sub_no_carry, CRTInteger, OverflowInteger,
+};
 use crate::gates::qap_gate;
 use crate::gates::range;
-use crate::utils::bigint_to_fe;
-use crate::utils::decompose_bigint_option;
-
-use super::FieldChip;
+use crate::utils::{bigint_to_fe, decompose_bigint_option, fe_to_biguint};
 
 #[derive(Clone, Debug)]
 pub struct FpConfig<F: FieldExt> {
@@ -75,7 +81,15 @@ impl<F: FieldExt> FpChip<F> {
 impl<F: FieldExt> FieldChip<F> for FpChip<F> {
     type WitnessType = Option<BigInt>;
     type FieldPoint = CRTInteger<F>;
-    type FieldType = ;
+    type FieldType = Fq;
+
+    fn get_assigned_value(x: &CRTInteger<F>) -> Option<Self::FieldType> {
+        x.value.map(|x| bigint_to_fe::<Fq>(&x))
+    }
+
+    fn fe_to_witness(x: &Option<Fq>) -> Option<BigInt> {
+        x.map(|x| BigInt::from(fe_to_biguint(&x)))
+    }
 
     fn load_private(
         &self,
@@ -194,27 +208,28 @@ impl<F: FieldExt> FieldChip<F> for FpChip<F> {
         }
         Ok(())
     }
+}
 
-    fn divide(
-            &self,
-            layouter: &mut impl Layouter<F>,
-            a: &CRTInteger<F>,
-            b: &CRTInteger<F>,
-        ) -> Result<CRTInteger<F>, Error> {
-        
-    let quot_witness = if let (Some(a_val), Some(b_val)) = (a.value, b.value) {
-        let x_1 = bigint_to_fp(x_1);
-        let y_1 = bigint_to_fp(y_1);
-        let x_2 = bigint_to_fp(x_2);
-        let y_2 = bigint_to_fp(y_2);
+impl<F: FieldExt> Selectable<F> for FpChip<F> {
+    type Point = CRTInteger<F>;
 
-        assert_ne!(x_1, x_2);
-        let lambda = (y_2 - y_1) * ((x_2 - x_1).invert().unwrap());
-        Some(fp_to_bigint(&lambda))
-    } else {
-        None
-    };
+    fn select(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &CRTInteger<F>,
+        b: &CRTInteger<F>,
+        sel: &AssignedCell<F, F>,
+    ) -> Result<CRTInteger<F>, Error> {
+        select::crt(&self.config.range.qap_config, layouter, a, b, sel)
+    }
 
+    fn inner_product(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &Vec<CRTInteger<F>>,
+        coeffs: &Vec<AssignedCell<F, F>>,
+    ) -> Result<CRTInteger<F>, Error> {
+        inner_product::crt(&self.config.range.qap_config, layouter, a, coeffs)
     }
 }
 
@@ -231,7 +246,8 @@ pub(crate) mod tests {
     use num_traits::One;
 
     use crate::fields::fp_crt::{FpChip, FpConfig};
-    use crate::utils::{fp_to_bigint, modulus as native_modulus};
+    use crate::fields::FieldChip;
+    use crate::utils::{fe_to_bigint, modulus};
     use num_bigint::{BigInt, BigUint};
 
     #[derive(Default)]
@@ -252,7 +268,7 @@ pub(crate) mod tests {
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
             let value = meta.advice_column();
             let constant = meta.fixed_column();
-            FpChip::configure(meta, value, constant, 17, 68, 4, native_modulus::<Fp>())
+            FpChip::configure(meta, value, constant, 17, 68, 4, modulus::<Fp>())
         }
 
         fn synthesize(
@@ -264,9 +280,9 @@ pub(crate) mod tests {
             chip.load_lookup_table(&mut layouter)?;
 
             let a_assigned =
-                chip.load_private(&mut layouter, self.a.as_ref().map(|x| fp_to_bigint(x)))?;
+                chip.load_private(&mut layouter, self.a.as_ref().map(|x| fe_to_bigint(x)))?;
             let b_assigned =
-                chip.load_private(&mut layouter, self.b.as_ref().map(|x| fp_to_bigint(x)))?;
+                chip.load_private(&mut layouter, self.b.as_ref().map(|x| fe_to_bigint(x)))?;
 
             // test fp_multiply
             {

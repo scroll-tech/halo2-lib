@@ -1,4 +1,4 @@
-use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::Error};
+use halo2_proofs::{arithmetic::FieldExt, circuit::Layouter, plonk::Error};
 use num_bigint::{BigInt, BigUint};
 
 use crate::bigint::{
@@ -6,13 +6,11 @@ use crate::bigint::{
     sub_no_carry, CRTInteger, OverflowInteger,
 };
 use crate::fields::fp_crt::{FpChip, FpConfig};
-use crate::fields::FqPoint;
 use crate::gates::qap_gate;
 use crate::gates::range;
-use crate::utils::bigint_to_fe;
-use crate::utils::decompose_bigint_option;
+use crate::utils::{bigint_to_fe, decompose_bigint_option, fe_to_biguint};
 
-use super::FieldChip;
+use super::{FieldChip, FqPoint};
 
 // Represent Fp2 point as FqPoint with degree = 2
 // `Fp2 = Fp[u] / (u^2 + 1)`

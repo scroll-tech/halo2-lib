@@ -180,15 +180,3 @@ fn test_signed_roundtrip() {
         -big_int::one()
     );
 }
-
-#[cfg(test)]
-#[test]
-fn test_fp() {
-    use super::*;
-    let x = big_int::from_str_radix(
-        "21888242871839275222246405745257275088696311157297823662689037894645226208582",
-        10,
-    )
-    .unwrap();
-    println!("{:?}", bigint_to_fp(x));
-}
