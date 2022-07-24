@@ -28,6 +28,38 @@ impl<F: FieldExt> Fp12Chip<F> {
     pub fn construct(fp_chip: FpChip<F>) -> Self {
         Self { fp_chip }
     }
+
+    fn fp2_mul_no_carry(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &FqPoint<F>,
+        fp2_pt: &FqPoint<F>,
+    ) -> Result<FqPoint<F>, Error> {
+	let deg = 6;
+	assert_eq!(a.degree, 12);
+	assert_eq!(fp2_pt.degree, 2);
+	
+        let mut out_coeffs = Vec::with_capacity(12);
+        for i in 0..6 {
+            let coeff1 = self.fp_chip
+                .mul_no_carry(layouter, &a.coeffs[i], &fp2_pt.coeffs[0])?;
+	    let coeff2 = self.fp_chip
+                .mul_no_carry(layouter, &a.coeffs[i + 6], &fp2_pt.coeffs[1])?;
+	    let coeff = self.fp_chip
+		.sub_no_carry(layouter, &coeff1, &coeff2)?;
+	    out_coeffs.push(coeff);
+	}
+	for i in 0..6 {
+            let coeff1 = self.fp_chip
+                .mul_no_carry(layouter, &a.coeffs[i + 6], &fp2_pt.coeffs[0])?;
+	    let coeff2 = self.fp_chip
+                .mul_no_carry(layouter, &a.coeffs[i], &fp2_pt.coeffs[1])?;
+	    let coeff = self.fp_chip
+		.add_no_carry(layouter, &coeff1, &coeff2)?;
+            out_coeffs.push(coeff);
+        }
+        Ok(FqPoint::construct(out_coeffs, 12))
+    }
 }
 
 impl<F: FieldExt> FieldChip<F> for Fp12Chip<F> {
@@ -96,7 +128,7 @@ impl<F: FieldExt> FieldChip<F> for Fp12Chip<F> {
         }
         Ok(FqPoint::construct(out_coeffs, a.degree))
     }
-
+    
     // w^6 = u + xi for xi = 9
     fn mul_no_carry(
         &self,
@@ -161,9 +193,6 @@ impl<F: FieldExt> FieldChip<F> for Fp12Chip<F> {
 		out_coeffs.push(a0b1_plus_a1b0[i].clone());
 	    }
 	}
-        out_coeffs.push(a0b0_minus_a1b1);
-        out_coeffs.push(a0b1_plus_a1b0);
-
         Ok(FqPoint::construct(out_coeffs, 12))
     }
 
