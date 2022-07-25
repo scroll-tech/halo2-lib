@@ -73,7 +73,7 @@ impl<F: FieldExt> FpChip<F> {
         }
     }
 
-    fn load_lookup_table(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
+    pub fn load_lookup_table(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         self.config.range.load_lookup_table(layouter)
     }
 }
@@ -83,12 +83,12 @@ impl<F: FieldExt> FieldChip<F> for FpChip<F> {
     type FieldPoint = CRTInteger<F>;
     type FieldType = Fq;
 
-    fn get_assigned_value(x: &CRTInteger<F>) -> Option<Self::FieldType> {
-        x.value.map(|x| bigint_to_fe::<Fq>(&x))
+    fn get_assigned_value(x: &CRTInteger<F>) -> Option<Fq> {
+        x.value.as_ref().map(|x| bigint_to_fe::<Fq>(x))
     }
 
     fn fe_to_witness(x: &Option<Fq>) -> Option<BigInt> {
-        x.map(|x| BigInt::from(fe_to_biguint(&x)))
+        x.map(|x| BigInt::from_bytes_le(num_bigint::Sign::Plus, x.to_bytes().as_ref()))
     }
 
     fn load_private(

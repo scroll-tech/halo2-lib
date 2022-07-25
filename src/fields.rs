@@ -1,3 +1,5 @@
+use std::fmt::Debug;
+
 use crate::bigint::CRTInteger;
 use halo2_proofs::{
     arithmetic::{Field, FieldExt},
@@ -5,7 +7,7 @@ use halo2_proofs::{
     plonk::Error,
 };
 
-pub mod fp2;
+// pub mod fp2;
 pub mod fp_crt;
 // pub mod fp_crt_vec;
 
@@ -28,8 +30,8 @@ impl<F: FieldExt> FqPoint<F> {
 
 // Common functionality for finite field chips
 pub trait FieldChip<F: FieldExt> {
-    type WitnessType;
-    type FieldPoint;
+    type WitnessType: Debug;
+    type FieldPoint: Clone + Debug;
     // a type implementing `Field` trait to help with witness generation (for example with inverse)
     type FieldType: Field;
 
@@ -112,14 +114,14 @@ pub trait FieldChip<F: FieldExt> {
         } else {
             None
         };
-        let quot_val = a_val.zip(b_inv).map(|(a, b)| a * b);
+        let quot_val = a_val.zip(b_inv).map(|(a, bi)| a * bi);
 
         let quot = self.load_private(layouter, Self::fe_to_witness(&quot_val))?;
         self.range_check(layouter, &quot)?;
 
         // constrain quot * b - a = 0 mod p
         let quot_b = self.mul_no_carry(layouter, &quot, b)?;
-        let quot_constraint = self.sub_no_carry(layouter, &quot, a)?;
+        let quot_constraint = self.sub_no_carry(layouter, &quot_b, a)?;
         self.check_carry_mod_to_zero(layouter, &quot_constraint)?;
 
         Ok(quot)
@@ -127,7 +129,7 @@ pub trait FieldChip<F: FieldExt> {
 
     // constrain and output -a / b
     // this is usually cheaper constraint-wise than computing -a and then (-a) / b separately
-    fn neg_divide<Fp: FieldExt>(
+    fn neg_divide(
         &self,
         layouter: &mut impl Layouter<F>,
         a: &Self::FieldPoint,
@@ -147,7 +149,7 @@ pub trait FieldChip<F: FieldExt> {
 
         // constrain quot * b + a = 0 mod p
         let quot_b = self.mul_no_carry(layouter, &quot, b)?;
-        let quot_constraint = self.add_no_carry(layouter, &quot, a)?;
+        let quot_constraint = self.add_no_carry(layouter, &quot_b, a)?;
         self.check_carry_mod_to_zero(layouter, &quot_constraint)?;
 
         Ok(quot)
