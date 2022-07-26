@@ -375,11 +375,15 @@ pub fn select_from_bits<F: FieldExt>(
     inner_product(range, layouter, points, &coeffs)
 }
 
+// variable base is \sum_i x_i * P_i
+// fixed base is \sum_i y_i * Q_i
 pub fn multi_scalar_multiply<F: FieldExt>(
     chip: &FpVecChip<F>,
     layouter: &mut impl Layouter<F>,
     P: &Vec<EccPoint<F>>,
     x: &Vec<AssignedCell<F, F>>,
+    Q: &Vec<FixedEccPoint<F>>,
+    y: &Vec<AssignedCell<F, F>>,
     b: F,
     max_bits: usize,
     window_bits: usize,
@@ -388,7 +392,10 @@ pub fn multi_scalar_multiply<F: FieldExt>(
 
     println!("Number of columns {:?}", num_cols);
     let k = P.len();
+    let l = Q.len();
     assert_eq!(k, x.len());
+    assert_eq!(l, y.len());
+    
     let num_windows = (max_bits + window_bits - 1) / window_bits;
     let rounded_bitlen = num_windows * window_bits;
     let mut col = 0;
@@ -420,29 +427,18 @@ pub fn multi_scalar_multiply<F: FieldExt>(
         rounded_bits_vec.push(rounded_bits);
     }
 
-    let mut is_zero_window_vec = Vec::with_capacity(k);
-    let mut ones_vec = Vec::with_capacity(window_bits);
-    for idx in 0..window_bits {
-        ones_vec.push(Constant(F::from(1)));
-    }
-    for idx in 0..k {
+    let mut fixed_rounded_bits_vec = Vec::with_capacity(l);
+    for idx in 0..l {
 	col = idx % num_cols;
-        let mut is_zero_window = Vec::with_capacity(num_windows);
-        for window_idx in 0..num_windows {
-            let temp_bits = rounded_bits_vec[idx][rounded_bitlen - window_bits * (window_idx + 1)
-                ..rounded_bitlen - window_bits * window_idx]
-                .iter()
-                .map(|x| Existing(&x))
-                .collect();
-            let bit_sum = chip
-                .config
-                .range[col]
-                .qap_config
-                .inner_product(layouter, &ones_vec, &temp_bits)?;
-            let is_zero = chip.config.range[col].is_zero(layouter, &bit_sum.2)?;
-            is_zero_window.push(is_zero.clone());
+        let mut fixed_rounded_bits = Vec::with_capacity(rounded_bitlen);
+        let bits = chip.config.range[col].num_to_bits(layouter, &y[idx], max_bits)?;
+        for cell in bits.iter() {
+            fixed_rounded_bits.push(cell.clone());
         }
-        is_zero_window_vec.push(is_zero_window);
+        for idx in 0..(rounded_bitlen - max_bits) {
+            fixed_rounded_bits.push(zero_cell.clone());
+        }
+        fixed_rounded_bits_vec.push(fixed_rounded_bits);
     }
 
     let base_point = G1Affine::random(OsRng);
@@ -466,20 +462,19 @@ pub fn multi_scalar_multiply<F: FieldExt>(
         EccPoint::construct(x_overflow, y_overflow)
     };
     
-    // contains random base points [A, ..., 2^{w + k - 1} * A]
-    let mut rand_start_vec = Vec::with_capacity(k);
+    // contains random base points [A, ..., 2^{w + k + l - 1} * A]
+    let mut rand_start_vec = Vec::with_capacity(k + l + window_bits);
     rand_start_vec.push(base.clone());
-    for idx in 1..(k + window_bits) {
+    for idx in 1..(k + l + window_bits) {
 	col = idx % num_cols;
         let base_mult = point_double(chip, layouter, &rand_start_vec[idx - 1], col)?;
         rand_start_vec.push(base_mult.clone());
     }
 
-    let sub_per_col = (k + num_cols - 1) / num_cols;
-    // contains (1 - 2^w) * [A, ..., 2^(k - 1) * A]
+    // contains (1 - 2^w) * [A, ..., 2^(k + l - 1) * A]
     let mut neg_mult_rand_start_vec = Vec::with_capacity(k);
-    for idx in 0..k {
-	col = (k + window_bits + idx) % num_cols;
+    for idx in 0..k + l {
+	col = (k + l + window_bits + idx) % num_cols;
         let diff = point_sub_unequal(
             chip,
             layouter,
@@ -502,12 +497,36 @@ pub fn multi_scalar_multiply<F: FieldExt>(
         }
         cached_points_vec.push(cached_points);
     }
+
+    let mut fixed_cached_points_vec = Vec::with_capacity(l);
+    for idx in 0..l {
+	let mut base_pt = G1Affine::default();
+	base_pt.x = bigint_to_fp(Q[idx].x.value.clone());
+	base_pt.y = bigint_to_fp(Q[idx].y.value.clone());
+	
+	let mut fixed_cached_points = Vec::with_capacity(cache_size);
+	fixed_cached_points.push(neg_mult_rand_start_vec[idx + k].clone());
+
+	let mut curr = base_pt;
+	for cache_idx in 0..(cache_size - 1) {
+	    col = (idx * cache_size + cache_idx) % num_cols;
+	    let new_point = FixedEccPoint::from_g1(
+		&curr,
+		Q[idx].x.truncation.limbs.len(),
+		Q[idx].x.truncation.limb_bits
+	    ).assign(&chip, layouter, col)?;
+	    let new_point_shifted = point_add_unequal(chip, layouter, &new_point, &neg_mult_rand_start_vec[idx + k], col)?;
+	    fixed_cached_points.push(new_point_shifted);
+	    curr = G1Affine::from(curr + base_pt);	    
+	}
+	fixed_cached_points_vec.push(fixed_cached_points);
+    }    
     
-    // initialize at (2^{k + 1} - 1) * A
-    let start_point = point_sub_unequal(chip, layouter, &rand_start_vec[k], &rand_start_vec[0], 0)?;
+    // initialize at (2^{k + l + 1} - 1) * A
+    let start_point = point_sub_unequal(chip, layouter, &rand_start_vec[k + l], &rand_start_vec[0], 0)?;
     let mut curr_point = start_point.clone();
     
-    // compute \sum_i x_i P_i + (2^{k + 1} - 1) * A
+    // compute \sum_i x_i P_i + (2^{k + l + 1} - 1) * A
     for idx in 0..num_windows {
         for double_idx in 0..window_bits {
 	    col = (idx * window_bits + double_idx) % num_cols;
@@ -525,6 +544,19 @@ pub fn multi_scalar_multiply<F: FieldExt>(
             )?;
             curr_point = point_add_unequal(chip, layouter, &curr_point, &add_point, col)?;
         }
+
+	for base_idx in 0..l {
+	    col = (idx * l + base_idx) % num_cols;
+	    let add_point = select_from_bits(
+		&chip.config.range[col],
+		layouter,
+		&fixed_cached_points_vec[base_idx],
+		&fixed_rounded_bits_vec[base_idx]
+		    [rounded_bitlen - window_bits * (idx + 1)..rounded_bitlen - window_bits * idx]
+		    .to_vec(),
+	    )?;
+	    curr_point = point_add_unequal(chip, layouter, &curr_point, &add_point, col)?;
+	}
     }
     curr_point = point_sub_unequal(chip, layouter, &curr_point, &start_point, col)?;
 
@@ -620,11 +652,13 @@ impl<F: FieldExt> EccVecChip<F> {
         layouter: &mut impl Layouter<F>,
         P: &Vec<EccPoint<F>>,
         x: &Vec<AssignedCell<F, F>>,
+	Q: &Vec<FixedEccPoint<F>>,
+	y: &Vec<AssignedCell<F, F>>,
         b: F,
         max_bits: usize,
         window_bits: usize,
     ) -> Result<EccPoint<F>, Error> {
-        multi_scalar_multiply(&self.fp_chip, layouter, P, x, b,
+        multi_scalar_multiply(&self.fp_chip, layouter, P, x, Q, y, b,
 			      max_bits, window_bits)
     }
 }
@@ -651,12 +685,16 @@ pub(crate) mod tests {
         Q: Option<G1Affine>,
         P_batch: Vec<Option<G1Affine>>,
         x: Option<F>,
+	Q_batch: Vec<Option<G1Affine>>,
+	y_batch: Vec<Option<F>>,
         x_batch: Vec<Option<F>>,
         batch_size: usize,
+	fixed_batch_size: usize,
         _marker: PhantomData<F>,
     }
 
     const BATCH_SIZE: usize = 1;
+    const FIXED_BATCH_SIZE: usize = 1;
     const NUM_COLUMNS: usize = 5;
     const NUM_CONST_COLUMNS: usize = 4;
     
@@ -667,13 +705,17 @@ pub(crate) mod tests {
 
         fn without_witnesses(&self) -> Self {
             let batch_size = BATCH_SIZE;
+	    let fixed_batch_size = FIXED_BATCH_SIZE;
             Self {
                 P: None,
                 Q: None,
                 P_batch: vec![None; batch_size],
                 x: Some(F::from(2)),
+		Q_batch: vec![None; fixed_batch_size],
+		y_batch: vec![None; fixed_batch_size],
                 x_batch: vec![None; batch_size],
                 batch_size,
+		fixed_batch_size,
                 _marker: PhantomData,
             }
         }
@@ -687,7 +729,7 @@ pub(crate) mod tests {
 	    for idx in 0..NUM_CONST_COLUMNS {
 		constant.push(meta.fixed_column());
 	    }
-            EccVecChip::configure(meta, value, constant, 22, 88, 3)
+            EccVecChip::configure(meta, value, constant, 17, 88, 3)
         }
 
         fn synthesize(
@@ -758,6 +800,29 @@ pub(crate) mod tests {
                 )?;
                 x_batch_assigned.push(xb_assigned);
             }
+
+	    let mut Q_batch_fixed = Vec::with_capacity(self.fixed_batch_size);
+	    let mut y_batch_assigned = Vec::with_capacity(self.fixed_batch_size);
+	    for i in 0..self.fixed_batch_size {
+		let mut fixed = FixedEccPoint::from_g1(&pt, 3, 88);
+		if let Some(Q_point) = &self.Q_batch[i] {
+		    pt = Q_point.clone();
+		    fixed = FixedEccPoint::<F>::from_g1(&pt, 3, 88);
+		}
+		Q_batch_fixed.push(fixed);
+		let yb_assigned = layouter.assign_region(
+		    || "input scalar y",
+		    |mut region| {
+			region.assign_advice(
+			    || format!("assign y_{}", i),
+			    config.value[0],
+			    0,
+			    || self.y_batch[i].clone().ok_or(Error::Synthesis),
+			)
+		    },
+		)?;
+		y_batch_assigned.push(yb_assigned);
+	    }
 
             /*
             // test fp mul
@@ -863,6 +928,8 @@ pub(crate) mod tests {
                     &mut layouter.namespace(|| "multi_scalar_mult"),
                     &P_batch_assigned,
                     &x_batch_assigned,
+		    &Q_batch_fixed,
+		    &y_batch_assigned,
                     F::from(3),
                     254,
                     4,
@@ -887,6 +954,15 @@ pub(crate) mod tests {
                                 )
                                 .unwrap();
                     }
+		    for (Q, y) in self.Q_batch.iter().zip(self.y_batch.iter()) {
+			msm = msm
+			    + Q.as_ref().unwrap()
+			    * Fn::from_repr(
+				y.as_ref().unwrap().to_repr().as_ref()[..32]
+				    .try_into()
+				    .unwrap(),
+			    ).unwrap();
+		    }
                     let actual = G1Affine::from(msm);
                     assert_eq!(fp_to_bigint(&actual.x), multi_scalar_mult.x.value.unwrap());
                     assert_eq!(fp_to_bigint(&actual.y), multi_scalar_mult.y.value.unwrap());
@@ -900,28 +976,38 @@ pub(crate) mod tests {
     use halo2_proofs::pairing::bn256::{G1Affine, G1};
     #[test]
     fn test_ecc_crt_vec() {
-        let k = 23;
+        let k = 18;
         let mut rng = rand::thread_rng();
 
         let batch_size = BATCH_SIZE;
+	let fixed_batch_size = FIXED_BATCH_SIZE;
 
         let P = Some(G1Affine::random(&mut rng));
         let Q = Some(G1Affine::random(&mut rng));
         let x = Some(Fn::random(&mut rng));
         let mut P_batch = Vec::with_capacity(batch_size);
         let mut x_batch = Vec::with_capacity(batch_size);
+        let mut Q_batch = Vec::with_capacity(fixed_batch_size);
+        let mut y_batch = Vec::with_capacity(fixed_batch_size);
         for _ in 0..batch_size {
             P_batch.push(Some(G1Affine::random(&mut rng)));
             x_batch.push(Some(Fn::random(&mut rng)));
         }
-
+	for _ in 0..fixed_batch_size {
+            Q_batch.push(Some(G1Affine::random(&mut rng)));
+            y_batch.push(Some(Fn::random(&mut rng)));
+	}
+	
         let circuit = MyCircuit::<Fn> {
             P,
             Q,
             P_batch,
             x,
+	    Q_batch,
+	    y_batch,
             x_batch,
             batch_size,
+	    fixed_batch_size,
             _marker: PhantomData,
         };
 
@@ -941,13 +1027,17 @@ pub(crate) mod tests {
         let root = root.titled("Ecc Layout", ("sans-serif", 60)).unwrap();
 
         let batch_size = BATCH_SIZE;
+	let fixed_batch_size = FIXED_BATCH_SIZE;
         let circuit = MyCircuit::<Fn> {
             P: None,
             Q: None,
             P_batch: vec![None; batch_size],
             x: None,
-            x_batch: vec![None; batch_size],
+	    Q_batch: vec![None; fixed_batch_size],
+            y_batch: vec![None; fixed_batch_size],
+	    x_batch: vec![None; batch_size],
             batch_size,
+	    fixed_batch_size,
             _marker: PhantomData,
         };
 
