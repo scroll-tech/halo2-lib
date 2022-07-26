@@ -7,7 +7,7 @@ use halo2_proofs::{
     plonk::Error,
 };
 
-pub mod fp12;
+//pub mod fp12;
 pub mod fp2;
 pub mod fp_crt;
 // pub mod fp_crt_vec;

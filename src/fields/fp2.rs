@@ -1,4 +1,5 @@
 use halo2_proofs::{arithmetic::FieldExt, circuit::Layouter, plonk::Error};
+use halo2curves::bn254::{Fq, Fq2};
 use num_bigint::{BigInt, BigUint};
 
 use crate::bigint::{
@@ -21,14 +22,34 @@ pub struct Fp2Chip<F: FieldExt> {
 }
 
 impl<F: FieldExt> Fp2Chip<F> {
-    pub fn construct(fp_chip: FpChip<F>) -> Self {
-        Self { fp_chip }
+    pub fn construct(config: FpConfig<F>) -> Self {
+        Self {
+            fp_chip: FpChip { config },
+        }
     }
 }
 
 impl<F: FieldExt> FieldChip<F> for Fp2Chip<F> {
     type WitnessType = Vec<Option<BigInt>>;
     type FieldPoint = FqPoint<F>;
+    type FieldType = Fq2;
+
+    fn get_assigned_value(x: &FqPoint<F>) -> Option<Fq2> {
+        assert_eq!(x.coeffs.len(), 2);
+        let c0 = x.coeffs[0].value.clone();
+        let c1 = x.coeffs[1].value.clone();
+        c0.zip(c1).map(|(c0, c1)| Fq2 {
+            c0: bigint_to_fe(&c0),
+            c1: bigint_to_fe(&c1),
+        })
+    }
+
+    fn fe_to_witness(x: &Option<Fq2>) -> Vec<Option<BigInt>> {
+        let c0 = x.map(|x| BigInt::from(fe_to_biguint(&x.c0)));
+        let c1 = x.map(|x| BigInt::from(fe_to_biguint(&x.c1)));
+        vec![c0, c1]
+    }
+
     fn load_private(
         &self,
         layouter: &mut impl Layouter<F>,
