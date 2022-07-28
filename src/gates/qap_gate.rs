@@ -424,8 +424,8 @@ impl<F: FieldExt> Config<F> {
 
         let mut indicator = Vec::with_capacity(2 * (1 << k) - 2);
         let mut offset = 0;
-        indicator.push(inv_bits[k - 1]);
-        indicator.push(assigned_bits[k - 1]);
+        indicator.push(inv_bits[k - 1].clone());
+        indicator.push(assigned_bits[k - 1].clone());
         for idx in 1..k {
             for old_idx in 0..(1 << idx) {
                 let inv_prod = self.mul(

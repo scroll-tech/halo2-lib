@@ -60,12 +60,6 @@ pub trait FieldChip<F: FieldExt> {
         b: &Self::FieldPoint,
     ) -> Result<Self::FieldPoint, Error>;
 
-    fn negate_no_carry(
-        &self,
-        layouter: &mut impl Layouter<F>,
-        a: &Self::FieldPoint,
-    ) -> Result<Self::FieldPoint, Error>;
-
     fn scalar_mul_no_carry(
         &self,
         layouter: &mut impl Layouter<F>,

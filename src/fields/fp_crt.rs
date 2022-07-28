@@ -9,7 +9,7 @@ use num_bigint::{BigInt, BigUint};
 use super::{FieldChip, Selectable};
 use crate::bigint::{
     add_no_carry, carry_mod, check_carry_mod_to_zero, inner_product, mul_no_carry,
-    scalar_mul_no_carry, select, sub_no_carry, CRTInteger, OverflowInteger,
+    scalar_mul_no_carry, select, sub_no_carry, CRTInteger, FixedCRTInteger, OverflowInteger,
 };
 use crate::gates::qap_gate;
 use crate::gates::range;
@@ -152,15 +152,6 @@ impl<F: FieldExt> FieldChip<F> for FpChip<F> {
         b: &CRTInteger<F>,
     ) -> Result<CRTInteger<F>, Error> {
         sub_no_carry::crt(&self.config.gate, layouter, a, b)
-    }
-
-    fn negate_no_carry(
-        &self,
-        layouter: &mut impl Layouter<F>,
-        a: &CRTInteger<F>,
-    ) -> Result<CRTInteger<F>, Error> {
-        let res = self.sub_no_carry(layouter, a, a)?;
-        Ok(res)
     }
 
     fn scalar_mul_no_carry(

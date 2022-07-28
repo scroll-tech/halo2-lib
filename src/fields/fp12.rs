@@ -1,4 +1,5 @@
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::Error};
+use halo2curves::bn254::{Fq, Fq2, Fq6, Fq12};
 use num_bigint::{BigInt, BigUint};
 
 use crate::bigint::{
@@ -10,7 +11,7 @@ use crate::fields::fp_crt::{FpChip, FpConfig};
 use crate::fields::FqPoint;
 use crate::gates::qap_gate;
 use crate::gates::range;
-use crate::utils::bigint_to_fe;
+use crate::utils::{ bigint_to_fe, fe_to_biguint, };
 use crate::utils::decompose_bigint_option;
 
 use super::FieldChip;
@@ -69,13 +70,73 @@ impl<F: FieldExt> Fp12Chip<F> {
         &self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
-    ) -> Result<FqPoint<F>, Error> {
+    ) -> Result<(), Error> {
+	Ok(())
     }
 }
 
 impl<F: FieldExt> FieldChip<F> for Fp12Chip<F> {
     type WitnessType = Vec<Option<BigInt>>;
     type FieldPoint = FqPoint<F>;
+    type FieldType = Fq12;
+
+    fn get_assigned_value(x: &FqPoint<F>) -> Option<Fq12> {
+        assert_eq!(x.coeffs.len(), 2);
+	let values: Vec<Option<BigInt>> = x.coeffs.iter().map(|v| v.value.clone()).collect();
+	let values_collected: Option<Vec<BigInt>> = values.into_iter().collect();
+	match values_collected {
+	    Some(c) => Some(Fq12 {
+		c0: Fq6 {
+		    c0: Fq2 {
+			c0: bigint_to_fe(&c[0]),
+			c1: bigint_to_fe(&c[1]),
+		    },
+		    c1: Fq2 {
+			c0: bigint_to_fe(&c[2]),
+			c1: bigint_to_fe(&c[3]),
+		    },
+		    c2: Fq2 {
+			c0: bigint_to_fe(&c[4]),
+			c1: bigint_to_fe(&c[5]),
+		    },
+		},
+		c1: Fq6 {
+		    c0: Fq2 {
+			c0: bigint_to_fe(&c[6]),
+			c1: bigint_to_fe(&c[7]),
+		    },
+		    c1: Fq2 {
+			c0: bigint_to_fe(&c[8]),
+			c1: bigint_to_fe(&c[9]),
+		    },
+		    c2: Fq2 {
+			c0: bigint_to_fe(&c[10]),
+			c1: bigint_to_fe(&c[11]),
+		    },
+		}
+	    }),
+	    None => None
+	}
+    }
+
+    fn fe_to_witness(x: &Option<Fq12>) -> Vec<Option<BigInt>> {
+	let coeffs = vec![
+            x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c0.c0))),
+	    x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c0.c1))),
+	    x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c1.c0))),
+	    x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c1.c1))),
+	    x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c2.c0))),
+	    x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c2.c1))),
+	    x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c0.c0))),
+	    x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c0.c1))),
+	    x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c1.c0))),
+	    x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c1.c1))),
+	    x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c2.c0))),
+	    x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c2.c1))),
+	];
+	coeffs
+    }
+
     fn load_private(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -179,8 +240,8 @@ impl<F: FieldExt> FieldChip<F> for Fp12Chip<F> {
             }
         }
 
-        let a0b0_minus_a1b1 = Vec::with_capacity(11);
-        let a0b1_plus_a1b0 = Vec::with_capacity(11);
+        let mut a0b0_minus_a1b1 = Vec::with_capacity(11);
+        let mut a0b1_plus_a1b0 = Vec::with_capacity(11);
         for i in 0..11 {
             let a0b0_minus_a1b1_entry =
                 self.fp_chip
