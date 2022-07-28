@@ -244,7 +244,8 @@ where
     let w = sel.len();
     let num_points = points.len();
     assert_eq!(1 << w, num_points);
-    let coeffs = range.qap_config.bits_to_indicator(layouter, sel)?;
+    let sel_quantum = sel.iter().map(|x| Existing(x)).collect();
+    let coeffs = range.qap_config.bits_to_indicator(layouter, &sel_quantum)?;
     inner_product(chip, layouter, points, &coeffs)
 }
 
@@ -294,8 +295,8 @@ where
     for idx in 1..max_bits {
         let or = range.qap_config.or(
             layouter,
-            &is_started[rounded_bitlen - max_bits + idx - 1],
-            &bits[max_bits - idx],
+            &Existing(&is_started[rounded_bitlen - max_bits + idx - 1]),
+            &Existing(&bits[max_bits - idx]),
         )?;
         is_started.push(or.clone());
     }
@@ -450,8 +451,8 @@ pub fn fixed_base_scalar_multiply<F: FieldExt>(
     for idx in 1..rounded_bitlen {
         let or = chip.config.range.qap_config.or(
             layouter,
-            &is_started[idx - 1],
-            &rounded_bits[rounded_bitlen - idx],
+            &Existing(&is_started[idx - 1]),
+            &Existing(&rounded_bits[rounded_bitlen - idx]),
         )?;
         is_started.push(or.clone());
     }

@@ -154,6 +154,15 @@ impl<F: FieldExt> FieldChip<F> for FpChip<F> {
         sub_no_carry::crt(&self.config.gate, layouter, a, b)
     }
 
+    fn negate_no_carry(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &CRTInteger<F>,
+    ) -> Result<CRTInteger<F>, Error> {
+        let res = self.sub_no_carry(layouter, a, a)?;
+        Ok(res)
+    }
+
     fn scalar_mul_no_carry(
         &self,
         layouter: &mut impl Layouter<F>,

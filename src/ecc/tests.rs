@@ -125,7 +125,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         {
             let prod = chip
                 .fp_chip
-                .mul(&mut layouter, &P_assigned.x, &P_assigned.y)?;
+                .mul(&mut layouter, &Existing(&P_assigned.x), &Existing(&P_assigned.y))?;
             assert_eq!(prod.value, prod.truncation.to_bigint());
             if self.P != None {
                 let actual_prod = self.P.unwrap().x * self.P.unwrap().y;

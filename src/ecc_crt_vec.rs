@@ -296,7 +296,7 @@ pub fn point_double<F: FieldExt>(
         chip.config
             .range[col]
             .qap_config
-            .mul_constant(layouter, &lambda.native, F::from(2))?;
+            .mul(layouter, &Existing(&lambda.native), &Constant(F::from(2)))?;
     let two_lambda = CRTInteger::construct(
         two_lambda_trunc,
         two_lambda_native,

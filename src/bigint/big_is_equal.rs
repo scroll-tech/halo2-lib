@@ -1,5 +1,6 @@
 use super::OverflowInteger;
 use crate::gates::qap_gate;
+use crate::gates::qap_gate::QuantumCell::Existing;
 use crate::gates::range;
 use crate::utils::*;
 use halo2_proofs::{
@@ -41,8 +42,9 @@ pub fn assign<F: FieldExt>(
     for idx in 0..(k - 1) {
 	let new = range.qap_config.and(
 	    layouter,
-	    &eq[idx + 1],
-	    &partials[idx])?;
+	    &Existing(&eq[idx + 1]),
+	    &Existing(&partials[idx])
+	)?;
 	partials.push(new);
     }
     Ok(partials[k - 1].clone())
