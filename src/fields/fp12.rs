@@ -70,8 +70,48 @@ impl<F: FieldExt> Fp12Chip<F> {
         &self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
-    ) -> Result<(), Error> {
-	Ok(())
+    ) -> Result<FqPoint<F>, Error> {
+	assert_eq!(a.degree, 12);
+	let c1 = scalar_mul_no_carry::crt(&self.fp_chip.config.gate, layouter, &a.coeffs[1], - F::from(1))?;
+	let c3 = scalar_mul_no_carry::crt(&self.fp_chip.config.gate, layouter, &a.coeffs[3], - F::from(1))?;
+	let c5 = scalar_mul_no_carry::crt(&self.fp_chip.config.gate, layouter, &a.coeffs[5], - F::from(1))?;
+	let c7 = scalar_mul_no_carry::crt(&self.fp_chip.config.gate, layouter, &a.coeffs[7], - F::from(1))?;
+	let c9 = scalar_mul_no_carry::crt(&self.fp_chip.config.gate, layouter, &a.coeffs[9], - F::from(1))?;
+	let c11 = scalar_mul_no_carry::crt(&self.fp_chip.config.gate, layouter, &a.coeffs[11], - F::from(1))?;
+	let coeffs = vec![
+	    a.coeffs[0].clone(),
+	    c1,
+	    a.coeffs[2].clone(),
+	    c3,
+	    a.coeffs[4].clone(),
+	    c5,
+	    a.coeffs[6].clone(),
+	    c7,
+	    a.coeffs[8].clone(),
+	    c9,
+	    a.coeffs[10].clone(),
+	    c11,
+	];	
+	Ok(FqPoint::construct(coeffs, 12))
+    }
+
+    // computes a ** (p ** power)
+    fn frobenius(
+	&self,
+	layouter: &mut impl Layouter<F>,
+	a: &FqPoint<F>,
+	power: usize,
+    ) -> Result<FqPoint<F>, Error> {
+	let pow = power % 12;
+	let out_coeffs = Vec::with_capacity(12);
+	
+	if pow % 2 == 0 {
+	    out_coeffs
+	} else {
+
+	}
+	
+	Ok(a.clone())
     }
 }
 
@@ -89,28 +129,28 @@ impl<F: FieldExt> FieldChip<F> for Fp12Chip<F> {
 		c0: Fq6 {
 		    c0: Fq2 {
 			c0: bigint_to_fe(&c[0]),
-			c1: bigint_to_fe(&c[1]),
+			c1: bigint_to_fe(&c[6]),
 		    },
 		    c1: Fq2 {
 			c0: bigint_to_fe(&c[2]),
-			c1: bigint_to_fe(&c[3]),
+			c1: bigint_to_fe(&c[8]),
 		    },
 		    c2: Fq2 {
 			c0: bigint_to_fe(&c[4]),
-			c1: bigint_to_fe(&c[5]),
+			c1: bigint_to_fe(&c[10]),
 		    },
 		},
 		c1: Fq6 {
 		    c0: Fq2 {
-			c0: bigint_to_fe(&c[6]),
+			c0: bigint_to_fe(&c[1]),
 			c1: bigint_to_fe(&c[7]),
 		    },
 		    c1: Fq2 {
-			c0: bigint_to_fe(&c[8]),
+			c0: bigint_to_fe(&c[3]),
 			c1: bigint_to_fe(&c[9]),
 		    },
 		    c2: Fq2 {
-			c0: bigint_to_fe(&c[10]),
+			c0: bigint_to_fe(&c[5]),
 			c1: bigint_to_fe(&c[11]),
 		    },
 		}
@@ -121,18 +161,18 @@ impl<F: FieldExt> FieldChip<F> for Fp12Chip<F> {
 
     fn fe_to_witness(x: &Option<Fq12>) -> Vec<Option<BigInt>> {
 	let coeffs = vec![
-            x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c0.c0))),
-	    x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c0.c1))),
-	    x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c1.c0))),
-	    x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c1.c1))),
-	    x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c2.c0))),
-	    x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c2.c1))),
-	    x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c0.c0))),
-	    x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c0.c1))),
-	    x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c1.c0))),
-	    x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c1.c1))),
-	    x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c2.c0))),
-	    x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c2.c1))),
+            x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c0.c0))), // 0
+	    x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c0.c0))), // 1
+	    x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c1.c0))), // 2
+	    x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c1.c0))), // 3
+	    x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c2.c0))), // 4
+	    x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c2.c0))), // 5
+	    x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c0.c1))), // 6
+	    x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c0.c1))), // 7
+	    x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c1.c1))), // 8
+	    x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c1.c1))), // 9
+	    x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c2.c1))), // 10
+	    x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c2.c1))), // 11
 	];
 	coeffs
     }
