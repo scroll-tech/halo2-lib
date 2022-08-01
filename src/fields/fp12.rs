@@ -1,18 +1,18 @@
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::Error};
-use halo2curves::bn254::{Fq, Fq2, Fq6, Fq12};
+use halo2curves::bn254::{Fq, Fq12, Fq2, Fq6};
 use num_bigint::{BigInt, BigUint};
 
 use crate::bigint::{
     add_no_carry, carry_mod, check_carry_mod_to_zero, mul_no_carry, scalar_mul_no_carry,
     sub_no_carry, CRTInteger, OverflowInteger,
 };
+use crate::fields::fp::{FpChip, FpConfig};
 use crate::fields::fp2::Fp2Chip;
-use crate::fields::fp_crt::{FpChip, FpConfig};
 use crate::fields::FqPoint;
 use crate::gates::qap_gate;
 use crate::gates::range;
-use crate::utils::{ bigint_to_fe, fe_to_biguint, };
 use crate::utils::decompose_bigint_option;
+use crate::utils::{bigint_to_fe, fe_to_biguint};
 
 use super::FieldChip;
 
@@ -71,47 +71,76 @@ impl<F: FieldExt> Fp12Chip<F> {
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
     ) -> Result<FqPoint<F>, Error> {
-	assert_eq!(a.degree, 12);
-	let c1 = scalar_mul_no_carry::crt(&self.fp_chip.config.gate, layouter, &a.coeffs[1], - F::from(1))?;
-	let c3 = scalar_mul_no_carry::crt(&self.fp_chip.config.gate, layouter, &a.coeffs[3], - F::from(1))?;
-	let c5 = scalar_mul_no_carry::crt(&self.fp_chip.config.gate, layouter, &a.coeffs[5], - F::from(1))?;
-	let c7 = scalar_mul_no_carry::crt(&self.fp_chip.config.gate, layouter, &a.coeffs[7], - F::from(1))?;
-	let c9 = scalar_mul_no_carry::crt(&self.fp_chip.config.gate, layouter, &a.coeffs[9], - F::from(1))?;
-	let c11 = scalar_mul_no_carry::crt(&self.fp_chip.config.gate, layouter, &a.coeffs[11], - F::from(1))?;
-	let coeffs = vec![
-	    a.coeffs[0].clone(),
-	    c1,
-	    a.coeffs[2].clone(),
-	    c3,
-	    a.coeffs[4].clone(),
-	    c5,
-	    a.coeffs[6].clone(),
-	    c7,
-	    a.coeffs[8].clone(),
-	    c9,
-	    a.coeffs[10].clone(),
-	    c11,
-	];	
-	Ok(FqPoint::construct(coeffs, 12))
+        assert_eq!(a.degree, 12);
+        let c1 = scalar_mul_no_carry::crt(
+            &self.fp_chip.config.gate,
+            layouter,
+            &a.coeffs[1],
+            -F::from(1),
+        )?;
+        let c3 = scalar_mul_no_carry::crt(
+            &self.fp_chip.config.gate,
+            layouter,
+            &a.coeffs[3],
+            -F::from(1),
+        )?;
+        let c5 = scalar_mul_no_carry::crt(
+            &self.fp_chip.config.gate,
+            layouter,
+            &a.coeffs[5],
+            -F::from(1),
+        )?;
+        let c7 = scalar_mul_no_carry::crt(
+            &self.fp_chip.config.gate,
+            layouter,
+            &a.coeffs[7],
+            -F::from(1),
+        )?;
+        let c9 = scalar_mul_no_carry::crt(
+            &self.fp_chip.config.gate,
+            layouter,
+            &a.coeffs[9],
+            -F::from(1),
+        )?;
+        let c11 = scalar_mul_no_carry::crt(
+            &self.fp_chip.config.gate,
+            layouter,
+            &a.coeffs[11],
+            -F::from(1),
+        )?;
+        let coeffs = vec![
+            a.coeffs[0].clone(),
+            c1,
+            a.coeffs[2].clone(),
+            c3,
+            a.coeffs[4].clone(),
+            c5,
+            a.coeffs[6].clone(),
+            c7,
+            a.coeffs[8].clone(),
+            c9,
+            a.coeffs[10].clone(),
+            c11,
+        ];
+        Ok(FqPoint::construct(coeffs, 12))
     }
 
     // computes a ** (p ** power)
     fn frobenius(
-	&self,
-	layouter: &mut impl Layouter<F>,
-	a: &FqPoint<F>,
-	power: usize,
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &FqPoint<F>,
+        power: usize,
     ) -> Result<FqPoint<F>, Error> {
-	let pow = power % 12;
-	let out_coeffs = Vec::with_capacity(12);
-	
-	if pow % 2 == 0 {
-	    out_coeffs
-	} else {
+        let pow = power % 12;
+        let out_coeffs = Vec::with_capacity(12);
 
-	}
-	
-	Ok(a.clone())
+        if pow % 2 == 0 {
+            out_coeffs
+        } else {
+        }
+
+        Ok(a.clone())
     }
 }
 
@@ -122,59 +151,59 @@ impl<F: FieldExt> FieldChip<F> for Fp12Chip<F> {
 
     fn get_assigned_value(x: &FqPoint<F>) -> Option<Fq12> {
         assert_eq!(x.coeffs.len(), 2);
-	let values: Vec<Option<BigInt>> = x.coeffs.iter().map(|v| v.value.clone()).collect();
-	let values_collected: Option<Vec<BigInt>> = values.into_iter().collect();
-	match values_collected {
-	    Some(c) => Some(Fq12 {
-		c0: Fq6 {
-		    c0: Fq2 {
-			c0: bigint_to_fe(&c[0]),
-			c1: bigint_to_fe(&c[6]),
-		    },
-		    c1: Fq2 {
-			c0: bigint_to_fe(&c[2]),
-			c1: bigint_to_fe(&c[8]),
-		    },
-		    c2: Fq2 {
-			c0: bigint_to_fe(&c[4]),
-			c1: bigint_to_fe(&c[10]),
-		    },
-		},
-		c1: Fq6 {
-		    c0: Fq2 {
-			c0: bigint_to_fe(&c[1]),
-			c1: bigint_to_fe(&c[7]),
-		    },
-		    c1: Fq2 {
-			c0: bigint_to_fe(&c[3]),
-			c1: bigint_to_fe(&c[9]),
-		    },
-		    c2: Fq2 {
-			c0: bigint_to_fe(&c[5]),
-			c1: bigint_to_fe(&c[11]),
-		    },
-		}
-	    }),
-	    None => None
-	}
+        let values: Vec<Option<BigInt>> = x.coeffs.iter().map(|v| v.value.clone()).collect();
+        let values_collected: Option<Vec<BigInt>> = values.into_iter().collect();
+        match values_collected {
+            Some(c) => Some(Fq12 {
+                c0: Fq6 {
+                    c0: Fq2 {
+                        c0: bigint_to_fe(&c[0]),
+                        c1: bigint_to_fe(&c[6]),
+                    },
+                    c1: Fq2 {
+                        c0: bigint_to_fe(&c[2]),
+                        c1: bigint_to_fe(&c[8]),
+                    },
+                    c2: Fq2 {
+                        c0: bigint_to_fe(&c[4]),
+                        c1: bigint_to_fe(&c[10]),
+                    },
+                },
+                c1: Fq6 {
+                    c0: Fq2 {
+                        c0: bigint_to_fe(&c[1]),
+                        c1: bigint_to_fe(&c[7]),
+                    },
+                    c1: Fq2 {
+                        c0: bigint_to_fe(&c[3]),
+                        c1: bigint_to_fe(&c[9]),
+                    },
+                    c2: Fq2 {
+                        c0: bigint_to_fe(&c[5]),
+                        c1: bigint_to_fe(&c[11]),
+                    },
+                },
+            }),
+            None => None,
+        }
     }
 
     fn fe_to_witness(x: &Option<Fq12>) -> Vec<Option<BigInt>> {
-	let coeffs = vec![
+        let coeffs = vec![
             x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c0.c0))), // 0
-	    x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c0.c0))), // 1
-	    x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c1.c0))), // 2
-	    x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c1.c0))), // 3
-	    x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c2.c0))), // 4
-	    x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c2.c0))), // 5
-	    x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c0.c1))), // 6
-	    x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c0.c1))), // 7
-	    x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c1.c1))), // 8
-	    x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c1.c1))), // 9
-	    x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c2.c1))), // 10
-	    x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c2.c1))), // 11
-	];
-	coeffs
+            x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c0.c0))), // 1
+            x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c1.c0))), // 2
+            x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c1.c0))), // 3
+            x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c2.c0))), // 4
+            x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c2.c0))), // 5
+            x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c0.c1))), // 6
+            x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c0.c1))), // 7
+            x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c1.c1))), // 8
+            x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c1.c1))), // 9
+            x.map(|x| BigInt::from(fe_to_biguint(&x.c0.c2.c1))), // 10
+            x.map(|x| BigInt::from(fe_to_biguint(&x.c1.c2.c1))), // 11
+        ];
+        coeffs
     }
 
     fn load_private(
@@ -221,6 +250,15 @@ impl<F: FieldExt> FieldChip<F> for Fp12Chip<F> {
                 .fp_chip
                 .sub_no_carry(layouter, &a.coeffs[i], &b.coeffs[i])?;
             out_coeffs.push(coeff);
+        }
+        Ok(FqPoint::construct(out_coeffs, a.degree))
+    }
+
+    fn negate(&self, layouter: &mut impl Layouter<F>, a: &FqPoint<F>) -> Result<FqPoint<F>, Error> {
+        let mut out_coeffs = Vec::with_capacity(a.degree);
+        for a_coeff in &a.coeffs {
+            let out_coeff = self.fp_chip.negate(layouter, a_coeff)?;
+            out_coeffs.push(out_coeff);
         }
         Ok(FqPoint::construct(out_coeffs, a.degree))
     }

@@ -13,17 +13,19 @@ use num_traits::Zero;
 
 pub mod add_no_carry;
 pub mod big_is_equal;
+pub mod big_is_zero;
 pub mod big_less_than;
 pub mod carry_mod;
 pub mod check_carry_mod_to_zero;
 pub mod check_carry_to_zero;
 pub mod decompose;
 pub mod inner_product;
-pub mod mod_reduce;
+// pub mod mod_reduce;
 pub mod mul_no_carry;
 pub mod negative;
 pub mod scalar_mul_no_carry;
 pub mod select;
+pub mod sub;
 pub mod sub_no_carry;
 
 #[derive(Clone, Debug)]

@@ -6,7 +6,7 @@ use crate::bigint::{
     add_no_carry, carry_mod, check_carry_mod_to_zero, mul_no_carry, scalar_mul_no_carry,
     sub_no_carry, CRTInteger, OverflowInteger,
 };
-use crate::fields::fp_crt::{FpChip, FpConfig};
+use crate::fields::fp::{FpChip, FpConfig};
 use crate::gates::qap_gate;
 use crate::gates::range;
 use crate::utils::{bigint_to_fe, decompose_bigint_option, fe_to_biguint};
@@ -26,6 +26,47 @@ impl<F: FieldExt> Fp2Chip<F> {
         Self {
             fp_chip: FpChip { config },
         }
+    }
+
+    pub fn load_constant(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        coeffs: Vec<BigInt>,
+    ) -> Result<FqPoint<F>, Error> {
+        let mut assigned_coeffs = Vec::with_capacity(2);
+        for a in coeffs {
+            let assigned_coeff = self.fp_chip.load_constant(layouter, a.clone())?;
+            assigned_coeffs.push(assigned_coeff);
+        }
+        Ok(FqPoint::construct(assigned_coeffs, 2))
+    }
+
+    pub fn fp_mul_no_carry(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &FqPoint<F>,
+        fp_point: &CRTInteger<F>,
+    ) -> Result<FqPoint<F>, Error> {
+        assert_eq!(a.coeffs.len(), 2);
+        assert_eq!(a.degree, 2);
+
+        let mut out_coeffs = Vec::with_capacity(2);
+        for c in &a.coeffs {
+            let coeff = self.fp_chip.mul_no_carry(layouter, c, fp_point)?;
+            out_coeffs.push(coeff);
+        }
+        Ok(FqPoint::construct(out_coeffs, 2))
+    }
+
+    pub fn conjugate(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &FqPoint<F>,
+    ) -> Result<FqPoint<F>, Error> {
+        assert_eq!(a.coeffs.len(), 2);
+
+        let neg_a1 = self.fp_chip.negate(layouter, &a.coeffs[1])?;
+        Ok(FqPoint::construct(vec![a.coeffs[0].clone(), neg_a1], 2))
     }
 }
 
@@ -94,6 +135,15 @@ impl<F: FieldExt> FieldChip<F> for Fp2Chip<F> {
                 .fp_chip
                 .sub_no_carry(layouter, &a.coeffs[i], &b.coeffs[i])?;
             out_coeffs.push(coeff);
+        }
+        Ok(FqPoint::construct(out_coeffs, a.degree))
+    }
+
+    fn negate(&self, layouter: &mut impl Layouter<F>, a: &FqPoint<F>) -> Result<FqPoint<F>, Error> {
+        let mut out_coeffs = Vec::with_capacity(a.degree);
+        for a_coeff in &a.coeffs {
+            let out_coeff = self.fp_chip.negate(layouter, a_coeff)?;
+            out_coeffs.push(out_coeff);
         }
         Ok(FqPoint::construct(out_coeffs, a.degree))
     }

@@ -7,13 +7,21 @@ use halo2_proofs::{
 use num_bigint::{BigInt, BigUint};
 
 use super::{FieldChip, Selectable};
-use crate::bigint::{
-    add_no_carry, carry_mod, check_carry_mod_to_zero, inner_product, mul_no_carry,
-    scalar_mul_no_carry, select, sub_no_carry, CRTInteger, FixedCRTInteger, OverflowInteger,
-};
-use crate::gates::qap_gate;
 use crate::gates::range;
 use crate::utils::{bigint_to_fe, decompose_bigint_option, fe_to_biguint};
+use crate::{
+    bigint::big_is_zero,
+    gates::qap_gate::QuantumCell::{Constant, Existing, Witness},
+};
+use crate::{bigint::sub, gates::qap_gate::QuantumCell};
+use crate::{
+    bigint::{
+        add_no_carry, carry_mod, check_carry_mod_to_zero, inner_product, mul_no_carry,
+        scalar_mul_no_carry, select, sub_no_carry, CRTInteger, FixedCRTInteger, OverflowInteger,
+    },
+    utils::decompose_biguint,
+};
+use crate::{gates::qap_gate, utils::decompose_bigint};
 
 #[derive(Clone, Debug)]
 pub struct FpConfig<F: FieldExt> {
@@ -75,6 +83,41 @@ impl<F: FieldExt> FpChip<F> {
 
     pub fn load_lookup_table(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         self.config.range.load_lookup_table(layouter)
+    }
+
+    pub fn load_constant(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: BigInt,
+    ) -> Result<CRTInteger<F>, Error> {
+        let a_vec = decompose_bigint::<F>(&a, self.config.num_limbs, self.config.limb_bits);
+        let (a_limbs, a_native) = layouter.assign_region(
+            || "load constant",
+            |mut region| {
+                let a_limbs = self.config.gate.assign_region(
+                    a_vec.iter().map(|v| Constant(v.clone())).collect(),
+                    0,
+                    &mut region,
+                )?;
+                let a_native = self.config.gate.assign_region(
+                    vec![Constant(bigint_to_fe(&a))],
+                    a_limbs.len(),
+                    &mut region,
+                )?;
+                Ok((a_limbs, a_native[0]))
+            },
+        )?;
+
+        Ok(CRTInteger::construct(
+            OverflowInteger::construct(
+                a_limbs,
+                BigUint::from(1u64) << self.config.limb_bits,
+                self.config.limb_bits,
+            ),
+            a_native,
+            Some(a),
+            (BigUint::from(1u64) << self.config.p.bits()) - 1usize,
+        ))
     }
 }
 
@@ -152,6 +195,34 @@ impl<F: FieldExt> FieldChip<F> for FpChip<F> {
         b: &CRTInteger<F>,
     ) -> Result<CRTInteger<F>, Error> {
         sub_no_carry::crt(&self.config.gate, layouter, a, b)
+    }
+
+    // Input: a
+    // Output: p - a if a != 0, else a
+    // Assume the actual value of `a` equals `a.truncation`
+    // Constrains a.truncation <= p using subtraction with carries
+    fn negate(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &CRTInteger<F>,
+    ) -> Result<CRTInteger<F>, Error> {
+        // Compute p - a.truncation using carries
+        let p = self.load_constant(layouter, BigInt::from(self.config.p))?;
+        let (out_or_p, underflow) = sub::crt(&self.config.range, layouter, &p, &a)?;
+        layouter.assign_region(
+            || "fp negate no underflow",
+            |mut region| {
+                let zero =
+                    self.config
+                        .gate
+                        .assign_region(vec![Constant(F::from(0))], 0, &mut region)?;
+                region.constrain_equal(zero[0].cell(), underflow.cell())?;
+                Ok(())
+            },
+        )?;
+
+        let a_is_zero = big_is_zero::assign(&self.config.range, layouter, &a.truncation)?;
+        select::crt(&self.config.gate, layouter, a, &out_or_p, &a_is_zero)
     }
 
     fn scalar_mul_no_carry(
@@ -245,7 +316,7 @@ pub(crate) mod tests {
     };
     use num_traits::One;
 
-    use crate::fields::fp_crt::{FpChip, FpConfig};
+    use crate::fields::fp::{FpChip, FpConfig};
     use crate::fields::FieldChip;
     use crate::utils::{fe_to_bigint, modulus};
     use num_bigint::{BigInt, BigUint};

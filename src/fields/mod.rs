@@ -7,9 +7,9 @@ use halo2_proofs::{
     plonk::Error,
 };
 
+pub mod fp;
 pub mod fp12;
 pub mod fp2;
-pub mod fp_crt;
 // pub mod fp_crt_vec;
 
 #[derive(Clone, Debug)]
@@ -58,6 +58,12 @@ pub trait FieldChip<F: FieldExt> {
         layouter: &mut impl Layouter<F>,
         a: &Self::FieldPoint,
         b: &Self::FieldPoint,
+    ) -> Result<Self::FieldPoint, Error>;
+
+    fn negate(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &Self::FieldPoint,
     ) -> Result<Self::FieldPoint, Error>;
 
     fn scalar_mul_no_carry(

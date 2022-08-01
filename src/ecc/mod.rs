@@ -18,7 +18,7 @@ use crate::bigint::{
 };
 use crate::fields::FieldChip;
 use crate::fields::{
-    fp_crt::{FpChip, FpConfig},
+    fp::{FpChip, FpConfig},
     Selectable,
 };
 use crate::gates::qap_gate::QuantumCell;
@@ -638,8 +638,8 @@ pub fn multi_scalar_multiply<F: FieldExt>(
 }
 
 pub struct EccChip<F: FieldExt, FC: FieldChip<F>> {
-    field_chip: FC,
-    range: range::RangeConfig<F>,
+    pub field_chip: FC,
+    pub range: range::RangeConfig<F>,
 }
 
 impl<F: FieldExt, FC: FieldChip<F>> EccChip<F, FC> {
@@ -677,6 +677,19 @@ impl<F: FieldExt, FC: FieldChip<F>> EccChip<F, FC> {
         let y_assigned = self.field_chip.load_private(layouter, y)?;
 
         Ok(EccPoint::construct(x_assigned, y_assigned))
+    }
+
+    pub fn negate(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        P: &EccPoint<F, FC>,
+    ) -> Result<EccPoint<F, FC>, Error> {
+        Ok(EccPoint::construct(
+            P.x,
+            self.field_chip
+                .negate(layouter, &P.y)
+                .expect("negating field point should not fail"),
+        ))
     }
 
     pub fn add_unequal(

@@ -8,8 +8,6 @@ use halo2_proofs::{
     circuit::*,
     plonk::*,
 };
-use num_bigint::BigUint as big_uint;
-use num_traits::One;
 
 // given OverflowInteger<F>'s `a` and `b` of the same shape,
 // returns whether `a == b`
@@ -30,22 +28,18 @@ pub fn assign<F: FieldExt>(
 
     let mut eq = Vec::with_capacity(k);
     for idx in 0..k {
-	let eq_limb = range.is_equal(
-	    layouter,
-	    &a.limbs[idx],
-	    &b.limbs[idx])?;
-	eq.push(eq_limb);
+        let eq_limb = range.is_equal(layouter, &a.limbs[idx], &b.limbs[idx])?;
+        eq.push(eq_limb);
     }
 
     let mut partials = Vec::with_capacity(k);
     partials.push(eq[0].clone());
     for idx in 0..(k - 1) {
-	let new = range.qap_config.and(
-	    layouter,
-	    &Existing(&eq[idx + 1]),
-	    &Existing(&partials[idx])
-	)?;
-	partials.push(new);
+        let new =
+            range
+                .qap_config
+                .and(layouter, &Existing(&eq[idx + 1]), &Existing(&partials[idx]))?;
+        partials.push(new);
     }
     Ok(partials[k - 1].clone())
 }
