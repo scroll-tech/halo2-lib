@@ -328,13 +328,11 @@ pub fn miller_loop_BN<F: FieldExt>(
     let mut f = FqPoint::construct(f_coeffs, 12);
 
     loop {
-        println!("{}", i);
         if i != last_index - 1 {
             let f_sq = fp12_chip.mul(layouter, &f, &f)?;
             f = fp12_multiply_with_line_equal(&ecc_chip.field_chip, layouter, &f_sq, &R, P)?;
         }
         R = ecc_chip.double(layouter, &R)?;
-        println!("double done");
 
         assert!(pseudo_binary_encoding[i] <= 1 && pseudo_binary_encoding[i] >= -1);
         if pseudo_binary_encoding[i] != 0 {

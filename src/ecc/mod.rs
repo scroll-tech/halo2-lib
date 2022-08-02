@@ -165,17 +165,11 @@ pub fn ecc_double<F: FieldExt, FC: FieldChip<F>>(
     layouter: &mut impl Layouter<F>,
     P: &EccPoint<F, FC>,
 ) -> Result<EccPoint<F, FC>, Error> {
-    println!(
-        "({:?}, {:?})",
-        FC::get_assigned_value(&P.x),
-        FC::get_assigned_value(&P.y)
-    );
     // removed optimization that computes `2 * lambda` while assigning witness to `lambda` simultaneously, in favor of readability. The difference is just copying `lambda` once
     let two_y = chip.scalar_mul_no_carry(layouter, &P.y, F::from(2))?;
     let three_x = chip.scalar_mul_no_carry(layouter, &P.x, F::from(3))?;
     let three_x_sq = chip.mul_no_carry(layouter, &three_x, &P.x)?;
     let lambda = chip.divide(layouter, &three_x_sq, &two_y)?;
-    println!("finished division");
 
     // x_3 = lambda^2 - 2 x % p
     let lambda_sq = chip.mul_no_carry(layouter, &lambda, &lambda)?;

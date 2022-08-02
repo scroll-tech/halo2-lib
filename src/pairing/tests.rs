@@ -32,7 +32,7 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         let value = meta.advice_column();
         let constant = meta.fixed_column();
-        PairingChip::configure(meta, value, constant, 17, 68, 4)
+        PairingChip::configure(meta, value, constant, 22, 88, 3)
     }
 
     fn synthesize(
@@ -57,8 +57,11 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
                     &self.P.unwrap(),
                     &G2Prepared::from_affine(self.Q.unwrap()),
                 )]);
-                let f_val: Vec<BigInt> =
-                    f.coeffs.iter().map(|x| x.value.clone().unwrap()).collect();
+                let f_val: Vec<String> = f
+                    .coeffs
+                    .iter()
+                    .map(|x| x.value.clone().unwrap().to_str_radix(16))
+                    .collect();
                 println!("single miller loop:");
                 println!("actual f: {:#?}", actual_f);
                 println!("circuit f: {:#?}", f_val);
@@ -70,7 +73,7 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
 
 #[test]
 fn test_pairing() {
-    let k = 18;
+    let k = 23;
     let mut rng = rand::thread_rng();
 
     let P = Some(G1Affine::random(&mut rng));

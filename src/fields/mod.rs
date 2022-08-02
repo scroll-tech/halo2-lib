@@ -115,16 +115,13 @@ pub trait FieldChip<F: FieldExt> {
         a: &Self::FieldPoint,
         b: &Self::FieldPoint,
     ) -> Result<Self::FieldPoint, Error> {
-        println!("start division");
         let a_val = Self::get_assigned_value(a);
         let b_val = Self::get_assigned_value(b);
-        println!("{:?} / {:?}", a_val, b_val);
         let b_inv: Option<Self::FieldType> = if let Some(bv) = b_val {
             bv.invert().into()
         } else {
             None
         };
-        println!("finished division witness gen");
         let quot_val = a_val.zip(b_inv).map(|(a, bi)| a * bi);
 
         let quot = self.load_private(layouter, Self::fe_to_witness(&quot_val))?;

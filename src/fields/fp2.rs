@@ -97,7 +97,6 @@ impl<F: FieldExt> FieldChip<F> for Fp2Chip<F> {
         assert_eq!(x.coeffs.len(), 2);
         let c0 = x.coeffs[0].value.clone();
         let c1 = x.coeffs[1].value.clone();
-        println!("{:?}, {:?}", c0, c1);
         c0.zip(c1).map(|(c0, c1)| Fq2 {
             c0: bigint_to_fe(&c0),
             c1: bigint_to_fe(&c1),
