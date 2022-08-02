@@ -410,8 +410,8 @@ impl<F: FieldExt> Circuit<F> for G2Circuit<F> {
                     sum.y.coeffs[1].value.clone().unwrap(),
                     BigInt::from(fe_to_biguint(&actual_sum.y.c1))
                 );
+                println!("add unequal witness OK");
             }
-            println!("add unequal witness OK");
         }
 
         // test double
@@ -435,8 +435,8 @@ impl<F: FieldExt> Circuit<F> for G2Circuit<F> {
                     doub.y.coeffs[1].value.clone().unwrap(),
                     BigInt::from(fe_to_biguint(&actual_doub.y.c1))
                 );
+                println!("double witness OK");
             }
-            println!("double witness OK");
         }
 
         Ok(())
@@ -467,7 +467,7 @@ fn test_ecc_g2() {
 #[cfg(feature = "dev-graph")]
 #[test]
 fn plot_ecc_g2() {
-    let k = 12;
+    let k = 13;
     use plotters::prelude::*;
 
     let root = BitMapBackend::new("layout.png", (512, 16384)).into_drawing_area();

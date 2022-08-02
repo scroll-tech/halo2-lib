@@ -1,10 +1,11 @@
 use halo2_proofs::{
-    arithmetic::{Field, FieldExt},
+    arithmetic::{BaseExt, Field, FieldExt},
     circuit::{AssignedCell, Layouter},
     pairing::bn256::Fq,
     plonk::{Advice, Column, ConstraintSystem, Error, Fixed, Selector, TableColumn},
 };
 use num_bigint::{BigInt, BigUint};
+use num_traits::Num;
 
 use super::{FieldChip, Selectable};
 use crate::gates::range;
@@ -104,7 +105,7 @@ impl<F: FieldExt> FpChip<F> {
                     a_limbs.len(),
                     &mut region,
                 )?;
-                Ok((a_limbs, a_native[0]))
+                Ok((a_limbs, a_native[0].clone()))
             },
         )?;
 
@@ -207,7 +208,7 @@ impl<F: FieldExt> FieldChip<F> for FpChip<F> {
         a: &CRTInteger<F>,
     ) -> Result<CRTInteger<F>, Error> {
         // Compute p - a.truncation using carries
-        let p = self.load_constant(layouter, BigInt::from(self.config.p))?;
+        let p = self.load_constant(layouter, BigInt::from(self.config.p.clone()))?;
         let (out_or_p, underflow) = sub::crt(&self.config.range, layouter, &p, &a)?;
         layouter.assign_region(
             || "fp negate no underflow",

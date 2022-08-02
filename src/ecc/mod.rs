@@ -2,14 +2,14 @@
 use std::marker::PhantomData;
 
 use halo2_proofs::{
-    arithmetic::{Field, FieldExt},
+    arithmetic::{BaseExt, Field, FieldExt},
     circuit::*,
     pairing::bn256::{Fq as Fp, Fr, G1Affine},
     pairing::group::ff::PrimeField,
     plonk::{Advice, Column, ConstraintSystem, Error, Fixed},
 };
 use num_bigint::{BigInt, BigUint};
-use num_traits::{One, Zero};
+use num_traits::{Num, One, Zero};
 use rand_core::OsRng;
 
 use crate::bigint::{
@@ -27,14 +27,6 @@ use crate::gates::{qap_gate, range};
 use crate::utils::{
     bigint_to_fe, decompose_bigint_option, decompose_biguint, fe_to_bigint, fe_to_biguint, modulus,
 };
-
-// committing to prime field F_p with
-// p = 21888242871839275222246405745257275088696311157297823662689037894645226208583
-//   = 0x30644e72e131a029b85045b68181585d97816a916871ca8d3c208c16d87cfd47
-use lazy_static::lazy_static;
-lazy_static! {
-    static ref FP_MODULUS: BigUint = modulus::<Fp>();
-}
 
 // EccPoint and EccChip take in a generic `FieldChip` to implement generic elliptic curve operations on arbitrary field extensions (provided chip exists) for short Weierstrass curves (currently further assuming a4 = 0 for optimization purposes)
 #[derive(Debug)]
@@ -173,11 +165,17 @@ pub fn ecc_double<F: FieldExt, FC: FieldChip<F>>(
     layouter: &mut impl Layouter<F>,
     P: &EccPoint<F, FC>,
 ) -> Result<EccPoint<F, FC>, Error> {
+    println!(
+        "({:?}, {:?})",
+        FC::get_assigned_value(&P.x),
+        FC::get_assigned_value(&P.y)
+    );
     // removed optimization that computes `2 * lambda` while assigning witness to `lambda` simultaneously, in favor of readability. The difference is just copying `lambda` once
     let two_y = chip.scalar_mul_no_carry(layouter, &P.y, F::from(2))?;
     let three_x = chip.scalar_mul_no_carry(layouter, &P.x, F::from(3))?;
     let three_x_sq = chip.mul_no_carry(layouter, &three_x, &P.x)?;
     let lambda = chip.divide(layouter, &three_x_sq, &two_y)?;
+    println!("finished division");
 
     // x_3 = lambda^2 - 2 x % p
     let lambda_sq = chip.mul_no_carry(layouter, &lambda, &lambda)?;
@@ -654,7 +652,10 @@ impl<F: FieldExt, FC: FieldChip<F>> EccChip<F, FC> {
         lookup_bits: usize,
         limb_bits: usize,
         num_limbs: usize,
-    ) -> FpConfig<F> {
+    ) -> FpConfig<F>
+    where
+        FC::FieldType: BaseExt,
+    {
         FpChip::configure(
             meta,
             value,
@@ -662,7 +663,7 @@ impl<F: FieldExt, FC: FieldChip<F>> EccChip<F, FC> {
             lookup_bits,
             limb_bits,
             num_limbs,
-            FP_MODULUS.clone(),
+            BigUint::from_str_radix(&FC::FieldType::MODULUS[2..], 16).unwrap(),
         )
     }
 
@@ -685,7 +686,7 @@ impl<F: FieldExt, FC: FieldChip<F>> EccChip<F, FC> {
         P: &EccPoint<F, FC>,
     ) -> Result<EccPoint<F, FC>, Error> {
         Ok(EccPoint::construct(
-            P.x,
+            P.x.clone(),
             self.field_chip
                 .negate(layouter, &P.y)
                 .expect("negating field point should not fail"),

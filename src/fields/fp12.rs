@@ -1,6 +1,8 @@
+use halo2_proofs::arithmetic::BaseExt;
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::Error};
 use halo2curves::bn254::{Fq, Fq12, Fq2, Fq6};
 use num_bigint::{BigInt, BigUint};
+use num_traits::Num;
 
 use crate::bigint::{
     add_no_carry, carry_mod, check_carry_mod_to_zero, mul_no_carry, scalar_mul_no_carry,
@@ -16,6 +18,7 @@ use crate::utils::{bigint_to_fe, fe_to_biguint};
 
 use super::FieldChip;
 
+const XI_0: u64 = 9;
 // Represent Fp12 point as FqPoint with degree = 12
 // `Fp12 = Fp2[w] / (w^6 - u - xi)`
 // This implementation assumes p = 3 (mod 4) in order for the polynomial u^2 + 1 to
@@ -27,8 +30,10 @@ pub struct Fp12Chip<F: FieldExt> {
 }
 
 impl<F: FieldExt> Fp12Chip<F> {
-    pub fn construct(fp_chip: FpChip<F>) -> Self {
-        Self { fp_chip }
+    pub fn construct(config: FpConfig<F>) -> Self {
+        Self {
+            fp_chip: FpChip { config },
+        }
     }
 
     fn fp2_mul_no_carry(
@@ -125,6 +130,7 @@ impl<F: FieldExt> Fp12Chip<F> {
         Ok(FqPoint::construct(coeffs, 12))
     }
 
+    /*
     // computes a ** (p ** power)
     fn frobenius(
         &self,
@@ -142,6 +148,7 @@ impl<F: FieldExt> Fp12Chip<F> {
 
         Ok(a.clone())
     }
+    */
 }
 
 impl<F: FieldExt> FieldChip<F> for Fp12Chip<F> {
@@ -287,7 +294,7 @@ impl<F: FieldExt> FieldChip<F> for Fp12Chip<F> {
         b: &FqPoint<F>,
     ) -> Result<FqPoint<F>, Error> {
         let deg = 6;
-        let xi = 9;
+        let xi = XI_0;
         assert_eq!(a.degree, 12);
         assert_eq!(b.degree, 12);
 
@@ -336,28 +343,36 @@ impl<F: FieldExt> FieldChip<F> for Fp12Chip<F> {
         // out_{i + 6} = a0b1_plus_a1b0_{i} + a0b0_minus_a1b1_{i + 6} + 9 * a0b1_plus_a1b0_{i + 6}
         let mut out_coeffs = Vec::with_capacity(12);
         for i in 0..6 {
-            let coeff1 =
-                self.fp_chip
-                    .sub_no_carry(layouter, &a0b0_minus_a1b1[i], &a0b1_plus_a1b0[i + 6])?;
-            let coeff2 =
-                self.fp_chip
-                    .scalar_mul_no_carry(layouter, &a0b0_minus_a1b1[i + 6], F::from(9))?;
-            let coeff = self.fp_chip.add_no_carry(layouter, &coeff1, &coeff2)?;
             if i < 5 {
+                let coeff1 = self.fp_chip.sub_no_carry(
+                    layouter,
+                    &a0b0_minus_a1b1[i],
+                    &a0b1_plus_a1b0[i + 6],
+                )?;
+                let coeff2 = self.fp_chip.scalar_mul_no_carry(
+                    layouter,
+                    &a0b0_minus_a1b1[i + 6],
+                    F::from(XI_0),
+                )?;
+                let coeff = self.fp_chip.add_no_carry(layouter, &coeff1, &coeff2)?;
                 out_coeffs.push(coeff);
             } else {
                 out_coeffs.push(a0b0_minus_a1b1[i].clone());
             }
         }
         for i in 0..6 {
-            let coeff1 =
-                self.fp_chip
-                    .add_no_carry(layouter, &a0b1_plus_a1b0[i], &a0b0_minus_a1b1[i + 6])?;
-            let coeff2 =
-                self.fp_chip
-                    .scalar_mul_no_carry(layouter, &a0b1_plus_a1b0[i + 6], F::from(9))?;
-            let coeff = self.fp_chip.add_no_carry(layouter, &coeff1, &coeff2)?;
             if i < 5 {
+                let coeff1 = self.fp_chip.add_no_carry(
+                    layouter,
+                    &a0b1_plus_a1b0[i],
+                    &a0b0_minus_a1b1[i + 6],
+                )?;
+                let coeff2 = self.fp_chip.scalar_mul_no_carry(
+                    layouter,
+                    &a0b1_plus_a1b0[i + 6],
+                    F::from(XI_0),
+                )?;
+                let coeff = self.fp_chip.add_no_carry(layouter, &coeff1, &coeff2)?;
                 out_coeffs.push(coeff);
             } else {
                 out_coeffs.push(a0b1_plus_a1b0[i].clone());

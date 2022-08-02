@@ -1,6 +1,11 @@
-use halo2_proofs::{arithmetic::FieldExt, circuit::Layouter, plonk::Error};
+use halo2_proofs::{
+    arithmetic::{BaseExt, FieldExt},
+    circuit::Layouter,
+    plonk::Error,
+};
 use halo2curves::bn254::{Fq, Fq2};
 use num_bigint::{BigInt, BigUint};
+use num_traits::Num;
 
 use crate::bigint::{
     add_no_carry, carry_mod, check_carry_mod_to_zero, mul_no_carry, scalar_mul_no_carry,
@@ -31,11 +36,13 @@ impl<F: FieldExt> Fp2Chip<F> {
     pub fn load_constant(
         &self,
         layouter: &mut impl Layouter<F>,
-        coeffs: Vec<BigInt>,
+        c: Fq2,
     ) -> Result<FqPoint<F>, Error> {
         let mut assigned_coeffs = Vec::with_capacity(2);
-        for a in coeffs {
-            let assigned_coeff = self.fp_chip.load_constant(layouter, a.clone())?;
+        for a in &[c.c0, c.c1] {
+            let assigned_coeff = self
+                .fp_chip
+                .load_constant(layouter, BigInt::from(fe_to_biguint(a)))?;
             assigned_coeffs.push(assigned_coeff);
         }
         Ok(FqPoint::construct(assigned_coeffs, 2))
@@ -68,6 +75,17 @@ impl<F: FieldExt> Fp2Chip<F> {
         let neg_a1 = self.fp_chip.negate(layouter, &a.coeffs[1])?;
         Ok(FqPoint::construct(vec![a.coeffs[0].clone(), neg_a1], 2))
     }
+
+    pub fn neg_conjugate(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &FqPoint<F>,
+    ) -> Result<FqPoint<F>, Error> {
+        assert_eq!(a.coeffs.len(), 2);
+
+        let neg_a0 = self.fp_chip.negate(layouter, &a.coeffs[0])?;
+        Ok(FqPoint::construct(vec![neg_a0, a.coeffs[1].clone()], 2))
+    }
 }
 
 impl<F: FieldExt> FieldChip<F> for Fp2Chip<F> {
@@ -79,6 +97,7 @@ impl<F: FieldExt> FieldChip<F> for Fp2Chip<F> {
         assert_eq!(x.coeffs.len(), 2);
         let c0 = x.coeffs[0].value.clone();
         let c1 = x.coeffs[1].value.clone();
+        println!("{:?}, {:?}", c0, c1);
         c0.zip(c1).map(|(c0, c1)| Fq2 {
             c0: bigint_to_fe(&c0),
             c1: bigint_to_fe(&c1),

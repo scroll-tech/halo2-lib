@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 use std::marker::PhantomData;
 
-use halo2_pairing::ecc_crt::*;
-use halo2_pairing::fields::fp_crt::FpConfig;
+use halo2_pairing::ecc::*;
+use halo2_pairing::fields::fp::{FpChip, FpConfig};
 use halo2_proofs::arithmetic::Field;
 use halo2_proofs::circuit::floor_planner::V1;
 use halo2_proofs::pairing::bn256::{Bn256, G1Affine, G1};
@@ -51,7 +51,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         let value = meta.advice_column();
         let constant = meta.fixed_column();
-        EccChip::configure(meta, value, constant, 17, 88, 3)
+        EccChip::<F, FpChip<F>>::configure(meta, value, constant, 22, 88, 3)
     }
 
     fn synthesize(
@@ -59,11 +59,32 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
-        let chip = EccChip::construct(config.clone());
-        chip.load_lookup_table(&mut layouter)?;
+        let fp_chip = FpChip::construct(config.clone());
+        fp_chip.load_lookup_table(&mut layouter)?;
+        let range = fp_chip.config.range.clone();
+        let chip = EccChip::construct(fp_chip, range);
 
-        let P_assigned = chip.load_private(&mut layouter, self.P.map(|P| (P.x, P.y)))?;
-        let Q_assigned = chip.load_private(&mut layouter, self.Q.map(|P| (P.x, P.y)))?;
+        let P_assigned = chip.load_private(
+            &mut layouter,
+            match self.P {
+                Some(P) => (Some(P.x), Some(P.y)),
+                None => (None, None),
+            },
+        )?;
+        let Q_assigned = chip.load_private(
+            &mut layouter,
+            match self.Q {
+                Some(Q) => (Some(Q.x), Some(Q.y)),
+                None => (None, None),
+            },
+        )?;
+        let mut pt = G1Affine::default();
+        let mut P_fixed = FixedEccPoint::from_g1(&pt, 3, 88);
+        if let Some(P_point) = &self.P {
+            pt = P_point.clone();
+            P_fixed = FixedEccPoint::<F>::from_g1(&P_point, 3, 88);
+        }
+
         let x_assigned = layouter.assign_region(
             || "input scalar x",
             |mut region| {
@@ -78,7 +99,13 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         let mut P_batch_assigned = Vec::with_capacity(self.batch_size);
         let mut x_batch_assigned = Vec::with_capacity(self.batch_size);
         for i in 0..self.batch_size {
-            let assigned = chip.load_private(&mut layouter, self.P_batch[i].map(|P| (P.x, P.y)))?;
+            let assigned = chip.load_private(
+                &mut layouter,
+                match self.P_batch[i] {
+                    Some(P) => (Some(P.x), Some(P.y)),
+                    None => (None, None),
+                },
+            )?;
             P_batch_assigned.push(assigned);
 
             let xb_assigned = layouter.assign_region(
@@ -94,7 +121,6 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
             )?;
             x_batch_assigned.push(xb_assigned);
         }
-
         /*
         // test fp mul
         {
