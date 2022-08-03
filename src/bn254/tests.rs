@@ -1,15 +1,21 @@
 #![cfg(test)]
+#![allow(non_snake_case)]
 use std::marker::PhantomData;
 
+use super::pairing::PairingChip;
 use super::*;
+use crate::fields::fp::FpConfig;
 use halo2_proofs::arithmetic::BaseExt;
-use halo2_proofs::circuit::floor_planner::*;
+use halo2_proofs::circuit::floor_planner::V1;
 use halo2_proofs::pairing::bn256::{multi_miller_loop, G1Affine, G2Affine, G2Prepared, Gt, G1, G2};
 use halo2_proofs::pairing::group::ff::PrimeField;
 use halo2_proofs::pairing::group::Group;
 use halo2_proofs::{
-    arithmetic::FieldExt, circuit::*, dev::MockProver, pairing::bn256::Fq as Fp,
-    pairing::bn256::Fr as Fn, plonk::*,
+    arithmetic::FieldExt,
+    circuit::{Layouter, SimpleFloorPlanner},
+    dev::MockProver,
+    pairing::bn256::Fr,
+    plonk::*,
 };
 use halo2curves::bn254::Fq12;
 use num_bigint::{BigInt, RandBigInt};
@@ -79,7 +85,7 @@ fn test_pairing() {
     let P = Some(G1Affine::random(&mut rng));
     let Q = Some(G2Affine::random(&mut rng));
 
-    let circuit = PairingCircuit::<Fn> {
+    let circuit = PairingCircuit::<Fr> {
         P,
         Q,
         _marker: PhantomData,

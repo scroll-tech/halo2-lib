@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 use std::marker::PhantomData;
 
+use ff::PrimeField;
 use group::Group;
 use halo2_proofs::{
     arithmetic::{BaseExt, CurveAffine, Field, FieldExt},
@@ -39,7 +40,7 @@ pub struct FixedEccPoint<F: FieldExt, GA: CurveAffine> {
 
 impl<F: FieldExt, GA: CurveAffine> FixedEccPoint<F, GA>
 where
-    GA::Base: FieldExt,
+    GA::Base: PrimeField,
 {
     pub fn construct(x: FixedCRTInteger<F>, y: FixedCRTInteger<F>) -> Self {
         Self {
@@ -89,14 +90,14 @@ pub fn fixed_base_scalar_multiply<F: FieldExt, GA: CurveAffine>(
     window_bits: usize,
 ) -> Result<EccPoint<F, FpChip<F, GA::Base>>, Error>
 where
-    GA::Base: FieldExt,
+    GA::Base: PrimeField,
 {
     let num_windows = (max_bits + window_bits - 1) / window_bits;
     let rounded_bitlen = num_windows * window_bits;
 
     // cached_points[i][j] holds j * 2^(i * w) for j in {0, ..., 2^w - 1}
     let mut cached_points = Vec::with_capacity(num_windows);
-    let mut base_pt = GA::from_xy(bigint_to_fe(&P.x.value), bigint_to_fe(&P.y.value)).unwrap();
+    let base_pt = GA::from_xy(bigint_to_fe(&P.x.value), bigint_to_fe(&P.y.value)).unwrap();
     let base_pt_assigned = P.assign(&chip, layouter)?;
     let mut increment = base_pt;
     for i in 0..num_windows {

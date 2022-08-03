@@ -49,7 +49,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         let value = meta.advice_column();
         let constant = meta.fixed_column();
-        EccChip::<F, FpChip<F, Fp>>::configure(meta, value, constant, 22, 88, 3)
+        FpConfig::configure(meta, value, constant, 22, 88, 3, modulus::<Fq>())
     }
 
     fn synthesize(
@@ -345,7 +345,7 @@ impl<F: FieldExt> Circuit<F> for G2Circuit<F> {
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         let value = meta.advice_column();
         let constant = meta.fixed_column();
-        EccChip::<F, Fp2Chip<F, Fq, Fq2>>::configure(meta, value, constant, 22, 88, 3)
+        FpConfig::configure(meta, value, constant, 22, 88, 3, modulus::<Fq>())
     }
 
     fn synthesize(

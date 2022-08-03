@@ -1,5 +1,6 @@
 use std::marker::PhantomData;
 
+use ff::PrimeField;
 use halo2_proofs::{
     arithmetic::{BaseExt, Field, FieldExt},
     circuit::{AssignedCell, Layouter},
@@ -75,36 +76,17 @@ impl<F: FieldExt> FpConfig<F> {
     }
 }
 
-pub struct FpChip<F: FieldExt, Fp: FieldExt> {
+pub struct FpChip<F: FieldExt, Fp: PrimeField> {
     pub config: FpConfig<F>,
     _marker: PhantomData<Fp>,
 }
 
-impl<F: FieldExt, Fp: FieldExt> FpChip<F, Fp> {
+impl<F: FieldExt, Fp: PrimeField> FpChip<F, Fp> {
     pub fn construct(config: FpConfig<F>) -> Self {
         Self {
             config,
             _marker: PhantomData,
         }
-    }
-
-    pub fn configure(
-        meta: &mut ConstraintSystem<F>,
-        value: Column<Advice>,
-        constant: Column<Fixed>,
-        lookup_bits: usize,
-        limb_bits: usize,
-        num_limbs: usize,
-    ) -> FpConfig<F> {
-        FpConfig::configure(
-            meta,
-            value,
-            constant,
-            lookup_bits,
-            limb_bits,
-            num_limbs,
-            modulus::<Fp>(),
-        )
     }
 
     pub fn load_lookup_table(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
@@ -147,7 +129,7 @@ impl<F: FieldExt, Fp: FieldExt> FpChip<F, Fp> {
     }
 }
 
-impl<F: FieldExt, Fp: FieldExt> FieldChip<F> for FpChip<F, Fp> {
+impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpChip<F, Fp> {
     type WitnessType = Option<BigInt>;
     type FieldPoint = CRTInteger<F>;
     type FieldType = Fp;
@@ -307,7 +289,7 @@ impl<F: FieldExt, Fp: FieldExt> FieldChip<F> for FpChip<F, Fp> {
     }
 }
 
-impl<F: FieldExt, Fp: FieldExt> Selectable<F> for FpChip<F, Fp> {
+impl<F: FieldExt, Fp: PrimeField> Selectable<F> for FpChip<F, Fp> {
     type Point = CRTInteger<F>;
 
     fn select(
@@ -365,7 +347,7 @@ pub(crate) mod tests {
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
             let value = meta.advice_column();
             let constant = meta.fixed_column();
-            FpChip::<F, Fq>::configure(meta, value, constant, 17, 68, 4)
+            FpConfig::configure(meta, value, constant, 17, 68, 4, modulus::<Fq>())
         }
 
         fn synthesize(

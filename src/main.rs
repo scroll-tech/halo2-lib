@@ -4,10 +4,10 @@ use std::marker::PhantomData;
 
 use halo2_pairing::ecc::*;
 use halo2_pairing::fields::fp::{FpChip, FpConfig};
+use halo2_pairing::utils::modulus;
 use halo2_proofs::arithmetic::Field;
 use halo2_proofs::circuit::floor_planner::V1;
-use halo2_proofs::pairing::bn256::{Bn256, G1Affine, G1};
-use halo2_proofs::pairing::group::ff::PrimeField;
+use halo2_proofs::pairing::bn256::{Bn256, G1Affine};
 use halo2_proofs::poly::commitment::Params;
 use halo2_proofs::{
     arithmetic::FieldExt,
@@ -52,7 +52,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         let value = meta.advice_column();
         let constant = meta.fixed_column();
-        EccChip::<F, FpChip<F, Fp>>::configure(meta, value, constant, 22, 88, 3)
+        FpConfig::configure(meta, value, constant, 22, 88, 3, modulus::<Fp>())
     }
 
     fn synthesize(

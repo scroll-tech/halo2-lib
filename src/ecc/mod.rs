@@ -1,5 +1,4 @@
 #![allow(non_snake_case)]
-#![feature(explicit_generic_args_with_impl_trait)]
 use std::marker::PhantomData;
 
 use group::{Curve, Group};
@@ -408,7 +407,7 @@ where
         is_zero_window_vec.push(is_zero_window);
     }
     let mut rng = rand::thread_rng();
-    let base_point: GA = GA::CurveExt::random(rng).to_affine();
+    let base_point: GA = GA::CurveExt::random(&mut rng).to_affine();
     let base_point_coord = base_point.coordinates().unwrap();
     let pt_x = FC::fe_to_witness(&Some(*base_point_coord.x()));
     let pt_y = FC::fe_to_witness(&Some(*base_point_coord.y()));
@@ -485,28 +484,6 @@ pub struct EccChip<F: FieldExt, FC: FieldChip<F>> {
 impl<F: FieldExt, FC: FieldChip<F>> EccChip<F, FC> {
     pub fn construct(field_chip: FC, range: range::RangeConfig<F>) -> Self {
         Self { field_chip, range }
-    }
-
-    pub fn configure(
-        meta: &mut ConstraintSystem<F>,
-        value: Column<Advice>,
-        constant: Column<Fixed>,
-        lookup_bits: usize,
-        limb_bits: usize,
-        num_limbs: usize,
-    ) -> FpConfig<F>
-    where
-        FC::FieldType: BaseExt,
-    {
-        FpConfig::configure(
-            meta,
-            value,
-            constant,
-            lookup_bits,
-            limb_bits,
-            num_limbs,
-            modulus::<FC::FieldType>(),
-        )
     }
 
     pub fn load_private(

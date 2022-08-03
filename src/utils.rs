@@ -1,6 +1,4 @@
-use halo2_proofs::arithmetic::BaseExt;
-use halo2_proofs::arithmetic::Field;
-use halo2_proofs::arithmetic::FieldExt;
+use ff::PrimeField;
 use num_bigint::BigInt;
 use num_bigint::BigUint;
 use num_bigint::Sign;
@@ -15,21 +13,21 @@ use halo2_proofs::pairing::bn256::Fr;
 
 // utils modified from halo2wrong
 
-pub fn modulus<F: BaseExt>() -> BigUint {
-    BigUint::from_str_radix(&F::MODULUS[2..], 16).unwrap()
+pub fn modulus<F: PrimeField>() -> BigUint {
+    fe_to_biguint(&-F::from(1)) + 1u64
 }
 
-pub fn power_of_two<F: FieldExt>(n: usize) -> F {
+pub fn power_of_two<F: PrimeField>(n: usize) -> F {
     biguint_to_fe(&(BigUint::one() << n))
 }
 
-pub fn biguint_to_fe<F: FieldExt>(e: &BigUint) -> F {
+pub fn biguint_to_fe<F: PrimeField>(e: &BigUint) -> F {
     let modulus = modulus::<F>();
     let e = e % modulus;
     F::from_str_vartime(&e.to_str_radix(10)[..]).unwrap()
 }
 
-pub fn bigint_to_fe<F: FieldExt>(e: &BigInt) -> F {
+pub fn bigint_to_fe<F: PrimeField>(e: &BigInt) -> F {
     let modulus = BigInt::from_biguint(Sign::Plus, modulus::<F>());
     let e: BigInt = if e < &BigInt::zero() {
         let mut a: BigInt = e % &modulus;
@@ -43,11 +41,11 @@ pub fn bigint_to_fe<F: FieldExt>(e: &BigInt) -> F {
     F::from_str_vartime(&e.to_str_radix(10)[..]).unwrap()
 }
 
-pub fn fe_to_biguint<F: FieldExt>(fe: &F) -> BigUint {
+pub fn fe_to_biguint<F: PrimeField>(fe: &F) -> BigUint {
     BigUint::from_bytes_le(fe.to_repr().as_ref())
 }
 
-pub fn fe_to_bigint<F: FieldExt>(fe: &F) -> BigInt {
+pub fn fe_to_bigint<F: PrimeField>(fe: &F) -> BigInt {
     let modulus = modulus::<F>();
     let e = fe_to_biguint(fe);
     if e <= &modulus / 2u32 {
@@ -57,11 +55,11 @@ pub fn fe_to_bigint<F: FieldExt>(fe: &F) -> BigInt {
     }
 }
 
-pub fn decompose<F: FieldExt>(e: &F, number_of_limbs: usize, bit_len: usize) -> Vec<F> {
+pub fn decompose<F: PrimeField>(e: &F, number_of_limbs: usize, bit_len: usize) -> Vec<F> {
     decompose_bigint(&fe_to_bigint(e), number_of_limbs, bit_len)
 }
 
-pub fn decompose_biguint<F: FieldExt>(
+pub fn decompose_biguint<F: PrimeField>(
     e: &BigUint,
     number_of_limbs: usize,
     bit_len: usize,
@@ -79,7 +77,11 @@ pub fn decompose_biguint<F: FieldExt>(
     limbs
 }
 
-pub fn decompose_bigint<F: FieldExt>(e: &BigInt, number_of_limbs: usize, bit_len: usize) -> Vec<F> {
+pub fn decompose_bigint<F: PrimeField>(
+    e: &BigInt,
+    number_of_limbs: usize,
+    bit_len: usize,
+) -> Vec<F> {
     let sgn = e.sign();
     let mut e: BigUint = if e.is_negative() {
         e.neg().to_biguint().unwrap()
@@ -102,7 +104,7 @@ pub fn decompose_bigint<F: FieldExt>(e: &BigInt, number_of_limbs: usize, bit_len
     limbs
 }
 
-pub fn decompose_option<F: FieldExt>(
+pub fn decompose_option<F: PrimeField>(
     value: &Option<F>,
     number_of_limbs: usize,
     bit_len: usize,
@@ -110,7 +112,7 @@ pub fn decompose_option<F: FieldExt>(
     decompose_bigint_option(&value.map(|fe| fe_to_bigint(&fe)), number_of_limbs, bit_len)
 }
 
-pub fn decompose_bigint_option<F: FieldExt>(
+pub fn decompose_bigint_option<F: PrimeField>(
     value: &Option<BigInt>,
     number_of_limbs: usize,
     bit_len: usize,
@@ -142,7 +144,7 @@ pub fn decompose_bigint_option<F: FieldExt>(
     }
 }
 
-pub fn decompose_biguint_option<F: FieldExt>(
+pub fn decompose_biguint_option<F: PrimeField>(
     value: &Option<F>,
     number_of_limbs: usize,
     bit_len: usize,

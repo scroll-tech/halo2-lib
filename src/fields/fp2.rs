@@ -21,8 +21,8 @@ use super::{FieldChip, FqPoint};
 
 // helper trait so we can actually construct and read the Fp2 struct
 // needs to be implemented for Fp2 struct for use cases below
-pub trait FieldExtConstructor<Fp: FieldExt, const degree: usize> {
-    fn new(c: [Fp; degree]) -> Self;
+pub trait FieldExtConstructor<Fp: FieldExt, const DEGREE: usize> {
+    fn new(c: [Fp; DEGREE]) -> Self;
 
     fn coeffs(&self) -> Vec<Fp>;
 }
