@@ -1,10 +1,12 @@
 #![allow(non_snake_case)]
+#![feature(explicit_generic_args_with_impl_trait)]
 use std::marker::PhantomData;
 
-use group::Group;
+use group::{Curve, Group};
 use halo2_proofs::{
     arithmetic::{BaseExt, CurveAffine, Field, FieldExt},
     circuit::{AssignedCell, Layouter},
+    pairing::bn256::{G1Affine, G1},
     plonk::{Advice, Column, ConstraintSystem, Error, Fixed},
 };
 use num_bigint::{BigInt, BigUint};
@@ -355,7 +357,7 @@ pub fn multi_scalar_multiply<F: FieldExt, FC, GA>(
     window_bits: usize,
 ) -> Result<EccPoint<F, FC>, Error>
 where
-    FC: FieldChip<F>,
+    FC: FieldChip<F> + Selectable<F, Point = FC::FieldPoint>,
     GA: CurveAffine<Base = FC::FieldType>,
 {
     let k = P.len();
@@ -405,11 +407,11 @@ where
         }
         is_zero_window_vec.push(is_zero_window);
     }
-
-    let base_point = GA::random(OsRng());
+    let mut rng = rand::thread_rng();
+    let base_point: GA = GA::CurveExt::random(rng).to_affine();
     let base_point_coord = base_point.coordinates().unwrap();
-    let pt_x = FC::fe_to_witness(&Some(base_point_coord.x()));
-    let pt_y = FC::fe_to_witness(&Some(base_point_coord.y()));
+    let pt_x = FC::fe_to_witness(&Some(*base_point_coord.x()));
+    let pt_y = FC::fe_to_witness(&Some(*base_point_coord.y()));
     let base = {
         let x_overflow = chip.load_private(layouter, pt_x)?;
         let y_overflow = chip.load_private(layouter, pt_y)?;
@@ -460,7 +462,7 @@ where
         for base_idx in 0..k {
             let add_point = select_from_bits(
                 chip,
-                &chip.config.range,
+                range,
                 layouter,
                 &cached_points_vec[base_idx],
                 &rounded_bits_vec[base_idx]
@@ -496,7 +498,15 @@ impl<F: FieldExt, FC: FieldChip<F>> EccChip<F, FC> {
     where
         FC::FieldType: BaseExt,
     {
-        FpChip::configure(meta, value, constant, lookup_bits, limb_bits, num_limbs)
+        FpConfig::configure(
+            meta,
+            value,
+            constant,
+            lookup_bits,
+            limb_bits,
+            num_limbs,
+            modulus::<FC::FieldType>(),
+        )
     }
 
     pub fn load_private(
@@ -541,7 +551,12 @@ impl<F: FieldExt, FC: FieldChip<F>> EccChip<F, FC> {
     ) -> Result<EccPoint<F, FC>, Error> {
         ecc_double(&self.field_chip, layouter, P)
     }
+}
 
+impl<F: FieldExt, FC: FieldChip<F>> EccChip<F, FC>
+where
+    FC: Selectable<F, Point = FC::FieldPoint>,
+{
     pub fn scalar_mult(
         &self,
         layouter: &mut impl Layouter<F>,
@@ -550,10 +565,7 @@ impl<F: FieldExt, FC: FieldChip<F>> EccChip<F, FC> {
         b: F,
         max_bits: usize,
         window_bits: usize,
-    ) -> Result<EccPoint<F, FC>, Error>
-    where
-        FC: Selectable<F, Point = FC::FieldPoint>,
-    {
+    ) -> Result<EccPoint<F, FC>, Error> {
         scalar_multiply(
             &self.field_chip,
             &self.range,
@@ -578,9 +590,9 @@ impl<F: FieldExt, FC: FieldChip<F>> EccChip<F, FC> {
     where
         GA: CurveAffine<Base = FC::FieldType>,
     {
-        multi_scalar_multiply(
+        multi_scalar_multiply::<F, FC, GA>(
             &self.field_chip,
-            &self.field_chip.config.range,
+            &self.range,
             layouter,
             P,
             x,
@@ -591,8 +603,8 @@ impl<F: FieldExt, FC: FieldChip<F>> EccChip<F, FC> {
     }
 }
 
-impl<F: FieldExt, GA: CurveAffine> EccChip<F, FpChip<F, GA::Base>> {
-    pub fn fixed_base_scalar_mult(
+impl<F: FieldExt, Fp: FieldExt> EccChip<F, FpChip<F, Fp>> {
+    pub fn fixed_base_scalar_mult<GA: CurveAffine<Base = Fp>>(
         &self,
         layouter: &mut impl Layouter<F>,
         P: &FixedEccPoint<F, GA>,
@@ -600,7 +612,7 @@ impl<F: FieldExt, GA: CurveAffine> EccChip<F, FpChip<F, GA::Base>> {
         b: F,
         max_bits: usize,
         window_bits: usize,
-    ) -> Result<EccPoint<F, FpChip<F, GA::Base>>, Error> {
+    ) -> Result<EccPoint<F, FpChip<F, Fp>>, Error> {
         fixed_base_scalar_multiply(&self.field_chip, layouter, P, x, b, max_bits, window_bits)
     }
 }

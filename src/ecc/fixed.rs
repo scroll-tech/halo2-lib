@@ -51,12 +51,12 @@ where
 
     pub fn from_g1(P: &GA, num_limbs: usize, limb_bits: usize) -> Self {
         let x_pt = FixedCRTInteger::from_native(
-            fe_to_bigint(&P.coordinates().unwrap().x()),
+            fe_to_bigint(P.coordinates().unwrap().x()),
             num_limbs,
             limb_bits,
         );
         let y_pt = FixedCRTInteger::from_native(
-            fe_to_bigint(&P.coordinates().unwrap().y()),
+            fe_to_bigint(P.coordinates().unwrap().y()),
             num_limbs,
             limb_bits,
         );

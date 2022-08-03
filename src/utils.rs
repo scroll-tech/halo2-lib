@@ -1,3 +1,4 @@
+use halo2_proofs::arithmetic::BaseExt;
 use halo2_proofs::arithmetic::Field;
 use halo2_proofs::arithmetic::FieldExt;
 use num_bigint::BigInt;
@@ -14,7 +15,7 @@ use halo2_proofs::pairing::bn256::Fr;
 
 // utils modified from halo2wrong
 
-pub fn modulus<F: FieldExt>() -> BigUint {
+pub fn modulus<F: BaseExt>() -> BigUint {
     BigUint::from_str_radix(&F::MODULUS[2..], 16).unwrap()
 }
 

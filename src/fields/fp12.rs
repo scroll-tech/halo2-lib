@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use halo2_proofs::arithmetic::BaseExt;
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::Error};
 use halo2curves::bn254::{Fq, Fq12, Fq2, Fq6};
@@ -26,13 +28,13 @@ const XI_0: u64 = 9;
 // This means we store an Fp12 point as `\sum_{i = 0}^6 (a_{i0} + a_{i1} * u) * w^i`
 // This is encoded in an FqPoint of degree 12 as `(a_{00}, ..., a_{50}, a_{01}, ..., a_{51})`
 pub struct Fp12Chip<F: FieldExt> {
-    pub fp_chip: FpChip<F>,
+    pub fp_chip: FpChip<F, Fq>,
 }
 
 impl<F: FieldExt> Fp12Chip<F> {
     pub fn construct(config: FpConfig<F>) -> Self {
         Self {
-            fp_chip: FpChip { config },
+            fp_chip: FpChip::construct(config),
         }
     }
 

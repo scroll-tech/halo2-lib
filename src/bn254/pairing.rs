@@ -11,11 +11,12 @@ use halo2_proofs::{
     },
     plonk::{Advice, Column, ConstraintSystem, Error, Fixed},
 };
-use halo2curves::bn254::{Fq2, FROBENIUS_COEFF_FQ12_C1};
+use halo2curves::bn254::{Fq, Fq2, FROBENIUS_COEFF_FQ12_C1};
 use num_bigint::{BigInt, BigUint};
 use num_traits::{Num, One, Zero};
 use rand_core::OsRng;
 
+use super::{Fp12Chip, Fp2Chip, FpChip};
 use crate::utils::{
     bigint_to_fe, biguint_to_fe, decompose_bigint_option, decompose_biguint, fe_to_bigint,
     fe_to_biguint, modulus,
@@ -25,15 +26,9 @@ use crate::{
     gates::{qap_gate, range},
 };
 use crate::{
-    ecc::EccChip,
-    fields::{
-        fp::{FpChip, FpConfig},
-        fp12::Fp12Chip,
-        fp2::Fp2Chip,
-        FieldChip,
-    },
+    ecc::{EccChip, EccPoint},
+    fields::{fp::FpConfig, FieldChip, FqPoint},
 };
-use crate::{ecc::EccPoint, fields::FqPoint};
 
 const XI_0: u64 = 9;
 
@@ -443,7 +438,7 @@ impl<F: FieldExt> PairingChip<F> {
         limb_bits: usize,
         num_limbs: usize,
     ) -> FpConfig<F> {
-        FpChip::configure(
+        FpConfig::configure(
             meta,
             value,
             constant,
@@ -459,8 +454,15 @@ impl<F: FieldExt> PairingChip<F> {
         layouter: &mut impl Layouter<F>,
         point: Option<G1Affine>,
     ) -> Result<EccPoint<F, FpChip<F>>, Error> {
-        self.g1_chip
-            .load_private(layouter, (point.map(|pt| pt.x), point.map(|pt| pt.y)))
+        // go from pse/pairing::bn256::Fq to forked Fq
+        let convert_fp = |x: bn256::Fq| biguint_to_fe(&fe_to_biguint(&x));
+        self.g1_chip.load_private(
+            layouter,
+            (
+                point.map(|pt| convert_fp(pt.x)),
+                point.map(|pt| convert_fp(pt.y)),
+            ),
+        )
     }
 
     pub fn load_private_g2(
@@ -495,5 +497,3 @@ impl<F: FieldExt> PairingChip<F> {
         )
     }
 }
-
-pub(crate) mod tests;

@@ -13,7 +13,7 @@ use halo2_proofs::{
     arithmetic::FieldExt, circuit::*, dev::MockProver, pairing::bn256::Fq as Fp,
     pairing::bn256::Fr as Fn, plonk::*,
 };
-use halo2curves::bn254::Fq2;
+use halo2curves::bn254::{Fq, Fq2};
 use num_bigint::{BigInt, RandBigInt};
 
 #[derive(Default)]
@@ -49,7 +49,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         let value = meta.advice_column();
         let constant = meta.fixed_column();
-        EccChip::<F, FpChip<F>>::configure(meta, value, constant, 22, 88, 3)
+        EccChip::<F, FpChip<F, Fp>>::configure(meta, value, constant, 22, 88, 3)
     }
 
     fn synthesize(
@@ -80,7 +80,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         let mut P_fixed = FixedEccPoint::from_g1(&pt, 3, 88);
         if let Some(P_point) = &self.P {
             pt = P_point.clone();
-            P_fixed = FixedEccPoint::<F>::from_g1(&P_point, 3, 88);
+            P_fixed = FixedEccPoint::<F, G1Affine>::from_g1(&P_point, 3, 88);
         }
 
         let x_assigned = layouter.assign_region(
@@ -219,7 +219,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
 
         // test multi scalar mult
         {
-            let multi_scalar_mult = chip.multi_scalar_mult(
+            let multi_scalar_mult = chip.multi_scalar_mult::<G1Affine>(
                 &mut layouter.namespace(|| "multi_scalar_mult"),
                 &P_batch_assigned,
                 &x_batch_assigned,
@@ -345,7 +345,7 @@ impl<F: FieldExt> Circuit<F> for G2Circuit<F> {
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         let value = meta.advice_column();
         let constant = meta.fixed_column();
-        EccChip::<F, Fp2Chip<F>>::configure(meta, value, constant, 22, 88, 3)
+        EccChip::<F, Fp2Chip<F, Fq, Fq2>>::configure(meta, value, constant, 22, 88, 3)
     }
 
     fn synthesize(

@@ -1,9 +1,10 @@
+use std::marker::PhantomData;
+
 use halo2_proofs::{
-    arithmetic::{BaseExt, FieldExt},
+    arithmetic::{BaseExt, Field, FieldExt},
     circuit::Layouter,
     plonk::Error,
 };
-use halo2curves::bn254::{Fq, Fq2};
 use num_bigint::{BigInt, BigUint};
 use num_traits::Num;
 
@@ -18,28 +19,38 @@ use crate::utils::{bigint_to_fe, decompose_bigint_option, fe_to_biguint};
 
 use super::{FieldChip, FqPoint};
 
+// helper trait so we can actually construct and read the Fp2 struct
+// needs to be implemented for Fp2 struct for use cases below
+pub trait FieldExtConstructor<Fp: FieldExt, const degree: usize> {
+    fn new(c: [Fp; degree]) -> Self;
+
+    fn coeffs(&self) -> Vec<Fp>;
+}
+
 // Represent Fp2 point as FqPoint with degree = 2
 // `Fp2 = Fp[u] / (u^2 + 1)`
 // This implementation assumes p = 3 (mod 4) in order for the polynomial u^2 + 1 to be irreducible over Fp; i.e., in order for -1 to not be a square (quadratic residue) in Fp
 // This means we store an Fp2 point as `a_0 + a_1 * u` where `a_0, a_1 in Fp`
-pub struct Fp2Chip<F: FieldExt> {
-    pub fp_chip: FpChip<F>,
+pub struct Fp2Chip<F: FieldExt, Fp: FieldExt, Fp2: Field> {
+    pub fp_chip: FpChip<F, Fp>,
+    _marker: PhantomData<Fp2>,
 }
 
-impl<F: FieldExt> Fp2Chip<F> {
+impl<F: FieldExt, Fp: FieldExt, Fp2: Field + FieldExtConstructor<Fp, 2>> Fp2Chip<F, Fp, Fp2> {
     pub fn construct(config: FpConfig<F>) -> Self {
         Self {
-            fp_chip: FpChip { config },
+            fp_chip: FpChip::construct(config),
+            _marker: PhantomData,
         }
     }
 
     pub fn load_constant(
         &self,
         layouter: &mut impl Layouter<F>,
-        c: Fq2,
+        c: Fp2,
     ) -> Result<FqPoint<F>, Error> {
         let mut assigned_coeffs = Vec::with_capacity(2);
-        for a in &[c.c0, c.c1] {
+        for a in &c.coeffs() {
             let assigned_coeff = self
                 .fp_chip
                 .load_constant(layouter, BigInt::from(fe_to_biguint(a)))?;
@@ -88,25 +99,33 @@ impl<F: FieldExt> Fp2Chip<F> {
     }
 }
 
-impl<F: FieldExt> FieldChip<F> for Fp2Chip<F> {
+impl<F: FieldExt, Fp: FieldExt, Fp2: Field + FieldExtConstructor<Fp, 2>> FieldChip<F>
+    for Fp2Chip<F, Fp, Fp2>
+{
     type WitnessType = Vec<Option<BigInt>>;
     type FieldPoint = FqPoint<F>;
-    type FieldType = Fq2;
+    type FieldType = Fp2;
 
-    fn get_assigned_value(x: &FqPoint<F>) -> Option<Fq2> {
+    fn get_assigned_value(x: &FqPoint<F>) -> Option<Fp2> {
         assert_eq!(x.coeffs.len(), 2);
         let c0 = x.coeffs[0].value.clone();
         let c1 = x.coeffs[1].value.clone();
-        c0.zip(c1).map(|(c0, c1)| Fq2 {
-            c0: bigint_to_fe(&c0),
-            c1: bigint_to_fe(&c1),
-        })
+        c0.zip(c1)
+            .map(|(c0, c1)| Fp2::new([bigint_to_fe(&c0), bigint_to_fe(&c1)]))
     }
 
-    fn fe_to_witness(x: &Option<Fq2>) -> Vec<Option<BigInt>> {
-        let c0 = x.map(|x| BigInt::from(fe_to_biguint(&x.c0)));
-        let c1 = x.map(|x| BigInt::from(fe_to_biguint(&x.c1)));
-        vec![c0, c1]
+    fn fe_to_witness(x: &Option<Fp2>) -> Vec<Option<BigInt>> {
+        match x.as_ref() {
+            None => vec![None, None],
+            Some(x) => {
+                let coeffs = x.coeffs();
+                assert_eq!(coeffs.len(), 2);
+                coeffs
+                    .iter()
+                    .map(|c| Some(BigInt::from(fe_to_biguint(c))))
+                    .collect()
+            }
+        }
     }
 
     fn load_private(

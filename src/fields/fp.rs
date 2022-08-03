@@ -1,28 +1,28 @@
+use std::marker::PhantomData;
+
 use halo2_proofs::{
     arithmetic::{BaseExt, Field, FieldExt},
     circuit::{AssignedCell, Layouter},
-    pairing::bn256::Fq,
     plonk::{Advice, Column, ConstraintSystem, Error, Fixed, Selector, TableColumn},
 };
 use num_bigint::{BigInt, BigUint};
 use num_traits::Num;
 
 use super::{FieldChip, Selectable};
-use crate::gates::range;
-use crate::utils::{bigint_to_fe, decompose_bigint_option, fe_to_biguint};
-use crate::{
-    bigint::big_is_zero,
-    gates::qap_gate::QuantumCell::{Constant, Existing, Witness},
-};
-use crate::{bigint::sub, gates::qap_gate::QuantumCell};
 use crate::{
     bigint::{
-        add_no_carry, carry_mod, check_carry_mod_to_zero, inner_product, mul_no_carry,
-        scalar_mul_no_carry, select, sub_no_carry, CRTInteger, FixedCRTInteger, OverflowInteger,
+        add_no_carry, big_is_zero, carry_mod, check_carry_mod_to_zero, inner_product, mul_no_carry,
+        scalar_mul_no_carry, select, sub, sub_no_carry, CRTInteger, FixedCRTInteger,
+        OverflowInteger,
     },
-    utils::decompose_biguint,
+    gates::qap_gate,
+    gates::qap_gate::QuantumCell::{Constant, Existing, Witness},
+    gates::range,
+    utils::{
+        bigint_to_fe, decompose_bigint, decompose_bigint_option, decompose_biguint, fe_to_biguint,
+        modulus,
+    },
 };
-use crate::{gates::qap_gate, utils::decompose_bigint};
 
 #[derive(Clone, Debug)]
 pub struct FpConfig<F: FieldExt> {
@@ -38,15 +38,7 @@ pub struct FpConfig<F: FieldExt> {
     pub p: BigUint,
 }
 
-pub struct FpChip<F: FieldExt> {
-    pub config: FpConfig<F>,
-}
-
-impl<F: FieldExt> FpChip<F> {
-    pub fn construct(config: FpConfig<F>) -> Self {
-        Self { config }
-    }
-
+impl<F: FieldExt> FpConfig<F> {
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
         value: Column<Advice>,
@@ -80,6 +72,39 @@ impl<F: FieldExt> FpChip<F> {
             num_limbs,
             p,
         }
+    }
+}
+
+pub struct FpChip<F: FieldExt, Fp: FieldExt> {
+    pub config: FpConfig<F>,
+    _marker: PhantomData<Fp>,
+}
+
+impl<F: FieldExt, Fp: FieldExt> FpChip<F, Fp> {
+    pub fn construct(config: FpConfig<F>) -> Self {
+        Self {
+            config,
+            _marker: PhantomData,
+        }
+    }
+
+    pub fn configure(
+        meta: &mut ConstraintSystem<F>,
+        value: Column<Advice>,
+        constant: Column<Fixed>,
+        lookup_bits: usize,
+        limb_bits: usize,
+        num_limbs: usize,
+    ) -> FpConfig<F> {
+        FpConfig::configure(
+            meta,
+            value,
+            constant,
+            lookup_bits,
+            limb_bits,
+            num_limbs,
+            modulus::<Fp>(),
+        )
     }
 
     pub fn load_lookup_table(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
@@ -122,17 +147,17 @@ impl<F: FieldExt> FpChip<F> {
     }
 }
 
-impl<F: FieldExt> FieldChip<F> for FpChip<F> {
+impl<F: FieldExt, Fp: FieldExt> FieldChip<F> for FpChip<F, Fp> {
     type WitnessType = Option<BigInt>;
     type FieldPoint = CRTInteger<F>;
-    type FieldType = Fq;
+    type FieldType = Fp;
 
-    fn get_assigned_value(x: &CRTInteger<F>) -> Option<Fq> {
-        x.value.as_ref().map(|x| bigint_to_fe::<Fq>(x))
+    fn get_assigned_value(x: &CRTInteger<F>) -> Option<Fp> {
+        x.value.as_ref().map(|x| bigint_to_fe::<Fp>(x))
     }
 
-    fn fe_to_witness(x: &Option<Fq>) -> Option<BigInt> {
-        x.map(|x| BigInt::from_bytes_le(num_bigint::Sign::Plus, x.to_bytes().as_ref()))
+    fn fe_to_witness(x: &Option<Fp>) -> Option<BigInt> {
+        x.map(|x| BigInt::from(fe_to_biguint(&x)))
     }
 
     fn load_private(
@@ -282,7 +307,7 @@ impl<F: FieldExt> FieldChip<F> for FpChip<F> {
     }
 }
 
-impl<F: FieldExt> Selectable<F> for FpChip<F> {
+impl<F: FieldExt, Fp: FieldExt> Selectable<F> for FpChip<F, Fp> {
     type Point = CRTInteger<F>;
 
     fn select(
@@ -312,8 +337,8 @@ pub(crate) mod tests {
     use halo2_proofs::arithmetic::BaseExt;
     use halo2_proofs::circuit::floor_planner::V1;
     use halo2_proofs::{
-        arithmetic::FieldExt, circuit::*, dev::MockProver, pairing::bn256::Fq as Fp,
-        pairing::bn256::Fr as Fn, plonk::*,
+        arithmetic::FieldExt, circuit::*, dev::MockProver, pairing::bn256::Fq, pairing::bn256::Fr,
+        plonk::*,
     };
     use num_traits::One;
 
@@ -324,8 +349,8 @@ pub(crate) mod tests {
 
     #[derive(Default)]
     struct MyCircuit<F> {
-        a: Option<Fp>,
-        b: Option<Fp>,
+        a: Option<Fq>,
+        b: Option<Fq>,
         _marker: PhantomData<F>,
     }
 
@@ -340,7 +365,7 @@ pub(crate) mod tests {
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
             let value = meta.advice_column();
             let constant = meta.fixed_column();
-            FpChip::configure(meta, value, constant, 17, 68, 4, modulus::<Fp>())
+            FpChip::<F, Fq>::configure(meta, value, constant, 17, 68, 4)
         }
 
         fn synthesize(
@@ -348,7 +373,7 @@ pub(crate) mod tests {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
-            let chip = FpChip::construct(config);
+            let chip = FpChip::<F, Fq>::construct(config);
             chip.load_lookup_table(&mut layouter)?;
 
             let a_assigned =
@@ -370,12 +395,12 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn test_fp_crt() {
+    fn test_fp() {
         let k = 18;
-        let a = Fp::rand();
-        let b = Fp::rand();
+        let a = Fq::rand();
+        let b = Fq::rand();
 
-        let circuit = MyCircuit::<Fn> {
+        let circuit = MyCircuit::<Fr> {
             a: Some(a),
             b: Some(b),
             _marker: PhantomData,
@@ -392,12 +417,11 @@ pub(crate) mod tests {
         let k = 9;
         use plotters::prelude::*;
 
-        let root = BitMapBackend::new("layout_fp_crt_mul_68_4_lookup17_pow9.png", (1024, 1024))
-            .into_drawing_area();
+        let root = BitMapBackend::new("layout.png", (1024, 1024)).into_drawing_area();
         root.fill(&WHITE).unwrap();
         let root = root.titled("Fp Layout", ("sans-serif", 60)).unwrap();
 
-        let circuit = MyCircuit::<Fn>::default();
+        let circuit = MyCircuit::<Fr>::default();
         halo2_proofs::dev::CircuitLayout::default()
             .render(k, &circuit, &root)
             .unwrap();

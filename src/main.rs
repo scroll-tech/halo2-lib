@@ -1,4 +1,5 @@
 #![allow(non_snake_case)]
+#![feature(explicit_generic_args_with_impl_trait)]
 use std::marker::PhantomData;
 
 use halo2_pairing::ecc::*;
@@ -51,7 +52,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         let value = meta.advice_column();
         let constant = meta.fixed_column();
-        EccChip::<F, FpChip<F>>::configure(meta, value, constant, 22, 88, 3)
+        EccChip::<F, FpChip<F, Fp>>::configure(meta, value, constant, 22, 88, 3)
     }
 
     fn synthesize(
@@ -79,11 +80,6 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
             },
         )?;
         let mut pt = G1Affine::default();
-        let mut P_fixed = FixedEccPoint::from_g1(&pt, 3, 88);
-        if let Some(P_point) = &self.P {
-            pt = P_point.clone();
-            P_fixed = FixedEccPoint::<F>::from_g1(&P_point, 3, 88);
-        }
 
         let x_assigned = layouter.assign_region(
             || "input scalar x",
@@ -195,7 +191,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
 
         // test multi scalar mult
         {
-            let multi_scalar_mult = chip.multi_scalar_mult(
+            let multi_scalar_mult = chip.multi_scalar_mult::<G1Affine>(
                 &mut layouter.namespace(|| "multi_scalar_mult"),
                 &P_batch_assigned,
                 &x_batch_assigned,
