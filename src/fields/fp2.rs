@@ -1,5 +1,6 @@
 use std::marker::PhantomData;
 
+use ff::PrimeField;
 use halo2_proofs::{
     arithmetic::{BaseExt, Field, FieldExt},
     circuit::Layouter,
@@ -21,7 +22,7 @@ use super::{FieldChip, FqPoint};
 
 // helper trait so we can actually construct and read the Fp2 struct
 // needs to be implemented for Fp2 struct for use cases below
-pub trait FieldExtConstructor<Fp: FieldExt, const DEGREE: usize> {
+pub trait FieldExtConstructor<Fp: PrimeField, const DEGREE: usize> {
     fn new(c: [Fp; DEGREE]) -> Self;
 
     fn coeffs(&self) -> Vec<Fp>;
@@ -31,12 +32,12 @@ pub trait FieldExtConstructor<Fp: FieldExt, const DEGREE: usize> {
 // `Fp2 = Fp[u] / (u^2 + 1)`
 // This implementation assumes p = 3 (mod 4) in order for the polynomial u^2 + 1 to be irreducible over Fp; i.e., in order for -1 to not be a square (quadratic residue) in Fp
 // This means we store an Fp2 point as `a_0 + a_1 * u` where `a_0, a_1 in Fp`
-pub struct Fp2Chip<F: FieldExt, Fp: FieldExt, Fp2: Field> {
+pub struct Fp2Chip<F: FieldExt, Fp: PrimeField, Fp2: Field> {
     pub fp_chip: FpChip<F, Fp>,
     _marker: PhantomData<Fp2>,
 }
 
-impl<F: FieldExt, Fp: FieldExt, Fp2: Field + FieldExtConstructor<Fp, 2>> Fp2Chip<F, Fp, Fp2> {
+impl<F: FieldExt, Fp: PrimeField, Fp2: Field + FieldExtConstructor<Fp, 2>> Fp2Chip<F, Fp, Fp2> {
     pub fn construct(config: FpConfig<F>) -> Self {
         Self {
             fp_chip: FpChip::construct(config),
@@ -99,7 +100,7 @@ impl<F: FieldExt, Fp: FieldExt, Fp2: Field + FieldExtConstructor<Fp, 2>> Fp2Chip
     }
 }
 
-impl<F: FieldExt, Fp: FieldExt, Fp2: Field + FieldExtConstructor<Fp, 2>> FieldChip<F>
+impl<F: FieldExt, Fp: PrimeField, Fp2: Field + FieldExtConstructor<Fp, 2>> FieldChip<F>
     for Fp2Chip<F, Fp, Fp2>
 {
     type WitnessType = Vec<Option<BigInt>>;

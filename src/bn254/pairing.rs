@@ -1,10 +1,8 @@
 #![allow(non_snake_case)]
-use std::marker::PhantomData;
-
+use ff::PrimeField;
 use halo2_proofs::{
-    arithmetic::{BaseExt, Field, FieldExt},
-    circuit::{layouter, Layouter},
-    pairing::group::ff::PrimeField,
+    arithmetic::{BaseExt, FieldExt},
+    circuit::Layouter,
     pairing::{
         bn256,
         bn256::{G1Affine, G2Affine, SIX_U_PLUS_2_NAF},
@@ -14,7 +12,6 @@ use halo2_proofs::{
 use halo2curves::bn254::{Fq, Fq2, FROBENIUS_COEFF_FQ12_C1};
 use num_bigint::{BigInt, BigUint};
 use num_traits::{Num, One, Zero};
-use rand_core::OsRng;
 
 use super::{Fp12Chip, Fp2Chip, FpChip};
 use crate::utils::{
@@ -22,12 +19,9 @@ use crate::utils::{
     fe_to_biguint, modulus,
 };
 use crate::{
-    ecc,
-    gates::{qap_gate, range},
-};
-use crate::{
     ecc::{EccChip, EccPoint},
     fields::{fp::FpConfig, FieldChip, FqPoint},
+    gates::{qap_gate, range},
 };
 
 const XI_0: u64 = 9;
@@ -73,9 +67,7 @@ pub fn sparse_line_function_unequal<F: FieldExt>(
         .iter()
         .map(|option_nc| {
             option_nc.as_ref().map(|nocarry| {
-                fp2_chip
-                    .carry_mod(layouter, nocarry)
-                    .expect("carry mod should not fail")
+                fp2_chip.carry_mod(layouter, nocarry).expect("carry mod should not fail")
             })
         })
         .collect())
@@ -140,9 +132,7 @@ pub fn sparse_line_function_equal<F: FieldExt>(
         .iter()
         .map(|option_nc| {
             option_nc.as_ref().map(|nocarry| {
-                fp2_chip
-                    .carry_mod(layouter, nocarry)
-                    .expect("carry mod should not fail")
+                fp2_chip.carry_mod(layouter, nocarry).expect("carry mod should not fail")
             })
         })
         .collect())
@@ -160,31 +150,26 @@ pub fn sparse_fp12_multiply<F: FieldExt>(
     assert_eq!(b_fp2_coeffs.len(), 6);
     let mut a_fp2_coeffs = Vec::with_capacity(6);
     for i in 0..6 {
-        a_fp2_coeffs.push(FqPoint::construct(
-            vec![a.coeffs[i].clone(), a.coeffs[i + 6].clone()],
-            2,
-        ));
+        a_fp2_coeffs
+            .push(FqPoint::construct(vec![a.coeffs[i].clone(), a.coeffs[i + 6].clone()], 2));
     }
     // a * b as element of Fp2[w] without evaluating w^6 = (XI_0 + u)
     let mut prod_2d: Vec<Option<FqPoint<F>>> = vec![None; 11];
     for i in 0..6 {
         for j in 0..6 {
-            prod_2d[i + j] = match (
-                prod_2d[i + j].clone(),
-                &a_fp2_coeffs[i],
-                b_fp2_coeffs[j].as_ref(),
-            ) {
-                (a, _, None) => a,
-                (None, a, Some(b)) => {
-                    let ab = fp2_chip.mul_no_carry(layouter, a, b)?;
-                    Some(ab)
-                }
-                (Some(a), b, Some(c)) => {
-                    let bc = fp2_chip.mul_no_carry(layouter, b, c)?;
-                    let out = fp2_chip.add_no_carry(layouter, &a, &bc)?;
-                    Some(out)
-                }
-            };
+            prod_2d[i + j] =
+                match (prod_2d[i + j].clone(), &a_fp2_coeffs[i], b_fp2_coeffs[j].as_ref()) {
+                    (a, _, None) => a,
+                    (None, a, Some(b)) => {
+                        let ab = fp2_chip.mul_no_carry(layouter, a, b)?;
+                        Some(ab)
+                    }
+                    (Some(a), b, Some(c)) => {
+                        let bc = fp2_chip.mul_no_carry(layouter, b, c)?;
+                        let out = fp2_chip.add_no_carry(layouter, &a, &bc)?;
+                        Some(out)
+                    }
+                };
         }
     }
 
@@ -199,9 +184,9 @@ pub fn sparse_fp12_multiply<F: FieldExt>(
             match (prod_2d[i].as_ref(), eval_w6) {
                 (None, b) => b.unwrap(), // Our current use cases of 235 and 034 sparse multiplication always result in non-None value
                 (Some(a), None) => a.clone(),
-                (Some(a), Some(b)) => fp2_chip
-                    .add_no_carry(layouter, a, &b)
-                    .expect("add no carry should not fail"),
+                (Some(a), Some(b)) => {
+                    fp2_chip.add_no_carry(layouter, a, &b).expect("add no carry should not fail")
+                }
             }
         } else {
             prod_2d[i].clone().unwrap()
@@ -289,21 +274,14 @@ pub fn miller_loop_BN<F: FieldExt>(
 
     let neg_Q = ecc_chip.negate(layouter, Q)?;
     assert!(pseudo_binary_encoding[i] == 1 || pseudo_binary_encoding[i] == -1);
-    let mut R = if pseudo_binary_encoding[i] == 1 {
-        Q.clone()
-    } else {
-        neg_Q.clone()
-    };
+    let mut R = if pseudo_binary_encoding[i] == 1 { Q.clone() } else { neg_Q.clone() };
     i -= 1;
 
     // initialize the first line function into Fq12 point
     let sparse_f = sparse_line_function_equal(&ecc_chip.field_chip, layouter, &R, P)?;
     assert_eq!(sparse_f.len(), 6);
 
-    let zero_fp = ecc_chip
-        .field_chip
-        .fp_chip
-        .load_constant(layouter, BigInt::from(0))?;
+    let zero_fp = ecc_chip.field_chip.fp_chip.load_constant(layouter, BigInt::from(0))?;
     let mut f_coeffs = Vec::with_capacity(12);
     for coeff in &sparse_f {
         if let Some(fp2_point) = coeff {
@@ -331,11 +309,7 @@ pub fn miller_loop_BN<F: FieldExt>(
 
         assert!(pseudo_binary_encoding[i] <= 1 && pseudo_binary_encoding[i] >= -1);
         if pseudo_binary_encoding[i] != 0 {
-            let sign_Q = if pseudo_binary_encoding[i] == 1 {
-                &Q
-            } else {
-                &neg_Q
-            };
+            let sign_Q = if pseudo_binary_encoding[i] == 1 { &Q } else { &neg_Q };
             f = fp12_multiply_with_line_unequal(
                 &ecc_chip.field_chip,
                 layouter,
@@ -445,7 +419,7 @@ impl<F: FieldExt> PairingChip<F> {
             lookup_bits,
             limb_bits,
             num_limbs,
-            BigUint::from_str_radix(&Fq2::MODULUS[2..], 16).unwrap(),
+            BigUint::from_str_radix(&Fq::MODULUS[2..], 16).unwrap(),
         )
     }
 
@@ -458,10 +432,7 @@ impl<F: FieldExt> PairingChip<F> {
         let convert_fp = |x: bn256::Fq| biguint_to_fe(&fe_to_biguint(&x));
         self.g1_chip.load_private(
             layouter,
-            (
-                point.map(|pt| convert_fp(pt.x)),
-                point.map(|pt| convert_fp(pt.y)),
-            ),
+            (point.map(|pt| convert_fp(pt.x)), point.map(|pt| convert_fp(pt.y))),
         )
     }
 
@@ -495,5 +466,18 @@ impl<F: FieldExt> PairingChip<F> {
             P,
             &SIX_U_PLUS_2_NAF, // pseudo binary encoding for BN254
         )
+    }
+
+    // optimal Ate pairing
+    pub fn pairing(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        Q: &EccPoint<F, Fp2Chip<F>>,
+        P: &EccPoint<F, FpChip<F>>,
+    ) -> Result<FqPoint<F>, Error> {
+        let f0 = self.miller_loop(layouter, Q, P)?;
+        // final_exp implemented in final_exp module
+        let f = self.fp12_chip.final_exp(&self.g2_chip.field_chip, layouter, &f0)?;
+        Ok(f)
     }
 }

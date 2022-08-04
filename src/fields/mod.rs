@@ -26,6 +26,7 @@ pub struct FqPoint<F: FieldExt> {
 
 impl<F: FieldExt> FqPoint<F> {
     pub fn construct(coeffs: Vec<CRTInteger<F>>, degree: usize) -> Self {
+        assert_eq!(coeffs.len(), degree);
         Self { coeffs, degree }
     }
 }

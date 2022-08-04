@@ -7,7 +7,9 @@ use super::*;
 use crate::fields::fp::FpConfig;
 use halo2_proofs::arithmetic::BaseExt;
 use halo2_proofs::circuit::floor_planner::V1;
-use halo2_proofs::pairing::bn256::{multi_miller_loop, G1Affine, G2Affine, G2Prepared, Gt, G1, G2};
+use halo2_proofs::pairing::bn256::{
+    multi_miller_loop, pairing, G1Affine, G2Affine, G2Prepared, Gt, G1, G2,
+};
 use halo2_proofs::pairing::group::ff::PrimeField;
 use halo2_proofs::pairing::group::Group;
 use halo2_proofs::{
@@ -52,6 +54,7 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
         let P_assigned = chip.load_private_g1(&mut layouter, self.P.clone())?;
         let Q_assigned = chip.load_private_g2(&mut layouter, self.Q.clone())?;
 
+        /*
         // test miller loop without final exp
         {
             let f = chip.miller_loop(&mut layouter, &Q_assigned, &P_assigned)?;
@@ -73,6 +76,24 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
                 println!("circuit f: {:#?}", f_val);
             }
         }
+        */
+
+        // test optimal ate pairing
+        {
+            let f = chip.pairing(&mut layouter, &Q_assigned, &P_assigned)?;
+            for fc in &f.coeffs {
+                assert_eq!(fc.value, fc.truncation.to_bigint());
+            }
+            if self.P != None {
+                let actual_f = pairing(&self.P.unwrap(), &self.Q.unwrap());
+                let f_val: Vec<String> =
+                    f.coeffs.iter().map(|x| x.value.clone().unwrap().to_str_radix(16)).collect();
+                println!("optimal ate pairing:");
+                println!("actual f: {:#?}", actual_f);
+                println!("circuit f: {:#?}", f_val);
+            }
+        }
+
         Ok(())
     }
 }
@@ -85,11 +106,7 @@ fn test_pairing() {
     let P = Some(G1Affine::random(&mut rng));
     let Q = Some(G2Affine::random(&mut rng));
 
-    let circuit = PairingCircuit::<Fr> {
-        P,
-        Q,
-        _marker: PhantomData,
-    };
+    let circuit = PairingCircuit::<Fr> { P, Q, _marker: PhantomData };
 
     let prover = MockProver::run(k, &circuit, vec![]).unwrap();
     //prover.assert_satisfied();
@@ -108,7 +125,5 @@ fn plot_pairing() {
 
     let circuit = PairingCircuit::<Fn>::default();
 
-    halo2_proofs::dev::CircuitLayout::default()
-        .render(k, &circuit, &root)
-        .unwrap();
+    halo2_proofs::dev::CircuitLayout::default().render(k, &circuit, &root).unwrap();
 }
