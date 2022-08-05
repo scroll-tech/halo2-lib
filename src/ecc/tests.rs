@@ -1,4 +1,3 @@
-#![cfg(test)]
 use std::marker::PhantomData;
 
 use crate::fields::fp2::Fp2Chip;
@@ -17,17 +16,17 @@ use halo2curves::bn254::{Fq, Fq2};
 use num_bigint::{BigInt, RandBigInt};
 
 #[derive(Default)]
-struct MyCircuit<F> {
-    P: Option<G1Affine>,
-    Q: Option<G1Affine>,
-    P_batch: Vec<Option<G1Affine>>,
-    x: Option<F>,
-    x_batch: Vec<Option<F>>,
-    batch_size: usize,
-    _marker: PhantomData<F>,
+pub struct MyCircuit<F> {
+    pub P: Option<G1Affine>,
+    pub Q: Option<G1Affine>,
+    pub P_batch: Vec<Option<G1Affine>>,
+    pub x: Option<F>,
+    pub x_batch: Vec<Option<F>>,
+    pub batch_size: usize,
+    pub _marker: PhantomData<F>,
 }
 
-const BATCH_SIZE: usize = 4;
+pub const BATCH_SIZE: usize = 4;
 
 impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
     type Config = FpConfig<F>;
@@ -117,7 +116,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
                     )
                 },
             )?;
-            x_batch_assigned.push(xb_assigned);
+            x_batch_assigned.push([xb_assigned]);
         }
 
         /*
@@ -164,13 +163,12 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         }
         */
 
-        /*
         // test scalar mult
         {
             let scalar_mult = chip.scalar_mult(
                 &mut layouter.namespace(|| "scalar_mult"),
                 &P_assigned,
-                &x_assigned,
+                &[x_assigned],
                 F::from(3),
                 254,
                 4,
@@ -190,7 +188,6 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
                 println!("scalar mult witness OK");
             }
         }
-        */
 
         /*
             // test fixed base scalar mult
@@ -217,9 +214,10 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
             }
          */
 
+        /*
         // test multi scalar mult
         {
-            let multi_scalar_mult = chip.multi_scalar_mult::<G1Affine>(
+            let multi_scalar_mult = chip.multi_scalar_mult::<G1Affine, 1>(
                 &mut layouter.namespace(|| "multi_scalar_mult"),
                 &P_batch_assigned,
                 &x_batch_assigned,
@@ -227,23 +225,15 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
                 254,
                 4,
             )?;
-            assert_eq!(
-                multi_scalar_mult.x.truncation.to_bigint(),
-                multi_scalar_mult.x.value
-            );
-            assert_eq!(
-                multi_scalar_mult.y.truncation.to_bigint(),
-                multi_scalar_mult.y.value
-            );
+            assert_eq!(multi_scalar_mult.x.truncation.to_bigint(), multi_scalar_mult.x.value);
+            assert_eq!(multi_scalar_mult.y.truncation.to_bigint(), multi_scalar_mult.y.value);
             if self.P_batch[0] != None {
                 let mut msm = G1::identity();
                 for (P, x) in self.P_batch.iter().zip(self.x_batch.iter()) {
                     msm = msm
                         + P.as_ref().unwrap()
                             * Fn::from_repr(
-                                x.as_ref().unwrap().to_repr().as_ref()[..32]
-                                    .try_into()
-                                    .unwrap(),
+                                x.as_ref().unwrap().to_repr().as_ref()[..32].try_into().unwrap(),
                             )
                             .unwrap();
                 }
@@ -251,11 +241,12 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
                 assert_eq!(actual.x, bigint_to_fe(&multi_scalar_mult.x.value.unwrap()));
                 assert_eq!(actual.y, bigint_to_fe(&multi_scalar_mult.y.value.unwrap()));
             }
-        }
+        } */
         Ok(())
     }
 }
 
+#[cfg(test)]
 #[test]
 fn test_ecc() {
     let k = 23;
@@ -273,15 +264,7 @@ fn test_ecc() {
         x_batch.push(Some(Fn::random(&mut rng)));
     }
 
-    let circuit = MyCircuit::<Fn> {
-        P,
-        Q,
-        P_batch,
-        x,
-        x_batch,
-        batch_size,
-        _marker: PhantomData,
-    };
+    let circuit = MyCircuit::<Fn> { P, Q, P_batch, x, x_batch, batch_size, _marker: PhantomData };
 
     let prover = MockProver::run(k, &circuit, vec![]).unwrap();
     //prover.assert_satisfied();
@@ -289,6 +272,7 @@ fn test_ecc() {
 }
 
 #[cfg(feature = "dev-graph")]
+#[cfg(test)]
 #[test]
 fn plot_ecc() {
     let k = 12;
@@ -309,13 +293,11 @@ fn plot_ecc() {
         _marker: PhantomData,
     };
 
-    halo2_proofs::dev::CircuitLayout::default()
-        .render(k, &circuit, &root)
-        .unwrap();
+    halo2_proofs::dev::CircuitLayout::default().render(k, &circuit, &root).unwrap();
 }
 
 #[derive(Default)]
-struct G2Circuit<F> {
+pub struct G2Circuit<F> {
     P: Option<G2Affine>,
     Q: Option<G2Affine>,
     //P_batch: Vec<Option<G2Affine>>,
@@ -443,6 +425,7 @@ impl<F: FieldExt> Circuit<F> for G2Circuit<F> {
     }
 }
 
+#[cfg(test)]
 #[test]
 fn test_ecc_g2() {
     let k = 23;
@@ -453,11 +436,7 @@ fn test_ecc_g2() {
     let P = Some(G2Affine::random(&mut rng));
     let Q = Some(G2Affine::random(&mut rng));
 
-    let circuit = G2Circuit::<Fn> {
-        P,
-        Q,
-        _marker: PhantomData,
-    };
+    let circuit = G2Circuit::<Fn> { P, Q, _marker: PhantomData };
 
     let prover = MockProver::run(k, &circuit, vec![]).unwrap();
     //prover.assert_satisfied();
@@ -465,6 +444,7 @@ fn test_ecc_g2() {
 }
 
 #[cfg(feature = "dev-graph")]
+#[cfg(test)]
 #[test]
 fn plot_ecc_g2() {
     let k = 13;
@@ -475,13 +455,7 @@ fn plot_ecc_g2() {
     let root = root.titled("Ecc Layout", ("sans-serif", 60)).unwrap();
 
     let batch_size = BATCH_SIZE;
-    let circuit = G2Circuit::<Fn> {
-        P: None,
-        Q: None,
-        _marker: PhantomData,
-    };
+    let circuit = G2Circuit::<Fn> { P: None, Q: None, _marker: PhantomData };
 
-    halo2_proofs::dev::CircuitLayout::default()
-        .render(k, &circuit, &root)
-        .unwrap();
+    halo2_proofs::dev::CircuitLayout::default().render(k, &circuit, &root).unwrap();
 }

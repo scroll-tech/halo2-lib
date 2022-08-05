@@ -324,7 +324,6 @@ pub fn miller_loop_BN<F: FieldExt>(
         }
         i -= 1;
     }
-    println!("finished main miller loop");
 
     // Frobenius coefficient coeff[1][j] = ((9+u)^{(p-1)/6})^j
     // load coeff[1][2], coeff[1][3]

@@ -40,10 +40,7 @@ pub struct EccPoint<F: FieldExt, FC: FieldChip<F>> {
 
 impl<F: FieldExt, FC: FieldChip<F>> Clone for EccPoint<F, FC> {
     fn clone(&self) -> Self {
-        Self {
-            x: self.x.clone(),
-            y: self.y.clone(),
-        }
+        Self { x: self.x.clone(), y: self.y.clone() }
     }
 }
 
@@ -215,16 +212,20 @@ where
     inner_product(chip, layouter, points, &coeffs)
 }
 
-// computes x * P on y^2 = x^3 + b
+// computes [scalar] * P on y^2 = x^3 + b
+// - `scalar` is represented as a reference array of `AssignedCell`s
+// - `scalar = sum_i scalar_i * 2^{max_bits * i}`
+// - an array of length > 1 is needed when `scalar` exceeds the modulus of scalar field `F`
 // assumes:
-//   * 0 < x < scalar field modulus
+// - `scalar_i < 2^{max_bits} for all i` (constrained by num_to_bits)
+// - `max_bits <= modulus::<F>.bits()`
 //   * P has order given by the scalar field modulus
-pub fn scalar_multiply<F: FieldExt, FC>(
+pub fn scalar_multiply<F: FieldExt, FC, const LANE: usize>(
     chip: &FC,
     range: &range::RangeConfig<F>,
     layouter: &mut impl Layouter<F>,
     P: &EccPoint<F, FC>,
-    x: &AssignedCell<F, F>,
+    scalar: &[AssignedCell<F, F>; LANE],
     b: F,
     max_bits: usize,
     window_bits: usize,
@@ -232,14 +233,19 @@ pub fn scalar_multiply<F: FieldExt, FC>(
 where
     FC: FieldChip<F> + Selectable<F, Point = FC::FieldPoint>,
 {
-    let num_windows = (max_bits + window_bits - 1) / window_bits;
+    assert!(scalar.len() > 0);
+    assert!((max_bits as u64) <= modulus::<F>().bits());
+
+    let total_bits = max_bits * scalar.len();
+    let num_windows = (total_bits + window_bits - 1) / window_bits;
     let rounded_bitlen = num_windows * window_bits;
 
-    let mut rounded_bits = Vec::with_capacity(rounded_bitlen);
-    let bits = range.num_to_bits(layouter, x, max_bits)?;
-    for cell in bits.iter() {
-        rounded_bits.push(cell.clone());
+    let mut bits = Vec::with_capacity(rounded_bitlen);
+    for x in scalar {
+        let mut new_bits = range.num_to_bits(layouter, x, max_bits)?;
+        bits.append(&mut new_bits);
     }
+    let mut rounded_bits = bits;
     let zero_cell = layouter.assign_region(
         || "constant 0",
         |mut region| {
@@ -248,21 +254,21 @@ where
             Ok(zero_cells_assigned[0].clone())
         },
     )?;
-    for idx in 0..(rounded_bitlen - max_bits) {
+    for idx in 0..(rounded_bitlen - total_bits) {
         rounded_bits.push(zero_cell.clone());
     }
 
     // is_started[idx] holds whether there is a 1 in bits with index at least (rounded_bitlen - idx)
     let mut is_started = Vec::with_capacity(rounded_bitlen);
-    for idx in 0..(rounded_bitlen - max_bits) {
+    for idx in 0..(rounded_bitlen - total_bits) {
         is_started.push(zero_cell.clone());
     }
     is_started.push(zero_cell.clone());
-    for idx in 1..max_bits {
+    for idx in 1..total_bits {
         let or = range.qap_config.or(
             layouter,
-            &Existing(&is_started[rounded_bitlen - max_bits + idx - 1]),
-            &Existing(&bits[max_bits - idx]),
+            &Existing(&is_started[rounded_bitlen - total_bits + idx - 1]),
+            &Existing(&rounded_bits[total_bits - idx]),
         )?;
         is_started.push(or.clone());
     }
@@ -279,9 +285,7 @@ where
             .iter()
             .map(|x| Existing(&x))
             .collect();
-        let bit_sum = range
-            .qap_config
-            .inner_product(layouter, &ones_vec, &temp_bits)?;
+        let bit_sum = range.qap_config.inner_product(layouter, &ones_vec, &temp_bits)?;
         let is_zero = range.is_zero(layouter, &bit_sum.2)?;
         is_zero_window.push(is_zero.clone());
     }
@@ -325,32 +329,25 @@ where
                 .to_vec(),
         )?;
         let mult_and_add = ecc_add_unequal(chip, layouter, &mult_point, &add_point)?;
-        let is_started_point = select(
-            chip,
-            layouter,
-            &mult_point,
-            &mult_and_add,
-            &is_zero_window[idx],
-        )?;
+        let is_started_point =
+            select(chip, layouter, &mult_point, &mult_and_add, &is_zero_window[idx])?;
 
-        curr_point = select(
-            chip,
-            layouter,
-            &is_started_point,
-            &add_point,
-            &is_started[window_bits * idx],
-        )?;
+        curr_point =
+            select(chip, layouter, &is_started_point, &add_point, &is_started[window_bits * idx])?;
     }
     Ok(curr_point.clone())
 }
 
 // need to supply an extra generic `GA` implementing `CurveAffine` trait in order to generate random witness points on the curve in question
-pub fn multi_scalar_multiply<F: FieldExt, FC, GA>(
+// Input:
+// - `scalars` is vector of same length as `P`
+// - each `scalar` in `scalars` satisfies same assumptions as in `scalar_multiply` above
+pub fn multi_scalar_multiply<F: FieldExt, FC, GA, const LANE: usize>(
     chip: &FC,
     range: &range::RangeConfig<F>,
     layouter: &mut impl Layouter<F>,
     P: &Vec<EccPoint<F, FC>>,
-    x: &Vec<AssignedCell<F, F>>,
+    scalars: &Vec<[AssignedCell<F, F>; LANE]>,
     b: F,
     max_bits: usize,
     window_bits: usize,
@@ -360,8 +357,13 @@ where
     GA: CurveAffine<Base = FC::FieldType>,
 {
     let k = P.len();
-    assert_eq!(k, x.len());
-    let num_windows = (max_bits + window_bits - 1) / window_bits;
+    assert_eq!(k, scalars.len());
+    assert!(k > 0);
+    assert!(scalars[0].len() > 0);
+    assert!((max_bits as u64) <= modulus::<F>().bits());
+
+    let total_bits = max_bits * scalars[0].len();
+    let num_windows = (total_bits + window_bits - 1) / window_bits;
     let rounded_bitlen = num_windows * window_bits;
 
     let zero_cell = layouter.assign_region(
@@ -373,13 +375,14 @@ where
         },
     )?;
     let mut rounded_bits_vec = Vec::with_capacity(k);
-    for idx in 0..k {
-        let mut rounded_bits = Vec::with_capacity(rounded_bitlen);
-        let bits = range.num_to_bits(layouter, &x[idx], max_bits)?;
-        for cell in bits.iter() {
-            rounded_bits.push(cell.clone());
+    for scalar in scalars {
+        let mut bits = Vec::with_capacity(rounded_bitlen);
+        for x in scalar {
+            let mut new_bits = range.num_to_bits(layouter, x, max_bits)?;
+            bits.append(&mut new_bits);
         }
-        for idx in 0..(rounded_bitlen - max_bits) {
+        let mut rounded_bits = bits;
+        for _i in 0..(rounded_bitlen - total_bits) {
             rounded_bits.push(zero_cell.clone());
         }
         rounded_bits_vec.push(rounded_bits);
@@ -398,9 +401,7 @@ where
                 .iter()
                 .map(|x| Existing(&x))
                 .collect();
-            let bit_sum = range
-                .qap_config
-                .inner_product(layouter, &ones_vec, &temp_bits)?;
+            let bit_sum = range.qap_config.inner_product(layouter, &ones_vec, &temp_bits)?;
             let is_zero = range.is_zero(layouter, &bit_sum.2)?;
             is_zero_window.push(is_zero.clone());
         }
@@ -506,9 +507,7 @@ impl<F: FieldExt, FC: FieldChip<F>> EccChip<F, FC> {
     ) -> Result<EccPoint<F, FC>, Error> {
         Ok(EccPoint::construct(
             P.x.clone(),
-            self.field_chip
-                .negate(layouter, &P.y)
-                .expect("negating field point should not fail"),
+            self.field_chip.negate(layouter, &P.y).expect("negating field point should not fail"),
         ))
     }
 
@@ -534,11 +533,11 @@ impl<F: FieldExt, FC: FieldChip<F>> EccChip<F, FC>
 where
     FC: Selectable<F, Point = FC::FieldPoint>,
 {
-    pub fn scalar_mult(
+    pub fn scalar_mult<const LANE: usize>(
         &self,
         layouter: &mut impl Layouter<F>,
         P: &EccPoint<F, FC>,
-        x: &AssignedCell<F, F>,
+        scalar: &[AssignedCell<F, F>; LANE],
         b: F,
         max_bits: usize,
         window_bits: usize,
@@ -548,18 +547,18 @@ where
             &self.range,
             layouter,
             P,
-            x,
+            scalar,
             b,
             max_bits,
             window_bits,
         )
     }
 
-    pub fn multi_scalar_mult<GA>(
+    pub fn multi_scalar_mult<GA, const LANE: usize>(
         &self,
         layouter: &mut impl Layouter<F>,
         P: &Vec<EccPoint<F, FC>>,
-        x: &Vec<AssignedCell<F, F>>,
+        scalars: &Vec<[AssignedCell<F, F>; LANE]>,
         b: F,
         max_bits: usize,
         window_bits: usize,
@@ -567,12 +566,12 @@ where
     where
         GA: CurveAffine<Base = FC::FieldType>,
     {
-        multi_scalar_multiply::<F, FC, GA>(
+        multi_scalar_multiply::<F, FC, GA, LANE>(
             &self.field_chip,
             &self.range,
             layouter,
             P,
-            x,
+            scalars,
             b,
             max_bits,
             window_bits,
@@ -581,18 +580,17 @@ where
 }
 
 impl<F: FieldExt, Fp: FieldExt> EccChip<F, FpChip<F, Fp>> {
-    pub fn fixed_base_scalar_mult<GA: CurveAffine<Base = Fp>>(
+    pub fn fixed_base_scalar_mult<GA: CurveAffine<Base = Fp>, const LANE: usize>(
         &self,
         layouter: &mut impl Layouter<F>,
         P: &FixedEccPoint<F, GA>,
-        x: &AssignedCell<F, F>,
+        scalar: &[AssignedCell<F, F>; LANE],
         b: F,
         max_bits: usize,
         window_bits: usize,
     ) -> Result<EccPoint<F, FpChip<F, Fp>>, Error> {
-        fixed_base_scalar_multiply(&self.field_chip, layouter, P, x, b, max_bits, window_bits)
+        fixed_base_scalar_multiply(&self.field_chip, layouter, P, scalar, b, max_bits, window_bits)
     }
 }
 
-#[cfg(test)]
-pub(crate) mod tests;
+pub mod tests;

@@ -43,11 +43,7 @@ where
     GA::Base: PrimeField,
 {
     pub fn construct(x: FixedCRTInteger<F>, y: FixedCRTInteger<F>) -> Self {
-        Self {
-            x,
-            y,
-            _marker: PhantomData,
-        }
+        Self { x, y, _marker: PhantomData }
     }
 
     pub fn from_g1(P: &GA, num_limbs: usize, limb_bits: usize) -> Self {
@@ -76,15 +72,19 @@ where
     }
 }
 
-// computes x * P on y^2 = x^3 + b
+// computes `[scalar] * P` on y^2 = x^3 + b where `P` is fixed (constant)
+// - `scalar` is represented as a reference array of `AssignedCell`s
+// - `scalar = sum_i scalar_i * 2^{max_bits * i}`
+// - an array of length > 1 is needed when `scalar` exceeds the modulus of scalar field `F`
 // assumes:
-//   * 0 < x < scalar field modulus
-//   * P has order given by the scalar field modulus
-pub fn fixed_base_scalar_multiply<F: FieldExt, GA: CurveAffine>(
+// - `scalar_i < 2^{max_bits} for all i` (constrained by num_to_bits)
+// - `max_bits <= modulus::<F>.bits()`
+
+pub fn fixed_base_scalar_multiply<F: FieldExt, GA: CurveAffine, const LANE: usize>(
     chip: &FpChip<F, GA::Base>,
     layouter: &mut impl Layouter<F>,
     P: &FixedEccPoint<F, GA>,
-    x: &AssignedCell<F, F>,
+    scalar: &[AssignedCell<F, F>; LANE],
     b: F,
     max_bits: usize,
     window_bits: usize,
@@ -92,7 +92,11 @@ pub fn fixed_base_scalar_multiply<F: FieldExt, GA: CurveAffine>(
 where
     GA::Base: PrimeField,
 {
-    let num_windows = (max_bits + window_bits - 1) / window_bits;
+    assert!(scalar.len() > 0);
+    assert!((max_bits as u64) <= modulus::<F>().bits());
+
+    let total_bits = max_bits * scalar.len();
+    let num_windows = (total_bits + window_bits - 1) / window_bits;
     let rounded_bitlen = num_windows * window_bits;
 
     // cached_points[i][j] holds j * 2^(i * w) for j in {0, ..., 2^w - 1}
@@ -123,24 +127,22 @@ where
         cached_points.push(cache_vec);
     }
 
-    let mut rounded_bits = Vec::with_capacity(rounded_bitlen);
-    let bits = chip.config.range.num_to_bits(layouter, x, max_bits)?;
-    for cell in bits.iter() {
-        rounded_bits.push(cell.clone());
+    let mut bits = Vec::with_capacity(rounded_bitlen);
+    for x in scalar {
+        let mut new_bits = chip.config.range.num_to_bits(layouter, x, max_bits)?;
+        bits.append(&mut new_bits);
     }
+    let mut rounded_bits = bits;
     let zero_cell = layouter.assign_region(
         || "constant 0",
         |mut region| {
             let zero_cells = vec![Constant(F::from(0))];
             let zero_cells_assigned =
-                chip.config
-                    .range
-                    .qap_config
-                    .assign_region(zero_cells, 0, &mut region)?;
+                chip.config.range.qap_config.assign_region(zero_cells, 0, &mut region)?;
             Ok(zero_cells_assigned[0].clone())
         },
     )?;
-    for idx in 0..(rounded_bitlen - max_bits) {
+    for idx in 0..(rounded_bitlen - total_bits) {
         rounded_bits.push(zero_cell.clone());
     }
 
@@ -168,11 +170,8 @@ where
             .iter()
             .map(|x| Existing(&x))
             .collect();
-        let bit_sum = chip
-            .config
-            .range
-            .qap_config
-            .inner_product(layouter, &ones_vec, &temp_bits)?;
+        let bit_sum =
+            chip.config.range.qap_config.inner_product(layouter, &ones_vec, &temp_bits)?;
         let is_zero = chip.config.range.is_zero(layouter, &bit_sum.2)?;
         is_zero_window.push(is_zero.clone());
     }
@@ -197,13 +196,7 @@ where
         )?;
         let sum = ecc_add_unequal(chip, layouter, &curr_point, &add_point)?;
         let zero_sum = select(chip, layouter, &curr_point, &sum, &is_zero_window[idx])?;
-        curr_point = select(
-            chip,
-            layouter,
-            &zero_sum,
-            &add_point,
-            &is_started[window_bits * idx],
-        )?;
+        curr_point = select(chip, layouter, &zero_sum, &add_point, &is_started[window_bits * idx])?;
     }
     Ok(curr_point.clone())
 }
