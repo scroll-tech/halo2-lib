@@ -3,6 +3,7 @@ use std::cmp;
 
 use super::OverflowInteger;
 use crate::gates::qap_gate;
+use crate::gates::qap_gate::QuantumCell::Existing;
 
 pub fn assign<F: FieldExt>(
     gate: &qap_gate::Config<F>,
@@ -13,7 +14,7 @@ pub fn assign<F: FieldExt>(
 
     let mut out_limbs = Vec::with_capacity(k);
     for limb in &a.limbs {
-        let out_limb = gate.neg(layouter, limb)?;
+        let out_limb = gate.neg(layouter, &Existing(&limb))?;
         out_limbs.push(out_limb);
     }
 

@@ -20,7 +20,7 @@ pub fn assign<F: FieldExt>(
     let mut out_limbs = Vec::with_capacity(k);
 
     for i in 0..k {
-        let out_cell = gate.mul_constant(layouter, &a.limbs[i], b)?;
+        let out_cell = gate.mul(layouter, &Existing(&a.limbs[i]), &Constant(b))?;
         out_limbs.push(out_cell);
     }
     Ok(OverflowInteger::construct(
@@ -41,11 +41,11 @@ pub fn crt<F: FieldExt>(
     let mut out_limbs = Vec::with_capacity(k);
 
     for i in 0..k {
-        let out_cell = gate.mul_constant(layouter, &a.truncation.limbs[i], b)?;
+        let out_cell = gate.mul(layouter, &Existing(&a.truncation.limbs[i]), &Constant(b))?;
         out_limbs.push(out_cell);
     }
 
-    let out_native = gate.mul_constant(layouter, &a.native, b)?;
+    let out_native = gate.mul(layouter, &Existing(&a.native), &Constant(b))?;
     let b_val = fe_to_bigint(&b);
     let b_abs = b_val.abs().to_biguint().unwrap();
     let out_val = a.value.as_ref().map(|a| a * &b_val);

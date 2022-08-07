@@ -10,20 +10,18 @@ use num_bigint::{BigInt, BigUint};
 use num_traits::{One, Zero};
 use rand_core::OsRng;
 
+use crate::bigint::{
+    add_no_carry, inner_product, mul_no_carry, scalar_mul_no_carry, select, sub_no_carry,
+    CRTInteger, FixedCRTInteger, OverflowInteger,
+};
 use crate::fields::fp_crt::{FpChip, FpConfig};
+use crate::fields::FieldChip;
 use crate::gates::qap_gate::QuantumCell;
 use crate::gates::qap_gate::QuantumCell::*;
 use crate::gates::{qap_gate, range};
 use crate::utils::{
-    bigint_to_fe, bigint_to_fp, decompose_bigint_option, decompose_biguint, fe_to_bigint,
-    fp_to_bigint, modulus as native_modulus,
-};
-use crate::{
-    bigint::{
-        add_no_carry, inner_product, mul_no_carry, scalar_mul_no_carry, select, sub_no_carry,
-        CRTInteger, FixedCRTInteger, OverflowInteger,
-    },
-    utils::fe_to_biguint,
+    bigint_to_fe, decompose_bigint_option, decompose_biguint, fe_to_bigint, fe_to_biguint,
+    modulus as native_modulus,
 };
 
 // committing to prime field F_p with
@@ -58,8 +56,8 @@ impl<F: FieldExt> FixedEccPoint<F> {
     }
 
     pub fn from_g1(P: &G1Affine, num_limbs: usize, limb_bits: usize) -> Self {
-        let x_pt = FixedCRTInteger::from_native(fp_to_bigint(&P.x), num_limbs, limb_bits);
-        let y_pt = FixedCRTInteger::from_native(fp_to_bigint(&P.y), num_limbs, limb_bits);
+        let x_pt = FixedCRTInteger::from_native(fe_to_bigint(&P.x), num_limbs, limb_bits);
+        let y_pt = FixedCRTInteger::from_native(fe_to_bigint(&P.y), num_limbs, limb_bits);
         Self { x: x_pt, y: y_pt }
     }
 
@@ -106,14 +104,14 @@ pub fn point_add_unequal<F: FieldExt>(
     let y_2 = Q.y.value.clone();
 
     let lambda = if let (Some(x_1), Some(y_1), Some(x_2), Some(y_2)) = (x_1, y_1, x_2, y_2) {
-        let x_1 = bigint_to_fp(x_1);
-        let y_1 = bigint_to_fp(y_1);
-        let x_2 = bigint_to_fp(x_2);
-        let y_2 = bigint_to_fp(y_2);
+        let x_1 = bigint_to_fe::<Fp>(&x_1);
+        let y_1 = bigint_to_fe::<Fp>(&y_1);
+        let x_2 = bigint_to_fe::<Fp>(&x_2);
+        let y_2 = bigint_to_fe::<Fp>(&y_2);
 
         assert_ne!(x_1, x_2);
         let lambda = (y_2 - y_1) * ((x_2 - x_1).invert().unwrap());
-        Some(fp_to_bigint(&lambda))
+        Some(BigInt::from(fe_to_biguint(&lambda)))
     } else {
         None
     };
@@ -121,7 +119,7 @@ pub fn point_add_unequal<F: FieldExt>(
     let dx = chip.sub_no_carry(layouter, &Q.x, &P.x)?;
     let dy = chip.sub_no_carry(layouter, &Q.y, &P.y)?;
 
-    let lambda = chip.load_private(layouter.namespace(|| "load lambda"), lambda, k)?;
+    let lambda = chip.load_private(layouter, lambda)?;
     chip.range_check(layouter, &lambda)?;
 
     // constrain lambda * dx - dy
@@ -170,14 +168,14 @@ pub fn point_sub_unequal<F: FieldExt>(
     let y_2 = Q.y.value.clone();
 
     let lambda = if let (Some(x_1), Some(y_1), Some(x_2), Some(y_2)) = (x_1, y_1, x_2, y_2) {
-        let x_1 = bigint_to_fp(x_1);
-        let y_1 = bigint_to_fp(y_1);
-        let x_2 = bigint_to_fp(x_2);
-        let y_2 = bigint_to_fp(y_2);
+        let x_1 = bigint_to_fe::<Fp>(&x_1);
+        let y_1 = bigint_to_fe::<Fp>(&y_1);
+        let x_2 = bigint_to_fe::<Fp>(&x_2);
+        let y_2 = bigint_to_fe::<Fp>(&y_2);
 
         assert_ne!(x_1, x_2);
         let lambda = (-y_2 - y_1) * (x_2 - x_1).invert().unwrap();
-        Some(fp_to_bigint(&lambda))
+        Some(BigInt::from(fe_to_biguint(&lambda)))
     } else {
         None
     };
@@ -185,7 +183,7 @@ pub fn point_sub_unequal<F: FieldExt>(
     let dx = chip.sub_no_carry(layouter, &Q.x, &P.x)?;
     let dy = chip.add_no_carry(layouter, &Q.y, &P.y)?;
 
-    let lambda = chip.load_private(layouter.namespace(|| "load lambda"), lambda, k)?;
+    let lambda = chip.load_private(layouter, lambda)?;
     chip.range_check(layouter, &lambda)?;
 
     // (x_2 - x_1) * lambda + y_2 + y_1 (mod p)
@@ -235,10 +233,10 @@ pub fn point_double<F: FieldExt>(
     let y = P.y.value.clone();
     let lambda = if let (Some(x), Some(y)) = (x, y) {
         assert_ne!(y, BigInt::zero());
-        let x = bigint_to_fp(x);
-        let y = bigint_to_fp(y);
+        let x = bigint_to_fe::<Fp>(&x);
+        let y = bigint_to_fe::<Fp>(&y);
         let lambda = Fp::from(3) * x * x * (Fp::from(2) * y).invert().unwrap();
-        Some(fp_to_bigint(&lambda))
+        Some(BigInt::from(fe_to_biguint(&lambda)))
     } else {
         None
     };
@@ -288,7 +286,7 @@ pub fn point_double<F: FieldExt>(
         chip.config
             .range
             .qap_config
-            .mul_constant(layouter, &lambda.native, F::from(2))?;
+            .mul(layouter, &Existing(&lambda.native), &Constant(F::from(2)))?;
     let two_lambda = CRTInteger::construct(
         two_lambda_trunc,
         two_lambda_native,
@@ -363,7 +361,8 @@ pub fn select_from_bits<F: FieldExt>(
     let w = sel.len();
     let num_points = points.len();
     assert_eq!(1 << w, num_points);
-    let coeffs = range.qap_config.bits_to_indicator(layouter, sel)?;
+    let sel_quantum = sel.iter().map(|x| Existing(x)).collect();
+    let coeffs = range.qap_config.bits_to_indicator(layouter, &sel_quantum)?;
     inner_product(range, layouter, points, &coeffs)
 }
 
@@ -413,8 +412,8 @@ pub fn scalar_multiply<F: FieldExt>(
     for idx in 1..max_bits {
         let or = chip.config.range.qap_config.or(
             layouter,
-            &is_started[rounded_bitlen - max_bits + idx - 1],
-            &bits[max_bits - idx],
+            &Existing(&is_started[rounded_bitlen - max_bits + idx - 1]),
+            &Existing(&bits[max_bits - idx]),
         )?;
         is_started.push(or.clone());
     }
@@ -515,8 +514,8 @@ pub fn fixed_base_scalar_multiply<F: FieldExt>(
     // cached_points[i][j] holds j * 2^(i * w) for j in {0, ..., 2^w - 1}
     let mut cached_points = Vec::with_capacity(num_windows);
     let mut base_pt = G1Affine::default();
-    base_pt.x = bigint_to_fp(P.x.value.clone());
-    base_pt.y = bigint_to_fp(P.y.value.clone());
+    base_pt.x = bigint_to_fe::<Fp>(&P.x.value.clone());
+    base_pt.y = bigint_to_fe::<Fp>(&P.y.value.clone());
     let base_pt_assigned = P.assign(&chip, layouter)?;
     let mut increment = base_pt;
     for i in 0..num_windows {
@@ -569,8 +568,8 @@ pub fn fixed_base_scalar_multiply<F: FieldExt>(
     for idx in 1..rounded_bitlen {
         let or = chip.config.range.qap_config.or(
             layouter,
-            &is_started[idx - 1],
-            &rounded_bits[rounded_bitlen - idx],
+            &Existing(&is_started[idx - 1]),
+            &Existing(&rounded_bits[rounded_bitlen - idx]),
         )?;
         is_started.push(or.clone());
     }
@@ -698,17 +697,8 @@ pub fn multi_scalar_multiply<F: FieldExt>(
     let pt_x = fe_to_bigint(&base_point.x);
     let pt_y = fe_to_bigint(&base_point.y);
     let base = {
-        let num_limbs = P[0].x.truncation.limbs.len();
-        let x_overflow = chip.load_private(
-            layouter.namespace(|| "random point x"),
-            Some(pt_x),
-            num_limbs,
-        )?;
-        let y_overflow = chip.load_private(
-            layouter.namespace(|| "random point y"),
-            Some(pt_y),
-            num_limbs,
-        )?;
+        let x_overflow = chip.load_private(layouter, Some(pt_x))?;
+        let y_overflow = chip.load_private(layouter, Some(pt_y))?;
 
         EccPoint::construct(x_overflow, y_overflow)
     };
@@ -807,25 +797,17 @@ impl<F: FieldExt> EccChip<F> {
 
     pub fn load_private(
         &self,
-        mut layouter: impl Layouter<F>,
+        layouter: &mut impl Layouter<F>,
         point: Option<(Fp, Fp)>,
     ) -> Result<EccPoint<F>, Error> {
         let (x, y) = if let Some((x, y)) = point {
-            (Some(fp_to_bigint(&x)), Some(fp_to_bigint(&y)))
+            (Some(fe_to_bigint(&x)), Some(fe_to_bigint(&y)))
         } else {
             (None, None)
         };
 
-        let x_assigned = self.fp_chip.load_private(
-            layouter.namespace(|| "x"),
-            x,
-            self.fp_chip.config.num_limbs,
-        )?;
-        let y_assigned = self.fp_chip.load_private(
-            layouter.namespace(|| "y"),
-            y,
-            self.fp_chip.config.num_limbs,
-        )?;
+        let x_assigned = self.fp_chip.load_private(layouter, x)?;
+        let y_assigned = self.fp_chip.load_private(layouter, y)?;
 
         Ok(EccPoint::construct(x_assigned, y_assigned))
     }
@@ -911,7 +893,7 @@ pub(crate) mod tests {
         _marker: PhantomData<F>,
     }
 
-    const BATCH_SIZE: usize = 1;
+    const BATCH_SIZE: usize = 4;
 
     impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         type Config = FpConfig<F>;
@@ -944,21 +926,15 @@ pub(crate) mod tests {
             let chip = EccChip::construct(config.clone());
             chip.load_lookup_table(&mut layouter)?;
 
-            let P_assigned = chip.load_private(
-                layouter.namespace(|| "input point P"),
-                self.P.map(|P| (P.x, P.y)),
-            )?;
-            let Q_assigned = chip.load_private(
-                layouter.namespace(|| "input point Q"),
-                self.Q.map(|P| (P.x, P.y)),
-            )?;
+            let P_assigned = chip.load_private(&mut layouter, self.P.map(|P| (P.x, P.y)))?;
+            let Q_assigned = chip.load_private(&mut layouter, self.Q.map(|P| (P.x, P.y)))?;
 
-	    let mut pt = G1Affine::default();	    
-	    let mut P_fixed = FixedEccPoint::from_g1(&pt, 3, 88);
-	    if let Some(P_point) = &self.P {
-		pt = P_point.clone();
-		P_fixed = FixedEccPoint::<F>::from_g1(&P_point, 3, 88);
-	    }
+            let mut pt = G1Affine::default();
+            let mut P_fixed = FixedEccPoint::from_g1(&pt, 3, 88);
+            if let Some(P_point) = &self.P {
+                pt = P_point.clone();
+                P_fixed = FixedEccPoint::<F>::from_g1(&P_point, 3, 88);
+            }
 
             let x_assigned = layouter.assign_region(
                 || "input scalar x",
@@ -974,10 +950,8 @@ pub(crate) mod tests {
             let mut P_batch_assigned = Vec::with_capacity(self.batch_size);
             let mut x_batch_assigned = Vec::with_capacity(self.batch_size);
             for i in 0..self.batch_size {
-                let assigned = chip.load_private(
-                    layouter.namespace(|| format!("input point P_{}", i)),
-                    self.P_batch[i].map(|P| (P.x, P.y)),
-                )?;
+                let assigned =
+                    chip.load_private(&mut layouter, self.P_batch[i].map(|P| (P.x, P.y)))?;
                 P_batch_assigned.push(assigned);
 
                 let xb_assigned = layouter.assign_region(
@@ -1003,12 +977,12 @@ pub(crate) mod tests {
                 assert_eq!(prod.value, prod.truncation.to_bigint());
                 if self.P != None {
                     let actual_prod = self.P.unwrap().x * self.P.unwrap().y;
-                    assert_eq!(fp_to_bigint(&actual_prod), prod.value.unwrap());
+                    assert_eq!(actual_prod, bigint_to_fe::<Fp>(&prod.value.unwrap()));
                 }
             }
             */
 
-	    /*
+            /*
             // test add_unequal
             {
                 let sum = chip.add_unequal(
@@ -1020,8 +994,9 @@ pub(crate) mod tests {
                 assert_eq!(sum.y.truncation.to_bigint(), sum.y.value);
                 if self.P != None {
                     let actual_sum = G1Affine::from(self.P.unwrap() + self.Q.unwrap());
-                    assert_eq!(sum.x.value.unwrap(), fp_to_bigint(&actual_sum.x));
-                    assert_eq!(sum.y.value.unwrap(), fp_to_bigint(&actual_sum.y));
+                    assert_eq!(bigint_to_fe::<Fp>(&sum.x.value.unwrap()), actual_sum.x);
+                    assert_eq!(bigint_to_fe::<Fp>(&sum.y.value.unwrap()), actual_sum.y);
+                    println!("OK");
                 }
             }
 
@@ -1030,11 +1005,11 @@ pub(crate) mod tests {
                 let doub = chip.double(&mut layouter.namespace(|| "double"), &P_assigned)?;
                 if self.P != None {
                     let actual_doub = G1Affine::from(self.P.unwrap() * Fn::from(2));
-                    assert_eq!(doub.x.value.unwrap(), fp_to_bigint(&actual_doub.x));
-                    assert_eq!(doub.y.value.unwrap(), fp_to_bigint(&actual_doub.y));
+                    assert_eq!(bigint_to_fe::<Fp>(&doub.x.value.unwrap()), actual_doub.x);
+                    assert_eq!(bigint_to_fe::<Fp>(&doub.y.value.unwrap()), actual_doub.y);
                 }
             }
-	     */
+            */
 
             /*
             // test scalar mult
@@ -1057,38 +1032,38 @@ pub(crate) mod tests {
                             )
                             .unwrap(),
                     );
-                    assert_eq!(fp_to_bigint(&actual.x), scalar_mult.x.value.unwrap());
-                    assert_eq!(fp_to_bigint(&actual.y), scalar_mult.y.value.unwrap());
+                    assert_eq!(actual.x, bigint_to_fe::<Fp>(&scalar_mult.x.value.unwrap()));
+                    assert_eq!(actual.y, bigint_to_fe::<Fp>(&scalar_mult.y.value.unwrap()));
                     println!("OK");
                 }
             }
             */
 
-	    /*
-            // test fixed base scalar mult
-            {
-                let fixed_base_scalar_mult = chip.fixed_base_scalar_mult(
-                    &mut layouter.namespace(|| "fixed_base_scalar_mult"),
-                    &P_fixed,
-                    &x_assigned,
-                    F::from(3),
-                    254,
-                    4,
-                )?;
-		if let Some(xv) = &self.x {
-		    println!("answer {:?}", G1Affine::from(pt * Fr::from_repr(
-			(*xv).to_repr().as_ref()[..32].try_into().unwrap()).unwrap()));
-		    let xx = fixed_base_scalar_mult.x.value;
-		    let yy = fixed_base_scalar_mult.y.value;
-		    if let Some(xxx) = &xx {
-			if let Some(yyy) = &yy {
-			    println!("result {:#01x} {:#01x}", xxx, yyy);
-			}
-		    }
-		}
+            /*
+                // test fixed base scalar mult
+                {
+                    let fixed_base_scalar_mult = chip.fixed_base_scalar_mult(
+                        &mut layouter.namespace(|| "fixed_base_scalar_mult"),
+                        &P_fixed,
+                        &x_assigned,
+                        F::from(3),
+                        254,
+                        4,
+                    )?;
+            if let Some(xv) = &self.x {
+                println!("answer {:?}", G1Affine::from(pt * Fr::from_repr(
+                (*xv).to_repr().as_ref()[..32].try_into().unwrap()).unwrap()));
+                let xx = fixed_base_scalar_mult.x.value;
+                let yy = fixed_base_scalar_mult.y.value;
+                if let Some(xxx) = &xx {
+                if let Some(yyy) = &yy {
+                    println!("result {:#01x} {:#01x}", xxx, yyy);
+                }
+                }
             }
-	     */
-	   
+                }
+             */
+
             // test multi scalar mult
             {
                 let multi_scalar_mult = chip.multi_scalar_mult(
@@ -1120,8 +1095,14 @@ pub(crate) mod tests {
                                 .unwrap();
                     }
                     let actual = G1Affine::from(msm);
-                    assert_eq!(fp_to_bigint(&actual.x), multi_scalar_mult.x.value.unwrap());
-                    assert_eq!(fp_to_bigint(&actual.y), multi_scalar_mult.y.value.unwrap());
+                    assert_eq!(
+                        actual.x,
+                        bigint_to_fe::<Fp>(&multi_scalar_mult.x.value.unwrap())
+                    );
+                    assert_eq!(
+                        actual.y,
+                        bigint_to_fe::<Fp>(&multi_scalar_mult.y.value.unwrap())
+                    );
                 }
             }
             Ok(())
@@ -1131,7 +1112,7 @@ pub(crate) mod tests {
     use halo2_proofs::pairing::bn256::{G1Affine, G1};
     #[test]
     fn test_ecc_crt() {
-        let k = 26;
+        let k = 23;
         let mut rng = rand::thread_rng();
 
         let batch_size = BATCH_SIZE;

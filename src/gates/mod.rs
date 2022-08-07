@@ -114,17 +114,17 @@ pub(crate) mod tests {
 
             // test add
             {
-                config.gate.add(&mut layouter, &a_cell, &b_cell)?;
+                config.gate.add(&mut layouter, &Existing(&a_cell), &Existing(&b_cell))?;
             }
 
             // test sub
             {
-                config.gate.sub(&mut layouter, &a_cell, &b_cell)?;
+                config.gate.sub(&mut layouter, &Existing(&a_cell), &Existing(&b_cell))?;
             }
 
             // test multiply
             {
-                config.gate.mul(&mut layouter, &c_cell, &b_cell)?;
+                config.gate.mul(&mut layouter, &Existing(&c_cell), &Existing(&b_cell))?;
             }
 
             Ok(())

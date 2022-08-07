@@ -130,7 +130,7 @@ pub fn crt<F: FieldExt>(
     b: &CRTInteger<F>,
 ) -> Result<CRTInteger<F>, Error> {
     let out_trunc = truncate(gate, layouter, &a.truncation, &b.truncation)?;
-    let out_native = gate.mul(layouter, &a.native, &b.native)?;
+    let out_native = gate.mul(layouter, &Existing(&a.native), &Existing(&b.native))?;
     let out_val = a.value.as_ref().zip(b.value.as_ref()).map(|(a, b)| a * b);
 
     Ok(CRTInteger::construct(

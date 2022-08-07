@@ -1,9 +1,29 @@
-use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
-use num_bigint::BigUint;
+use std::marker::PhantomData;
 
-use crate::bigint::*;
-use crate::gates::qap_gate;
-use crate::gates::range;
+use ff::PrimeField;
+use halo2_proofs::{
+    arithmetic::{BaseExt, Field, FieldExt},
+    circuit::{AssignedCell, Layouter},
+    plonk::{Advice, Column, ConstraintSystem, Error, Fixed, Selector, TableColumn},
+};
+use num_bigint::{BigInt, BigUint};
+use num_traits::Num;
+
+use super::{FieldChip, Selectable};
+use crate::{
+    bigint::{
+        add_no_carry, big_is_zero, carry_mod, check_carry_mod_to_zero, inner_product, mul_no_carry,
+        scalar_mul_no_carry, select, sub, sub_no_carry, CRTInteger, FixedCRTInteger,
+        OverflowInteger,
+    },
+    gates::qap_gate,
+    gates::qap_gate::QuantumCell::{Constant, Existing, Witness},
+    gates::range,
+    utils::{
+        bigint_to_fe, decompose_bigint, decompose_bigint_option, decompose_biguint, fe_to_biguint,
+        modulus,
+    },
+};
 
 #[derive(Clone, Debug)]
 pub struct FpConfig<F: FieldExt> {
@@ -19,15 +39,7 @@ pub struct FpConfig<F: FieldExt> {
     pub p: BigUint,
 }
 
-pub struct FpChip<F: FieldExt> {
-    pub config: FpConfig<F>,
-}
-
-impl<F: FieldExt> FpChip<F> {
-    pub fn construct(config: FpConfig<F>) -> Self {
-        Self { config }
-    }
-
+impl<F: FieldExt> FpConfig<F> {
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
         value: Column<Advice>,
@@ -62,186 +74,266 @@ impl<F: FieldExt> FpChip<F> {
             p,
         }
     }
+}
+
+pub struct FpChip<F: FieldExt, Fp: PrimeField> {
+    pub config: FpConfig<F>,
+    _marker: PhantomData<Fp>,
+}
+
+impl<F: FieldExt, Fp: PrimeField> FpChip<F, Fp> {
+    pub fn construct(config: FpConfig<F>) -> Self {
+        Self {
+            config,
+            _marker: PhantomData,
+        }
+    }
 
     pub fn load_lookup_table(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         self.config.range.load_lookup_table(layouter)
     }
 
-    pub fn load_private(
+    pub fn load_constant(
         &self,
-        mut layouter: impl Layouter<F>,
-        vec_a: Vec<Option<F>>,
-        max_limb_size: BigUint,
-    ) -> Result<OverflowInteger<F>, Error> {
+        layouter: &mut impl Layouter<F>,
+        a: BigInt,
+    ) -> Result<CRTInteger<F>, Error> {
+        let a_vec = decompose_bigint::<F>(&a, self.config.num_limbs, self.config.limb_bits);
+        let (a_limbs, a_native) = layouter.assign_region(
+            || "load constant",
+            |mut region| {
+                let a_limbs = self.config.gate.assign_region(
+                    a_vec.iter().map(|v| Constant(v.clone())).collect(),
+                    0,
+                    &mut region,
+                )?;
+                let a_native = self.config.gate.assign_region(
+                    vec![Constant(bigint_to_fe(&a))],
+                    a_limbs.len(),
+                    &mut region,
+                )?;
+                Ok((a_limbs, a_native[0].clone()))
+            },
+        )?;
+
+        Ok(CRTInteger::construct(
+            OverflowInteger::construct(
+                a_limbs,
+                BigUint::from(1u64) << self.config.limb_bits,
+                self.config.limb_bits,
+            ),
+            a_native,
+            Some(a),
+            (BigUint::from(1u64) << self.config.p.bits()) - 1usize,
+        ))
+    }
+}
+
+impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpChip<F, Fp> {
+    type WitnessType = Option<BigInt>;
+    type FieldPoint = CRTInteger<F>;
+    type FieldType = Fp;
+
+    fn get_assigned_value(x: &CRTInteger<F>) -> Option<Fp> {
+        x.value.as_ref().map(|x| bigint_to_fe::<Fp>(x))
+    }
+
+    fn fe_to_witness(x: &Option<Fp>) -> Option<BigInt> {
+        x.map(|x| BigInt::from(fe_to_biguint(&x)))
+    }
+
+    fn load_private(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: Option<BigInt>,
+    ) -> Result<CRTInteger<F>, Error> {
         let config = &self.config;
 
+        let a_vec = decompose_bigint_option(&a, self.config.num_limbs, self.config.limb_bits);
         let limbs = layouter.assign_region(
             || "load private",
             |mut region| {
-                let mut limbs = Vec::with_capacity(vec_a.len());
-                for (i, a) in vec_a.iter().enumerate() {
+                let mut limbs = Vec::with_capacity(self.config.num_limbs);
+                for (i, a_val) in a_vec.iter().enumerate() {
                     let limb = region.assign_advice(
                         || "private value",
                         config.value,
                         i,
-                        || a.ok_or(Error::Synthesis),
+                        || a_val.ok_or(Error::Synthesis),
                     )?;
                     limbs.push(limb);
                 }
                 Ok(limbs)
             },
         )?;
-        Ok(OverflowInteger::construct(
-            limbs,
-            max_limb_size,
+
+        let a_native = OverflowInteger::evaluate(
+            &self.config.range.qap_config,
+            layouter,
+            &limbs,
             self.config.limb_bits,
-        ))
-    }
-
-    pub fn load_constant(
-        &self,
-        mut layouter: impl Layouter<F>,
-        vec_a: Vec<F>,
-    ) -> Result<OverflowInteger<F>, Error> {
-        let config = &self.config;
-
-        let limbs = layouter.assign_region(
-            || "load constant",
-            |mut region| {
-                let mut limbs = Vec::with_capacity(vec_a.len());
-                for (i, a) in vec_a.iter().enumerate() {
-                    let limb = region.assign_advice_from_constant(
-                        || "constant value",
-                        config.value,
-                        i,
-                        *a,
-                    )?;
-                    limbs.push(limb);
-                }
-                Ok(limbs)
-            },
         )?;
-        Ok(OverflowInteger::construct(
-            limbs,
-            BigUint::from(1u32) << 64,
-            64,
+
+        Ok(CRTInteger::construct(
+            OverflowInteger::construct(
+                limbs,
+                BigUint::from(1u64) << self.config.limb_bits,
+                self.config.limb_bits,
+            ),
+            a_native,
+            a,
+            (BigUint::from(1u64) << self.config.p.bits()) - 1usize,
         ))
     }
 
     // signed overflow BigInt functions
-    pub fn add_no_carry(
+    fn add_no_carry(
         &self,
         layouter: &mut impl Layouter<F>,
-        a: &OverflowInteger<F>,
-        b: &OverflowInteger<F>,
-    ) -> Result<OverflowInteger<F>, Error> {
-        add_no_carry::assign(&self.config.gate, layouter, a, b)
+        a: &CRTInteger<F>,
+        b: &CRTInteger<F>,
+    ) -> Result<CRTInteger<F>, Error> {
+        add_no_carry::crt(&self.config.gate, layouter, a, b)
     }
 
-    pub fn sub_no_carry(
+    fn sub_no_carry(
         &self,
         layouter: &mut impl Layouter<F>,
-        a: &OverflowInteger<F>,
-        b: &OverflowInteger<F>,
-    ) -> Result<OverflowInteger<F>, Error> {
-        sub_no_carry::assign(&self.config.gate, layouter, a, b)
+        a: &CRTInteger<F>,
+        b: &CRTInteger<F>,
+    ) -> Result<CRTInteger<F>, Error> {
+        sub_no_carry::crt(&self.config.gate, layouter, a, b)
     }
 
-    pub fn mul_no_carry(
+    // Input: a
+    // Output: p - a if a != 0, else a
+    // Assume the actual value of `a` equals `a.truncation`
+    // Constrains a.truncation <= p using subtraction with carries
+    fn negate(
         &self,
         layouter: &mut impl Layouter<F>,
-        a: &OverflowInteger<F>,
-        b: &OverflowInteger<F>,
-    ) -> Result<OverflowInteger<F>, Error> {
-        mul_no_carry::assign(&self.config.gate, layouter, a, b)
+        a: &CRTInteger<F>,
+    ) -> Result<CRTInteger<F>, Error> {
+        // Compute p - a.truncation using carries
+        let p = self.load_constant(layouter, BigInt::from(self.config.p.clone()))?;
+        let (out_or_p, underflow) = sub::crt(&self.config.range, layouter, &p, &a)?;
+        layouter.assign_region(
+            || "fp negate no underflow",
+            |mut region| {
+                let zero =
+                    self.config
+                        .gate
+                        .assign_region(vec![Constant(F::from(0))], 0, &mut region)?;
+                region.constrain_equal(zero[0].cell(), underflow.cell())?;
+                Ok(())
+            },
+        )?;
+
+        let a_is_zero = big_is_zero::assign(&self.config.range, layouter, &a.truncation)?;
+        select::crt(&self.config.gate, layouter, a, &out_or_p, &a_is_zero)
     }
 
-    pub fn mod_reduce(
+    fn scalar_mul_no_carry(
         &self,
         layouter: &mut impl Layouter<F>,
-        a: &OverflowInteger<F>,
-        desired_num_limbs: usize,
-        modulus: num_bigint::BigUint,
-    ) -> Result<OverflowInteger<F>, Error> {
-        mod_reduce::assign(&self.config.gate, layouter, a, desired_num_limbs, modulus)
+        a: &CRTInteger<F>,
+        b: F,
+    ) -> Result<CRTInteger<F>, Error> {
+        scalar_mul_no_carry::crt(&self.config.gate, layouter, a, b)
     }
 
-    pub fn check_carry_to_zero(
+    fn mul_no_carry(
         &self,
         layouter: &mut impl Layouter<F>,
-        a: &OverflowInteger<F>,
+        a: &CRTInteger<F>,
+        b: &CRTInteger<F>,
+    ) -> Result<CRTInteger<F>, Error> {
+        mul_no_carry::crt(&self.config.gate, layouter, a, b)
+    }
+
+    fn check_carry_mod_to_zero(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &CRTInteger<F>,
     ) -> Result<(), Error> {
-        check_carry_to_zero::assign(&self.config.range, layouter, a)
+        check_carry_mod_to_zero::crt(&self.config.range, layouter, a, &self.config.p)
     }
 
-    pub fn carry_mod(
+    fn carry_mod(
         &self,
         layouter: &mut impl Layouter<F>,
-        a: &OverflowInteger<F>,
-    ) -> Result<OverflowInteger<F>, Error> {
-        carry_mod::assign(&self.config.range, layouter, a, &self.config.p)
+        a: &CRTInteger<F>,
+    ) -> Result<CRTInteger<F>, Error> {
+        carry_mod::crt(&self.config.range, layouter, a, &self.config.p)
     }
 
-    // BigInt functions
-    pub fn decompose(
+    fn range_check(&self, layouter: &mut impl Layouter<F>, a: &CRTInteger<F>) -> Result<(), Error> {
+        let n = a.truncation.limb_bits;
+        let k = a.truncation.limbs.len();
+        assert!(a.max_size.bits() as usize <= n * k);
+        let last_limb_bits = a.max_size.bits() as usize - n * (k - 1);
+        assert!(last_limb_bits > 0);
+
+        if a.value != None {
+            assert!(a.value.clone().unwrap().bits() <= a.max_size.bits());
+        }
+
+        // range check limbs of `a` are in [0, 2^n) except last limb should be in [0, 2^last_limb_bits)
+        let mut index: usize = 0;
+        for cell in a.truncation.limbs.iter() {
+            let limb_bits = if index == k - 1 { last_limb_bits } else { n };
+            self.config.range.range_check(layouter, cell, limb_bits)?;
+            index = index + 1;
+        }
+        Ok(())
+    }
+}
+
+impl<F: FieldExt, Fp: PrimeField> Selectable<F> for FpChip<F, Fp> {
+    type Point = CRTInteger<F>;
+
+    fn select(
         &self,
         layouter: &mut impl Layouter<F>,
-        a: &AssignedCell<F, F>,
-    ) -> Result<OverflowInteger<F>, Error> {
-        decompose::assign(
-            &self.config.range,
-            layouter,
-            a,
-            self.config.limb_bits,
-            self.config.num_limbs,
-        )
+        a: &CRTInteger<F>,
+        b: &CRTInteger<F>,
+        sel: &AssignedCell<F, F>,
+    ) -> Result<CRTInteger<F>, Error> {
+        select::crt(&self.config.range.qap_config, layouter, a, b, sel)
     }
 
-    pub fn big_less_than(
+    fn inner_product(
         &self,
         layouter: &mut impl Layouter<F>,
-        a: &OverflowInteger<F>,
-        b: &OverflowInteger<F>,
-    ) -> Result<AssignedCell<F, F>, Error> {
-        big_less_than::assign(&self.config.range, layouter, a, b)
-    }
-
-    // F_p functions
-    pub fn mul(
-        &self,
-        layouter: &mut impl Layouter<F>,
-        a: &OverflowInteger<F>,
-        b: &OverflowInteger<F>,
-    ) -> Result<OverflowInteger<F>, Error> {
-        let k_a = a.limbs.len();
-        let k_b = b.limbs.len();
-        assert_eq!(k_a, k_b);
-        let k = k_a;
-
-        let no_carry = self.mul_no_carry(layouter, a, b)?;
-        let prime_reduce = self.mod_reduce(layouter, &no_carry, k, self.config.p.clone())?;
-        self.carry_mod(layouter, &prime_reduce)
+        a: &Vec<CRTInteger<F>>,
+        coeffs: &Vec<AssignedCell<F, F>>,
+    ) -> Result<CRTInteger<F>, Error> {
+        inner_product::crt(&self.config.range.qap_config, layouter, a, coeffs)
     }
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use std::marker::PhantomData;
+
+    use halo2_proofs::arithmetic::BaseExt;
     use halo2_proofs::circuit::floor_planner::V1;
     use halo2_proofs::{
-        arithmetic::FieldExt, circuit::*, dev::MockProver, pairing::bn256::Fr as Fn, plonk::*,
+        arithmetic::FieldExt, circuit::*, dev::MockProver, pairing::bn256::Fq, pairing::bn256::Fr,
+        plonk::*,
     };
     use num_traits::One;
 
     use crate::fields::fp::{FpChip, FpConfig};
-    use crate::utils::*;
-    use num_bigint::BigInt as big_int;
-    use num_bigint::BigUint as big_uint;
+    use crate::fields::FieldChip;
+    use crate::utils::{fe_to_bigint, modulus};
+    use num_bigint::{BigInt, BigUint};
 
     #[derive(Default)]
     struct MyCircuit<F> {
-        a: Vec<Option<F>>,
-        b: Vec<Option<F>>,
-        c: Vec<Option<F>>,
+        a: Option<Fq>,
+        b: Option<Fq>,
+        _marker: PhantomData<F>,
     }
 
     impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
@@ -249,25 +341,13 @@ pub(crate) mod tests {
         type FloorPlanner = V1;
 
         fn without_witnesses(&self) -> Self {
-            Self {
-                a: vec![None; 4],
-                b: vec![None; 4],
-                c: vec![None; 4],
-            }
+            Self::default()
         }
 
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
             let value = meta.advice_column();
             let constant = meta.fixed_column();
-            FpChip::configure(
-                meta,
-                value,
-                constant,
-                17,
-                68,
-                4,
-                modulus::<halo2_proofs::pairing::bn256::Fq>(),
-            )
+            FpConfig::configure(meta, value, constant, 17, 68, 4, modulus::<Fq>())
         }
 
         fn synthesize(
@@ -275,31 +355,20 @@ pub(crate) mod tests {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
-            let chip = FpChip::construct(config);
+            let chip = FpChip::<F, Fq>::construct(config);
             chip.load_lookup_table(&mut layouter)?;
 
-            let a_assigned = chip.load_private(
-                layouter.namespace(|| "input a"),
-                self.a.clone(),
-                big_uint::one() << 64 - 1usize,
-            )?;
-            let b_assigned = chip.load_private(
-                layouter.namespace(|| "input b"),
-                self.b.clone(),
-                big_uint::one() << 64 - 1usize,
-            )?;
-            let c_assigned = chip.load_private(
-                layouter.namespace(|| "input c"),
-                self.c.clone(),
-                big_uint::one() << 64 - 1usize,
-            )?;
+            let a_assigned =
+                chip.load_private(&mut layouter, self.a.as_ref().map(|x| fe_to_bigint(x)))?;
+            let b_assigned =
+                chip.load_private(&mut layouter, self.b.as_ref().map(|x| fe_to_bigint(x)))?;
 
             // test fp_multiply
             {
                 chip.mul(
                     &mut layouter.namespace(|| "fp_multiply"),
                     &a_assigned,
-                    &c_assigned,
+                    &b_assigned,
                 )?;
             }
 
@@ -310,21 +379,13 @@ pub(crate) mod tests {
     #[test]
     fn test_fp() {
         let k = 18;
-        let circuit = MyCircuit::<Fn> {
-            a: (vec![50, -3, 11, -(1 << 30)])
-                .iter()
-                .map(|a| Some(bigint_to_fe(&big_int::from(*a as i64))))
-                .collect(),
-            b: vec![
-                Some(biguint_to_fe(&(big_uint::from(1u64) << 65))),
-                Some(bigint_to_fe(&big_int::from(-2i64))),
-                Some(Fn::from(0)),
-                Some(Fn::from(0)),
-            ],
-            c: (vec![(1i64 << 31), 2i64, 0, 0])
-                .iter()
-                .map(|a| Some(bigint_to_fe(&big_int::from(*a as i64))))
-                .collect(),
+        let a = Fq::rand();
+        let b = Fq::rand();
+
+        let circuit = MyCircuit::<Fr> {
+            a: Some(a),
+            b: Some(b),
+            _marker: PhantomData,
         };
 
         let prover = MockProver::run(k, &circuit, vec![]).unwrap();
@@ -334,20 +395,15 @@ pub(crate) mod tests {
 
     #[cfg(feature = "dev-graph")]
     #[test]
-    fn plot_fp() {
+    fn plot_fp_crt() {
         let k = 9;
         use plotters::prelude::*;
 
-        let root = BitMapBackend::new("layout_fp_mul_68_4_lookup17_pow9.png", (1024, 1024))
-            .into_drawing_area();
+        let root = BitMapBackend::new("layout.png", (1024, 1024)).into_drawing_area();
         root.fill(&WHITE).unwrap();
         let root = root.titled("Fp Layout", ("sans-serif", 60)).unwrap();
 
-        let circuit = MyCircuit::<Fn> {
-            a: vec![None; 4],
-            b: vec![None; 4],
-            c: vec![None; 4],
-        };
+        let circuit = MyCircuit::<Fr>::default();
         halo2_proofs::dev::CircuitLayout::default()
             .render(k, &circuit, &root)
             .unwrap();

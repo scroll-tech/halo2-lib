@@ -4,6 +4,7 @@ use std::cmp;
 
 use super::{CRTInteger, OverflowInteger};
 use crate::{gates::qap_gate, utils::fe_to_bigint};
+use crate::gates::qap_gate::QuantumCell::Existing;
 
 pub fn assign<F: FieldExt>(
     gate: &qap_gate::Config<F>,
@@ -17,7 +18,7 @@ pub fn assign<F: FieldExt>(
     let mut out_limbs = Vec::with_capacity(k);
 
     for (a_limb, b_limb) in a.limbs.iter().zip(b.limbs.iter()) {
-        let out_limb = gate.select(layouter, a_limb, b_limb, sel)?;
+        let out_limb = gate.select(layouter, &Existing(&a_limb), &Existing(&b_limb), &Existing(&sel))?;
         out_limbs.push(out_limb);
     }
 
@@ -40,7 +41,7 @@ pub fn crt<F: FieldExt>(
     let mut out_limbs = Vec::with_capacity(k);
 
     for (a_limb, b_limb) in a.truncation.limbs.iter().zip(b.truncation.limbs.iter()) {
-        let out_limb = gate.select(layouter, a_limb, b_limb, sel)?;
+        let out_limb = gate.select(layouter, &Existing(a_limb), &Existing(b_limb), &Existing(sel))?;
         out_limbs.push(out_limb);
     }
 
@@ -53,7 +54,7 @@ pub fn crt<F: FieldExt>(
         a.truncation.limb_bits,
     );
 
-    let out_native = gate.select(layouter, &a.native, &b.native, sel)?;
+    let out_native = gate.select(layouter, &Existing(&a.native), &Existing(&b.native), &Existing(&sel))?;
     let out_val = a
         .value
         .as_ref()

@@ -3,6 +3,7 @@ use std::cmp;
 
 use super::{CRTInteger, OverflowInteger};
 use crate::gates::qap_gate;
+use crate::gates::qap_gate::QuantumCell::{Constant, Existing};
 
 pub fn assign<F: FieldExt>(
     gate: &qap_gate::Config<F>,
@@ -16,7 +17,7 @@ pub fn assign<F: FieldExt>(
     let mut out_limbs = Vec::with_capacity(k_max);
 
     for (a_limb, b_limb) in a.limbs[..k].iter().zip(b.limbs[..k].iter()) {
-        let out_limb = gate.add(layouter, a_limb, b_limb)?;
+        let out_limb = gate.add(layouter, &Existing(&a_limb), &Existing(&b_limb))?;
         out_limbs.push(out_limb);
     }
     if a.limbs.len() > k {
@@ -44,7 +45,7 @@ pub fn crt<F: FieldExt>(
 ) -> Result<CRTInteger<F>, Error> {
     assert_eq!(a.truncation.limbs.len(), b.truncation.limbs.len());
     let out_trunc = assign(gate, layouter, &a.truncation, &b.truncation)?;
-    let out_native = gate.add(layouter, &a.native, &b.native)?;
+    let out_native = gate.add(layouter, &Existing(&a.native), &Existing(&b.native))?;
     let out_val = a.value.as_ref().zip(b.value.as_ref()).map(|(a, b)| a + b);
     Ok(CRTInteger::construct(
         out_trunc,
