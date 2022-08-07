@@ -99,7 +99,8 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
         println!("minimum rows used by an advice column: {}", advice_rows.min().unwrap());
         // IMPORTANT: this assigns all constants to the fixed columns
         // This is not optional.
-        let const_rows = chip.fp_chip.range.gate_chip.load_constants(&mut layouter)?;
+        let const_rows =
+            chip.fp_chip.range.gate_chip.assign_and_constrain_constants(&mut layouter)?;
         println!("maximum rows used by a fixed column: {}", const_rows);
         Ok(())
     }

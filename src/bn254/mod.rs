@@ -9,7 +9,7 @@ use crate::{
 pub mod final_exp;
 pub mod pairing;
 
-const NUM_ADVICE: usize = 2;
+const NUM_ADVICE: usize = 1;
 const NUM_FIXED: usize = 1;
 
 type FpConfig<F> = fp::FpConfig<F, NUM_ADVICE, NUM_FIXED>;

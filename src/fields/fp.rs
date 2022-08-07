@@ -362,7 +362,7 @@ pub(crate) mod tests {
             );
             // IMPORTANT: this assigns all constants to the fixed columns
             // This is not optional.
-            let const_rows = chip.range.gate().load_constants(&mut layouter)?;
+            let const_rows = chip.range.gate().assign_and_constrain_constants(&mut layouter)?;
             println!("maximum rows used by a fixed column: {}", const_rows);
             Ok(())
         }

@@ -4,8 +4,15 @@ use halo2_proofs::{
     plonk::{Advice, Column, ConstraintSystem, Error, Fixed, Selector},
     poly::Rotation,
 };
+use num_bigint::BigUint;
 use num_traits::Num;
-use std::{collections::HashSet, marker::PhantomData};
+use std::{
+    cell,
+    collections::{HashMap, HashSet},
+    marker::PhantomData,
+};
+
+use crate::utils::fe_to_biguint;
 
 use super::{
     GateInstructions,
@@ -110,8 +117,12 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize>
     }
 
     /// call this at the very end of synthesize!
-    pub fn load_constants(&mut self, layouter: &mut impl Layouter<F>) -> Result<usize, Error> {
+    pub fn assign_and_constrain_constants(
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+    ) -> Result<usize, Error> {
         // load constants cyclically over NUM_FIXED columns
+        let mut assigned: HashMap<BigUint, AssignedCell<F, F>> = HashMap::new();
         let mut col = 0;
         let mut offset = 0;
         layouter.assign_region(
@@ -122,20 +133,26 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize>
                     return Ok(0);
                 }
                 for (c, ocell) in &self.constants_to_assign {
-                    let c_cell = region.assign_fixed(
-                        || "load constant",
-                        self.config.constants[col],
-                        offset,
-                        || Ok(c.clone()),
-                    )?;
+                    let c_big = fe_to_biguint(c);
+                    let c_cell = if let Some(c_cell) = assigned.get(&c_big) {
+                        c_cell.clone()
+                    } else {
+                        let c_cell = region.assign_fixed(
+                            || "load constant",
+                            self.config.constants[col],
+                            offset,
+                            || Ok(c.clone()),
+                        )?;
+                        assigned.insert(c_big, c_cell.clone());
+                        col += 1;
+                        if col == NUM_FIXED {
+                            col = 0;
+                            offset += 1;
+                        }
+                        c_cell
+                    };
                     if let Some(cell) = ocell {
                         region.constrain_equal(c_cell.cell(), cell.clone())?;
-                    }
-
-                    col += 1;
-                    if col == NUM_FIXED {
-                        col = 0;
-                        offset += 1;
                     }
                 }
                 Ok(offset + 1)

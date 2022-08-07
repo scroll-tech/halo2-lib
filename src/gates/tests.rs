@@ -66,7 +66,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
             chip.advice_rows.iter().max().unwrap()
         );
 
-        let const_rows = chip.load_constants(&mut layouter)?;
+        let const_rows = chip.assign_and_constrain_constants(&mut layouter)?;
         println!("maximum rows used by a fixed column: {}", const_rows);
         Ok(())
     }
@@ -161,7 +161,7 @@ impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
             chip.gate_chip.advice_rows.iter().max().unwrap()
         );
 
-        let const_rows = chip.gate_chip.load_constants(&mut layouter)?;
+        let const_rows = chip.gate_chip.assign_and_constrain_constants(&mut layouter)?;
         println!("maximum rows used by a fixed column: {}", const_rows);
         Ok(())
     }
