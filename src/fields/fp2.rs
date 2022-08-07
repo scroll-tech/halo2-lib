@@ -9,62 +9,45 @@ use halo2_proofs::{
 use num_bigint::{BigInt, BigUint};
 use num_traits::Num;
 
-use crate::bigint::{
-    add_no_carry, carry_mod, check_carry_mod_to_zero, mul_no_carry, scalar_mul_no_carry,
-    sub_no_carry, CRTInteger, OverflowInteger,
-};
 use crate::fields::fp::{FpChip, FpConfig};
-use crate::gates::qap_gate;
-use crate::gates::range;
 use crate::utils::{bigint_to_fe, decompose_bigint_option, fe_to_biguint};
+use crate::{
+    bigint::{
+        add_no_carry, carry_mod, check_carry_mod_to_zero, mul_no_carry, scalar_mul_no_carry,
+        sub_no_carry, CRTInteger, OverflowInteger,
+    },
+    gates::range::RangeChip,
+};
 
-use super::{FieldChip, FqPoint};
+use super::{FieldChip, FieldExtConstructor, FqPoint, PrimeFieldChip};
 
-// helper trait so we can actually construct and read the Fp2 struct
-// needs to be implemented for Fp2 struct for use cases below
-pub trait FieldExtConstructor<Fp: PrimeField, const DEGREE: usize> {
-    fn new(c: [Fp; DEGREE]) -> Self;
-
-    fn coeffs(&self) -> Vec<Fp>;
+/// Represent Fp2 point as FqPoint with degree = 2
+/// `Fp2 = Fp[u] / (u^2 + 1)`
+/// This implementation assumes p = 3 (mod 4) in order for the polynomial u^2 + 1 to be irreducible over Fp; i.e., in order for -1 to not be a square (quadratic residue) in Fp
+/// This means we store an Fp2 point as `a_0 + a_1 * u` where `a_0, a_1 in Fp`
+pub struct Fp2Chip<'a, F: FieldExt, FpChip: PrimeFieldChip<F>, Fp2: Field> {
+    pub fp_chip: &'a mut FpChip,
+    _f: PhantomData<F>,
+    _fp2: PhantomData<Fp2>,
 }
 
-// Represent Fp2 point as FqPoint with degree = 2
-// `Fp2 = Fp[u] / (u^2 + 1)`
-// This implementation assumes p = 3 (mod 4) in order for the polynomial u^2 + 1 to be irreducible over Fp; i.e., in order for -1 to not be a square (quadratic residue) in Fp
-// This means we store an Fp2 point as `a_0 + a_1 * u` where `a_0, a_1 in Fp`
-pub struct Fp2Chip<F: FieldExt, Fp: PrimeField, Fp2: Field> {
-    pub fp_chip: FpChip<F, Fp>,
-    _marker: PhantomData<Fp2>,
-}
-
-impl<F: FieldExt, Fp: PrimeField, Fp2: Field + FieldExtConstructor<Fp, 2>> Fp2Chip<F, Fp, Fp2> {
-    pub fn construct(config: FpConfig<F>) -> Self {
-        Self {
-            fp_chip: FpChip::construct(config),
-            _marker: PhantomData,
-        }
-    }
-
-    pub fn load_constant(
-        &self,
-        layouter: &mut impl Layouter<F>,
-        c: Fp2,
-    ) -> Result<FqPoint<F>, Error> {
-        let mut assigned_coeffs = Vec::with_capacity(2);
-        for a in &c.coeffs() {
-            let assigned_coeff = self
-                .fp_chip
-                .load_constant(layouter, BigInt::from(fe_to_biguint(a)))?;
-            assigned_coeffs.push(assigned_coeff);
-        }
-        Ok(FqPoint::construct(assigned_coeffs, 2))
+impl<'a, F, FpChip, Fp2> Fp2Chip<'a, F, FpChip, Fp2>
+where
+    F: FieldExt,
+    FpChip: PrimeFieldChip<F, FieldPoint = CRTInteger<F>>,
+    FpChip::FieldType: PrimeField,
+    Fp2: Field + FieldExtConstructor<FpChip::FieldType, 2>,
+{
+    /// User must construct an `FpChip` first using a config. This is intended so everything shares a single `FlexGateChip`, which is needed for the column allocation to work.
+    pub fn construct(fp_chip: &'a mut FpChip) -> Self {
+        Self { fp_chip, _f: PhantomData, _fp2: PhantomData }
     }
 
     pub fn fp_mul_no_carry(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
-        fp_point: &CRTInteger<F>,
+        fp_point: &FpChip::FieldPoint,
     ) -> Result<FqPoint<F>, Error> {
         assert_eq!(a.coeffs.len(), 2);
         assert_eq!(a.degree, 2);
@@ -78,7 +61,7 @@ impl<F: FieldExt, Fp: PrimeField, Fp2: Field + FieldExtConstructor<Fp, 2>> Fp2Ch
     }
 
     pub fn conjugate(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
     ) -> Result<FqPoint<F>, Error> {
@@ -89,7 +72,7 @@ impl<F: FieldExt, Fp: PrimeField, Fp2: Field + FieldExtConstructor<Fp, 2>> Fp2Ch
     }
 
     pub fn neg_conjugate(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
     ) -> Result<FqPoint<F>, Error> {
@@ -100,19 +83,33 @@ impl<F: FieldExt, Fp: PrimeField, Fp2: Field + FieldExtConstructor<Fp, 2>> Fp2Ch
     }
 }
 
-impl<F: FieldExt, Fp: PrimeField, Fp2: Field + FieldExtConstructor<Fp, 2>> FieldChip<F>
-    for Fp2Chip<F, Fp, Fp2>
+impl<F, FpChip, Fp2> FieldChip<F> for Fp2Chip<'_, F, FpChip, Fp2>
+where
+    F: FieldExt,
+    FpChip: PrimeFieldChip<
+        F,
+        FieldPoint = CRTInteger<F>,
+        WitnessType = Option<BigInt>,
+        ConstantType = BigInt,
+    >,
+    FpChip::FieldType: PrimeField,
+    Fp2: Field + FieldExtConstructor<FpChip::FieldType, 2>,
 {
+    type ConstantType = Fp2;
     type WitnessType = Vec<Option<BigInt>>;
     type FieldPoint = FqPoint<F>;
     type FieldType = Fp2;
+    type RangeChip = FpChip::RangeChip;
+
+    fn range(&mut self) -> &mut Self::RangeChip {
+        self.fp_chip.range()
+    }
 
     fn get_assigned_value(x: &FqPoint<F>) -> Option<Fp2> {
         assert_eq!(x.coeffs.len(), 2);
         let c0 = x.coeffs[0].value.clone();
         let c1 = x.coeffs[1].value.clone();
-        c0.zip(c1)
-            .map(|(c0, c1)| Fp2::new([bigint_to_fe(&c0), bigint_to_fe(&c1)]))
+        c0.zip(c1).map(|(c0, c1)| Fp2::new([bigint_to_fe(&c0), bigint_to_fe(&c1)]))
     }
 
     fn fe_to_witness(x: &Option<Fp2>) -> Vec<Option<BigInt>> {
@@ -121,16 +118,13 @@ impl<F: FieldExt, Fp: PrimeField, Fp2: Field + FieldExtConstructor<Fp, 2>> Field
             Some(x) => {
                 let coeffs = x.coeffs();
                 assert_eq!(coeffs.len(), 2);
-                coeffs
-                    .iter()
-                    .map(|c| Some(BigInt::from(fe_to_biguint(c))))
-                    .collect()
+                coeffs.iter().map(|c| Some(BigInt::from(fe_to_biguint(c)))).collect()
             }
         }
     }
 
     fn load_private(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         coeffs: Vec<Option<BigInt>>,
     ) -> Result<FqPoint<F>, Error> {
@@ -142,9 +136,23 @@ impl<F: FieldExt, Fp: PrimeField, Fp2: Field + FieldExtConstructor<Fp, 2>> Field
         Ok(FqPoint::construct(assigned_coeffs, 2))
     }
 
+    fn load_constant(
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        c: Fp2,
+    ) -> Result<FqPoint<F>, Error> {
+        let mut assigned_coeffs = Vec::with_capacity(2);
+        for a in &c.coeffs() {
+            let assigned_coeff =
+                self.fp_chip.load_constant(layouter, BigInt::from(fe_to_biguint(a)))?;
+            assigned_coeffs.push(assigned_coeff);
+        }
+        Ok(FqPoint::construct(assigned_coeffs, 2))
+    }
+
     // signed overflow BigInt functions
     fn add_no_carry(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
         b: &FqPoint<F>,
@@ -152,16 +160,14 @@ impl<F: FieldExt, Fp: PrimeField, Fp2: Field + FieldExtConstructor<Fp, 2>> Field
         assert_eq!(a.degree, b.degree);
         let mut out_coeffs = Vec::with_capacity(a.degree);
         for i in 0..a.degree {
-            let coeff = self
-                .fp_chip
-                .add_no_carry(layouter, &a.coeffs[i], &b.coeffs[i])?;
+            let coeff = self.fp_chip.add_no_carry(layouter, &a.coeffs[i], &b.coeffs[i])?;
             out_coeffs.push(coeff);
         }
         Ok(FqPoint::construct(out_coeffs, a.degree))
     }
 
     fn sub_no_carry(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
         b: &FqPoint<F>,
@@ -169,15 +175,17 @@ impl<F: FieldExt, Fp: PrimeField, Fp2: Field + FieldExtConstructor<Fp, 2>> Field
         assert_eq!(a.degree, b.degree);
         let mut out_coeffs = Vec::with_capacity(a.degree);
         for i in 0..a.degree {
-            let coeff = self
-                .fp_chip
-                .sub_no_carry(layouter, &a.coeffs[i], &b.coeffs[i])?;
+            let coeff = self.fp_chip.sub_no_carry(layouter, &a.coeffs[i], &b.coeffs[i])?;
             out_coeffs.push(coeff);
         }
         Ok(FqPoint::construct(out_coeffs, a.degree))
     }
 
-    fn negate(&self, layouter: &mut impl Layouter<F>, a: &FqPoint<F>) -> Result<FqPoint<F>, Error> {
+    fn negate(
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        a: &FqPoint<F>,
+    ) -> Result<FqPoint<F>, Error> {
         let mut out_coeffs = Vec::with_capacity(a.degree);
         for a_coeff in &a.coeffs {
             let out_coeff = self.fp_chip.negate(layouter, a_coeff)?;
@@ -187,23 +195,21 @@ impl<F: FieldExt, Fp: PrimeField, Fp2: Field + FieldExtConstructor<Fp, 2>> Field
     }
 
     fn scalar_mul_no_carry(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
         b: F,
     ) -> Result<FqPoint<F>, Error> {
         let mut out_coeffs = Vec::with_capacity(a.degree);
         for i in 0..a.degree {
-            let coeff = self
-                .fp_chip
-                .scalar_mul_no_carry(layouter, &a.coeffs[i], b)?;
+            let coeff = self.fp_chip.scalar_mul_no_carry(layouter, &a.coeffs[i], b)?;
             out_coeffs.push(coeff);
         }
         Ok(FqPoint::construct(out_coeffs, a.degree))
     }
 
     fn mul_no_carry(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
         b: &FqPoint<F>,
@@ -213,9 +219,7 @@ impl<F: FieldExt, Fp: PrimeField, Fp2: Field + FieldExtConstructor<Fp, 2>> Field
         let mut ab_coeffs = Vec::with_capacity(a.degree * b.degree);
         for i in 0..a.degree {
             for j in 0..b.degree {
-                let coeff = self
-                    .fp_chip
-                    .mul_no_carry(layouter, &a.coeffs[i], &b.coeffs[j])?;
+                let coeff = self.fp_chip.mul_no_carry(layouter, &a.coeffs[i], &b.coeffs[j])?;
                 ab_coeffs.push(coeff);
             }
         }
@@ -238,7 +242,7 @@ impl<F: FieldExt, Fp: PrimeField, Fp2: Field + FieldExtConstructor<Fp, 2>> Field
     }
 
     fn check_carry_mod_to_zero(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
     ) -> Result<(), Error> {
@@ -249,7 +253,7 @@ impl<F: FieldExt, Fp: PrimeField, Fp2: Field + FieldExtConstructor<Fp, 2>> Field
     }
 
     fn carry_mod(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
     ) -> Result<FqPoint<F>, Error> {
@@ -261,7 +265,11 @@ impl<F: FieldExt, Fp: PrimeField, Fp2: Field + FieldExtConstructor<Fp, 2>> Field
         Ok(FqPoint::construct(out_coeffs, a.degree))
     }
 
-    fn range_check(&self, layouter: &mut impl Layouter<F>, a: &FqPoint<F>) -> Result<(), Error> {
+    fn range_check(
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        a: &FqPoint<F>,
+    ) -> Result<(), Error> {
         let mut out_coeffs = Vec::with_capacity(a.degree);
         for a_coeff in &a.coeffs {
             let coeff = self.fp_chip.range_check(layouter, a_coeff)?;

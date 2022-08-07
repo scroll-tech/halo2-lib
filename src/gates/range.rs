@@ -1,36 +1,43 @@
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*, poly::Rotation};
 use num_bigint::{BigInt, BigUint};
-use std::marker::PhantomData;
 
-use crate::gates::qap_gate;
-use crate::gates::qap_gate::QuantumCell;
-use crate::gates::qap_gate::QuantumCell::*;
-use crate::utils::*;
+use crate::gates::{
+    flex_gate::{FlexGateChip, FlexGateConfig},
+    GateInstructions,
+    QuantumCell::{self, Constant, Existing, Witness},
+};
+use crate::utils::{
+    bigint_to_fe, biguint_to_fe, decompose_biguint_option, decompose_option, fe_to_biguint,
+};
+
+use super::RangeInstructions;
 
 #[derive(Clone, Debug)]
-pub struct RangeConfig<F: FieldExt> {
-    pub q_lookup: Selector,
+pub struct RangeConfig<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize> {
+    pub q_lookups: [Selector; NUM_ADVICE],
     pub lookup: TableColumn,
     pub lookup_bits: usize,
-    pub qap_config: qap_gate::Config<F>,
-    _marker: PhantomData<F>,
+    pub gate_config: FlexGateConfig<F, NUM_ADVICE, NUM_FIXED>,
 }
 
-impl<F: FieldExt> RangeConfig<F> {
-    pub fn configure(
-        meta: &mut ConstraintSystem<F>,
-        q_lookup: Selector,
-        lookup: TableColumn,
-        lookup_bits: usize,
-        qap_config: qap_gate::Config<F>,
-    ) -> Self {
+impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize>
+    RangeConfig<F, NUM_ADVICE, NUM_FIXED>
+{
+    pub fn configure(meta: &mut ConstraintSystem<F>, lookup_bits: usize) -> Self {
         assert!(lookup_bits <= 28);
+
+        let mut q_lookup_vec = Vec::with_capacity(NUM_ADVICE);
+        for _i in 0..NUM_ADVICE {
+            let q = meta.complex_selector();
+            q_lookup_vec.push(q);
+        }
+        let lookup = meta.lookup_table_column();
+        let gate_config = FlexGateConfig::configure(meta);
         let config = Self {
-            q_lookup,
+            q_lookups: q_lookup_vec.try_into().expect("qlookup should have correct len"),
             lookup,
             lookup_bits,
-            qap_config,
-            _marker: PhantomData,
+            gate_config,
         };
         config.create_lookup(meta);
 
@@ -38,11 +45,39 @@ impl<F: FieldExt> RangeConfig<F> {
     }
 
     fn create_lookup(&self, meta: &mut ConstraintSystem<F>) -> () {
-        meta.lookup("lookup", |meta| {
-            let q = meta.query_selector(self.q_lookup);
-            let a = meta.query_advice(self.qap_config.value, Rotation::cur());
-            vec![(q * a, self.lookup)]
-        });
+        for i in 0..NUM_ADVICE {
+            meta.lookup("lookup", |meta| {
+                let q = meta.query_selector(self.q_lookups[i]);
+                let a = meta.query_advice(self.gate_config.gates[i].value, Rotation::cur());
+                vec![(q * a, self.lookup)]
+            });
+        }
+    }
+}
+
+// See FlexGateChip for why we need distinction between Config and Chip
+#[derive(Clone, Debug)]
+pub struct RangeChip<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize> {
+    pub q_lookups: [Selector; NUM_ADVICE],
+    pub lookup: TableColumn,
+    pub lookup_bits: usize,
+    pub gate_chip: FlexGateChip<F, NUM_ADVICE, NUM_FIXED>,
+}
+
+impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize>
+    RangeChip<F, NUM_ADVICE, NUM_FIXED>
+{
+    pub fn construct(
+        config: RangeConfig<F, NUM_ADVICE, NUM_FIXED>,
+        using_simple_floor_planner: bool,
+    ) -> Self {
+        let gate_chip = FlexGateChip::construct(config.gate_config, using_simple_floor_planner);
+        Self {
+            q_lookups: config.q_lookups,
+            lookup: config.lookup,
+            lookup_bits: config.lookup_bits,
+            gate_chip,
+        }
     }
 
     pub fn load_lookup_table(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
@@ -62,15 +97,37 @@ impl<F: FieldExt> RangeConfig<F> {
         )?;
         Ok(())
     }
+}
+
+impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize> RangeInstructions<F>
+    for RangeChip<F, NUM_ADVICE, NUM_FIXED>
+{
+    type GateChip = FlexGateChip<F, NUM_ADVICE, NUM_FIXED>;
+
+    fn gate(&mut self) -> &mut Self::GateChip {
+        &mut self.gate_chip
+    }
+
+    fn lookup_bits(&self) -> usize {
+        self.lookup_bits
+    }
+
+    fn enable_lookup(
+        &self,
+        region: &mut Region<'_, F>,
+        column_index: usize,
+        offset: usize,
+    ) -> Result<(), Error> {
+        self.q_lookups[column_index].enable(region, offset)
+    }
 
     // returns the limbs
-    pub fn range_check(
-        &self,
+    fn range_check(
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &AssignedCell<F, F>,
         range_bits: usize,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
-        // println!("Calling range_check on {} bits.", range_bits);
         assert_ne!(range_bits, 0);
         let k = (range_bits + self.lookup_bits - 1) / self.lookup_bits;
         let rem_bits = range_bits % self.lookup_bits;
@@ -85,35 +142,36 @@ impl<F: FieldExt> RangeConfig<F> {
                 let mut running_sum = limbs[0];
                 let mut running_pow = F::from(1u64);
 
-                self.q_lookup.enable(&mut region, 0)?;
+                let mut enable_lookups = Vec::new();
+                let mut enable_gates = Vec::new();
+
+                enable_lookups.push(0);
                 let mut cells = Vec::with_capacity(3 * k + 2);
                 cells.push(Witness(limbs[0]));
                 for idx in 1..k {
                     running_pow = running_pow * limb_base;
-                    running_sum = running_sum
-                        .zip(limbs[idx])
-                        .map(|(sum, x)| sum + x * running_pow);
+                    running_sum = running_sum.zip(limbs[idx]).map(|(sum, x)| sum + x * running_pow);
                     cells.push(Constant(running_pow));
                     cells.push(Witness(limbs[idx]));
                     if idx < k - 1 || rem_bits != 1 {
-                        self.q_lookup.enable(&mut region, offset + 1)?;
+                        enable_lookups.push(offset + 1);
                     }
                     cells.push(Witness(running_sum));
-                    self.qap_config.q_enable.enable(&mut region, offset - 1)?;
+                    enable_gates.push(offset - 1);
 
                     offset = offset + 3;
                     if idx == k - 1 {
                         if rem_bits == 1 {
+                            enable_gates.push(offset);
                             // we want to check x := limbs[idx] is boolean
                             // we constrain x*(x-1) = 0 + x * x - x == 0
                             // | 0 | x | x | x |
-                            self.qap_config.q_enable.enable(&mut region, offset)?;
                             cells.push(Constant(F::from(0)));
                             cells.push(Witness(limbs[k - 1]));
                             cells.push(Witness(limbs[k - 1]));
                             cells.push(Witness(limbs[k - 1]));
                         } else if rem_bits > 1 {
-                            self.qap_config.q_enable.enable(&mut region, offset)?;
+                            enable_gates.push(offset);
                             let mult_val = biguint_to_fe(
                                 &(BigUint::from(1u64) << (self.lookup_bits - rem_bits)),
                             );
@@ -123,11 +181,18 @@ impl<F: FieldExt> RangeConfig<F> {
                             cells.push(Witness(
                                 Some(mult_val).zip(limbs[k - 1]).map(|(m, l)| m * l),
                             ));
-                            self.q_lookup.enable(&mut region, offset + 3)?;
+                            enable_lookups.push(offset + 3);
                         }
                     }
                 }
-                let assigned_cells = self.qap_config.assign_region(cells, 0, &mut region)?;
+                let (assigned_cells, column_index) =
+                    self.gate_chip.assign_region(cells, 0, &mut region)?;
+                for row in enable_lookups {
+                    self.enable_lookup(&mut region, column_index, row)?;
+                }
+                for row in enable_gates {
+                    self.gate_chip.enable(&mut region, column_index, row)?;
+                }
                 region.constrain_equal(a.cell(), assigned_cells[3 * (k - 1)].cell())?;
                 if rem_bits != 0 {
                     region.constrain_equal(
@@ -161,8 +226,8 @@ impl<F: FieldExt> RangeConfig<F> {
 
     // Warning: This may fail silently if a or b have more than num_bits
     // | a + 2^(num_bits) - b | b | 1 | a + 2^(num_bits) | - 2^(num_bits) | 1 | a |
-    pub fn check_less_than(
-        &self,
+    fn check_less_than(
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &AssignedCell<F, F>,
         b: &AssignedCell<F, F>,
@@ -171,9 +236,6 @@ impl<F: FieldExt> RangeConfig<F> {
         let shifted_val = layouter.assign_region(
             || format!("check_less_than {} bits", num_bits),
             |mut region| {
-                self.qap_config.q_enable.enable(&mut region, 0)?;
-                self.qap_config.q_enable.enable(&mut region, 3)?;
-
                 let cells = vec![
                     Witness(
                         Some(biguint_to_fe::<F>(&(BigUint::from(1u64) << num_bits)))
@@ -194,7 +256,10 @@ impl<F: FieldExt> RangeConfig<F> {
                     Constant(F::from(1)),
                     Existing(&a),
                 ];
-                let assigned_cells = self.qap_config.assign_region(cells, 0, &mut region)?;
+                let (assigned_cells, column_index) =
+                    self.gate_chip.assign_region(cells, 0, &mut region)?;
+                self.gate_chip.enable(&mut region, column_index, 0)?;
+                self.gate_chip.enable(&mut region, column_index, 3)?;
                 Ok(assigned_cells[0].clone())
             },
         )?;
@@ -203,8 +268,8 @@ impl<F: FieldExt> RangeConfig<F> {
         Ok(())
     }
 
-    pub fn is_less_than(
-        &self,
+    fn is_less_than(
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &AssignedCell<F, F>,
         b: &AssignedCell<F, F>,
@@ -216,9 +281,11 @@ impl<F: FieldExt> RangeConfig<F> {
         layouter.assign_region(
             || format!("is_less_than {} bit bound", num_bits),
             |mut region| {
-                self.qap_config.q_enable.enable(&mut region, 0)?;
-                self.qap_config.q_enable.enable(&mut region, 3)?;
-                self.q_lookup.enable(&mut region, 8)?;
+                let mut enable_lookups = Vec::new();
+                let mut enable_gates = Vec::new();
+                enable_gates.push(0);
+                enable_gates.push(3);
+                enable_lookups.push(8);
 
                 let mut cells = Vec::with_capacity(9 + 3 * k + 8);
                 let shifted_val = Some(biguint_to_fe::<F>(&(BigUint::from(1u64) << padded_bits)))
@@ -242,18 +309,14 @@ impl<F: FieldExt> RangeConfig<F> {
 
                 let mut shift_val = shifted_val.as_ref().map(|fe| fe_to_biguint(fe));
                 let mask = BigUint::from(1u64 << self.lookup_bits);
-                let mut limb = shift_val
-                    .as_ref()
-                    .map(|x| x.modpow(&BigUint::from(1u64), &mask));
+                let mut limb = shift_val.as_ref().map(|x| x.modpow(&BigUint::from(1u64), &mask));
                 cells.push(Witness(limb.as_ref().map(|x| biguint_to_fe(x))));
 
                 let mut offset = 9;
                 let mut running_sum = limb;
                 for idx in 1..(k + 1) {
                     shift_val = shift_val.map(|x| x >> self.lookup_bits);
-                    limb = shift_val
-                        .as_ref()
-                        .map(|x| x.modpow(&BigUint::from(1u64), &mask));
+                    limb = shift_val.as_ref().map(|x| x.modpow(&BigUint::from(1u64), &mask));
                     running_sum = running_sum
                         .zip(limb.as_ref())
                         .map(|(sum, x)| sum + (x << (idx * self.lookup_bits)));
@@ -262,8 +325,8 @@ impl<F: FieldExt> RangeConfig<F> {
                     cells.push(Constant(running_pow));
                     cells.push(Witness(limb.as_ref().map(|x| biguint_to_fe(x))));
                     cells.push(Witness(running_sum.as_ref().map(|sum| biguint_to_fe(sum))));
-                    self.qap_config.q_enable.enable(&mut region, offset - 1)?;
-                    self.q_lookup.enable(&mut region, offset + 1)?;
+                    enable_gates.push(offset - 1);
+                    enable_lookups.push(offset + 1);
 
                     offset = offset + 3;
                     if idx == k {
@@ -282,7 +345,7 @@ impl<F: FieldExt> RangeConfig<F> {
                             }
                         });
 
-                        self.qap_config.q_enable.enable(&mut region, offset)?;
+                        enable_gates.push(offset);
                         cells.push(Witness(is_zero));
                         cells.push(Witness(limb.as_ref().map(|bi| biguint_to_fe(bi))));
                         cells.push(Witness(inv));
@@ -293,7 +356,14 @@ impl<F: FieldExt> RangeConfig<F> {
                         cells.push(Constant(F::from(0)));
                     }
                 }
-                let assigned_cells = self.qap_config.assign_region(cells, 0, &mut region)?;
+                let (assigned_cells, column_index) =
+                    self.gate_chip.assign_region(cells, 0, &mut region)?;
+                for row in enable_gates {
+                    self.gate_chip.enable(&mut region, column_index, row)?;
+                }
+                for row in enable_lookups {
+                    self.enable_lookup(&mut region, column_index, row)?;
+                }
                 region.constrain_equal(assigned_cells[0].cell(), assigned_cells[7].cell())?;
                 // check limb equalities for idx = k
                 region.constrain_equal(
@@ -315,31 +385,19 @@ impl<F: FieldExt> RangeConfig<F> {
     }
 
     // | out | a | inv | 1 | 0 | a | out | 0
-    pub fn is_zero(
-        &self,
+    fn is_zero(
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &AssignedCell<F, F>,
     ) -> Result<AssignedCell<F, F>, Error> {
-        let is_zero = a.value().map(|x| {
-            if (*x).is_zero_vartime() {
-                F::from(1)
-            } else {
-                F::from(0)
-            }
-        });
-        let inv = a.value().map(|x| {
-            if *x == F::from(0) {
-                F::from(1)
-            } else {
-                (*x).invert().unwrap()
-            }
-        });
+        let is_zero =
+            a.value().map(|x| if (*x).is_zero_vartime() { F::from(1) } else { F::from(0) });
+        let inv =
+            a.value().map(|x| if *x == F::from(0) { F::from(1) } else { (*x).invert().unwrap() });
 
         layouter.assign_region(
             || "is_equal",
             |mut region| {
-                self.qap_config.q_enable.enable(&mut region, 0)?;
-                self.qap_config.q_enable.enable(&mut region, 4)?;
                 let cells = vec![
                     Witness(is_zero),
                     Existing(&a),
@@ -350,15 +408,18 @@ impl<F: FieldExt> RangeConfig<F> {
                     Witness(is_zero),
                     Constant(F::from(0)),
                 ];
-                let assigned_cells = self.qap_config.assign_region(cells, 0, &mut region)?;
+                let (assigned_cells, column_index) =
+                    self.gate_chip.assign_region(cells, 0, &mut region)?;
+                self.gate_chip.enable(&mut region, column_index, 0)?;
+                self.gate_chip.enable(&mut region, column_index, 4)?;
                 region.constrain_equal(assigned_cells[0].cell(), assigned_cells[6].cell())?;
                 Ok(assigned_cells[0].clone())
             },
         )
     }
 
-    pub fn is_equal(
-        &self,
+    fn is_equal(
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &AssignedCell<F, F>,
         b: &AssignedCell<F, F>,
@@ -366,14 +427,15 @@ impl<F: FieldExt> RangeConfig<F> {
         let diff = layouter.assign_region(
             || "is_equal",
             |mut region| {
-                self.qap_config.q_enable.enable(&mut region, 0)?;
                 let cells = vec![
                     Witness(a.value().zip(b.value()).map(|(av, bv)| *av - *bv)),
                     Constant(F::from(1)),
                     Existing(&b),
                     Existing(&a),
                 ];
-                let assigned_cells = self.qap_config.assign_region(cells, 0, &mut region)?;
+                let (assigned_cells, column_index) =
+                    self.gate_chip.assign_region(cells, 0, &mut region)?;
+                self.gate_chip.enable(&mut region, column_index, 0)?;
                 Ok(assigned_cells[0].clone())
             },
         )?;
@@ -381,8 +443,8 @@ impl<F: FieldExt> RangeConfig<F> {
     }
 
     // returns little-endian bit vectors
-    pub fn num_to_bits(
-        &self,
+    fn num_to_bits(
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &AssignedCell<F, F>,
         range_bits: usize,
@@ -391,6 +453,7 @@ impl<F: FieldExt> RangeConfig<F> {
         let bit_cells = layouter.assign_region(
             || "range check",
             |mut region| {
+                let mut enable_gates = Vec::new();
                 let mut cells = Vec::with_capacity(3 * range_bits - 2);
                 let mut running_sum = bits[0];
                 let mut running_pow = F::from(1u64);
@@ -402,10 +465,15 @@ impl<F: FieldExt> RangeConfig<F> {
                     cells.push(Constant(running_pow));
                     cells.push(Witness(bits[idx]));
                     cells.push(Witness(running_sum));
-                    self.qap_config.q_enable.enable(&mut region, offset - 1)?;
+
+                    enable_gates.push(offset - 1);
                     offset = offset + 3;
                 }
-                let assigned_cells = self.qap_config.assign_region(cells, 0, &mut region)?;
+                let (assigned_cells, column_index) =
+                    self.gate_chip.assign_region(cells, 0, &mut region)?;
+                for row in enable_gates {
+                    self.gate_chip.enable(&mut region, column_index, row)?;
+                }
                 region.constrain_equal(a.cell(), assigned_cells.last().unwrap().clone().cell())?;
                 let mut assigned_bits = Vec::with_capacity(range_bits);
                 assigned_bits.push(assigned_cells[0].clone());
@@ -420,14 +488,14 @@ impl<F: FieldExt> RangeConfig<F> {
             layouter.assign_region(
                 || "bit check",
                 |mut region| {
-                    self.qap_config.q_enable.enable(&mut region, 0)?;
                     let cells = vec![
                         Constant(F::from(0)),
                         Existing(&bit_cells[idx]),
                         Existing(&bit_cells[idx]),
                         Existing(&bit_cells[idx]),
                     ];
-                    self.qap_config.assign_region(cells, 0, &mut region)?;
+                    let (_, column_index) = self.gate_chip.assign_region(cells, 0, &mut region)?;
+                    self.gate_chip.enable(&mut region, column_index, 0)?;
                     Ok(())
                 },
             )?;

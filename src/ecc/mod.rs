@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 use std::marker::PhantomData;
 
+use ff::PrimeField;
 use group::{Curve, Group};
 use halo2_proofs::{
     arithmetic::{BaseExt, CurveAffine, Field, FieldExt},
@@ -12,41 +13,40 @@ use num_bigint::{BigInt, BigUint};
 use num_traits::{Num, One, Zero};
 use rand_core::OsRng;
 
-use crate::bigint::{
-    add_no_carry, inner_product, mul_no_carry, scalar_mul_no_carry, select, sub_no_carry,
-    CRTInteger, FixedCRTInteger, OverflowInteger,
-};
-use crate::fields::FieldChip;
-use crate::fields::{
-    fp::{FpChip, FpConfig},
-    Selectable,
-};
-use crate::gates::qap_gate::QuantumCell;
-use crate::gates::qap_gate::QuantumCell::*;
-use crate::gates::{qap_gate, range};
+use crate::fields::{PrimeFieldChip, Selectable};
+use crate::gates::QuantumCell::{self, Constant, Existing, Witness};
 use crate::utils::{
     bigint_to_fe, decompose_bigint_option, decompose_biguint, fe_to_bigint, fe_to_biguint, modulus,
 };
+use crate::{
+    bigint::{
+        add_no_carry, inner_product, mul_no_carry, scalar_mul_no_carry, select, sub_no_carry,
+        CRTInteger, FixedCRTInteger, OverflowInteger,
+    },
+    gates::RangeInstructions,
+};
+use crate::{fields::FieldChip, gates::GateInstructions};
 
 pub mod fixed;
 use fixed::{fixed_base_scalar_multiply, FixedEccPoint};
 
 // EccPoint and EccChip take in a generic `FieldChip` to implement generic elliptic curve operations on arbitrary field extensions (provided chip exists) for short Weierstrass curves (currently further assuming a4 = 0 for optimization purposes)
 #[derive(Debug)]
-pub struct EccPoint<F: FieldExt, FC: FieldChip<F>> {
-    pub x: FC::FieldPoint,
-    pub y: FC::FieldPoint,
+pub struct EccPoint<F: FieldExt, FieldPoint: Clone> {
+    pub x: FieldPoint,
+    pub y: FieldPoint,
+    _marker: PhantomData<F>,
 }
 
-impl<F: FieldExt, FC: FieldChip<F>> Clone for EccPoint<F, FC> {
+impl<F: FieldExt, FieldPoint: Clone> Clone for EccPoint<F, FieldPoint> {
     fn clone(&self) -> Self {
-        Self { x: self.x.clone(), y: self.y.clone() }
+        Self { x: self.x.clone(), y: self.y.clone(), _marker: PhantomData }
     }
 }
 
-impl<F: FieldExt, FC: FieldChip<F>> EccPoint<F, FC> {
-    pub fn construct(x: FC::FieldPoint, y: FC::FieldPoint) -> Self {
-        Self { x, y }
+impl<F: FieldExt, FieldPoint: Clone> EccPoint<F, FieldPoint> {
+    pub fn construct(x: FieldPoint, y: FieldPoint) -> Self {
+        Self { x, y, _marker: PhantomData }
     }
 }
 
@@ -60,11 +60,11 @@ impl<F: FieldExt, FC: FieldChip<F>> EccPoint<F, FC> {
 //  x_3 = lambda^2 - x_1 - x_2 (mod p)
 //  y_3 = lambda (x_1 - x_3) - y_1 mod p
 pub fn ecc_add_unequal<F: FieldExt, FC: FieldChip<F>>(
-    chip: &FC,
+    chip: &mut FC,
     layouter: &mut impl Layouter<F>,
-    P: &EccPoint<F, FC>,
-    Q: &EccPoint<F, FC>,
-) -> Result<EccPoint<F, FC>, Error> {
+    P: &EccPoint<F, FC::FieldPoint>,
+    Q: &EccPoint<F, FC::FieldPoint>,
+) -> Result<EccPoint<F, FC::FieldPoint>, Error> {
     let dx = chip.sub_no_carry(layouter, &Q.x, &P.x)?;
     let dy = chip.sub_no_carry(layouter, &Q.y, &P.y)?;
     let lambda = chip.divide(layouter, &dy, &dx)?;
@@ -89,11 +89,11 @@ pub fn ecc_add_unequal<F: FieldExt, FC: FieldChip<F>>(
 //  Find ecc subtraction P - Q = (x_3, y_3)
 //  Assumes that P !=Q and Q != (P - Q)
 pub fn ecc_sub_unequal<F: FieldExt, FC: FieldChip<F>>(
-    chip: &FC,
+    chip: &mut FC,
     layouter: &mut impl Layouter<F>,
-    P: &EccPoint<F, FC>,
-    Q: &EccPoint<F, FC>,
-) -> Result<EccPoint<F, FC>, Error> {
+    P: &EccPoint<F, FC::FieldPoint>,
+    Q: &EccPoint<F, FC::FieldPoint>,
+) -> Result<EccPoint<F, FC::FieldPoint>, Error> {
     let dx = chip.sub_no_carry(layouter, &Q.x, &P.x)?;
     let dy = chip.add_no_carry(layouter, &Q.y, &P.y)?;
 
@@ -132,10 +132,10 @@ pub fn ecc_sub_unequal<F: FieldExt, FC: FieldChip<F>>(
 // then we compute x_3 = lambda^2 - 2 x (mod p)
 //                 y_3 = lambda (x - x_3) - y (mod p)
 pub fn ecc_double<F: FieldExt, FC: FieldChip<F>>(
-    chip: &FC,
+    chip: &mut FC,
     layouter: &mut impl Layouter<F>,
-    P: &EccPoint<F, FC>,
-) -> Result<EccPoint<F, FC>, Error> {
+    P: &EccPoint<F, FC::FieldPoint>,
+) -> Result<EccPoint<F, FC::FieldPoint>, Error> {
     // removed optimization that computes `2 * lambda` while assigning witness to `lambda` simultaneously, in favor of readability. The difference is just copying `lambda` once
     let two_y = chip.scalar_mul_no_carry(layouter, &P.y, F::from(2))?;
     let three_x = chip.scalar_mul_no_carry(layouter, &P.x, F::from(3))?;
@@ -158,12 +158,12 @@ pub fn ecc_double<F: FieldExt, FC: FieldChip<F>>(
 }
 
 pub fn select<F: FieldExt, FC>(
-    chip: &FC,
+    chip: &mut FC,
     layouter: &mut impl Layouter<F>,
-    P: &EccPoint<F, FC>,
-    Q: &EccPoint<F, FC>,
+    P: &EccPoint<F, FC::FieldPoint>,
+    Q: &EccPoint<F, FC::FieldPoint>,
     sel: &AssignedCell<F, F>,
-) -> Result<EccPoint<F, FC>, Error>
+) -> Result<EccPoint<F, FC::FieldPoint>, Error>
 where
     FC: FieldChip<F> + Selectable<F, Point = FC::FieldPoint>,
 {
@@ -175,11 +175,11 @@ where
 // takes the dot product of points with sel, where each is intepreted as
 // a _vector_
 pub fn inner_product<F: FieldExt, FC>(
-    chip: &FC,
+    chip: &mut FC,
     layouter: &mut impl Layouter<F>,
-    points: &Vec<EccPoint<F, FC>>,
+    points: &Vec<EccPoint<F, FC::FieldPoint>>,
     coeffs: &Vec<AssignedCell<F, F>>,
-) -> Result<EccPoint<F, FC>, Error>
+) -> Result<EccPoint<F, FC::FieldPoint>, Error>
 where
     FC: FieldChip<F> + Selectable<F, Point = FC::FieldPoint>,
 {
@@ -195,12 +195,11 @@ where
 
 // sel is little-endian binary
 pub fn select_from_bits<F: FieldExt, FC>(
-    chip: &FC,
-    range: &range::RangeConfig<F>,
+    chip: &mut FC,
     layouter: &mut impl Layouter<F>,
-    points: &Vec<EccPoint<F, FC>>,
+    points: &Vec<EccPoint<F, FC::FieldPoint>>,
     sel: &Vec<AssignedCell<F, F>>,
-) -> Result<EccPoint<F, FC>, Error>
+) -> Result<EccPoint<F, FC::FieldPoint>, Error>
 where
     FC: FieldChip<F> + Selectable<F, Point = FC::FieldPoint>,
 {
@@ -208,7 +207,7 @@ where
     let num_points = points.len();
     assert_eq!(1 << w, num_points);
     let sel_quantum = sel.iter().map(|x| Existing(x)).collect();
-    let coeffs = range.qap_config.bits_to_indicator(layouter, &sel_quantum)?;
+    let coeffs = chip.range().gate().bits_to_indicator(layouter, &sel_quantum)?;
     inner_product(chip, layouter, points, &coeffs)
 }
 
@@ -221,15 +220,14 @@ where
 // - `max_bits <= modulus::<F>.bits()`
 //   * P has order given by the scalar field modulus
 pub fn scalar_multiply<F: FieldExt, FC, const LANE: usize>(
-    chip: &FC,
-    range: &range::RangeConfig<F>,
+    chip: &mut FC,
     layouter: &mut impl Layouter<F>,
-    P: &EccPoint<F, FC>,
+    P: &EccPoint<F, FC::FieldPoint>,
     scalar: &[AssignedCell<F, F>; LANE],
     b: F,
     max_bits: usize,
     window_bits: usize,
-) -> Result<EccPoint<F, FC>, Error>
+) -> Result<EccPoint<F, FC::FieldPoint>, Error>
 where
     FC: FieldChip<F> + Selectable<F, Point = FC::FieldPoint>,
 {
@@ -242,7 +240,7 @@ where
 
     let mut bits = Vec::with_capacity(rounded_bitlen);
     for x in scalar {
-        let mut new_bits = range.num_to_bits(layouter, x, max_bits)?;
+        let mut new_bits = chip.range().num_to_bits(layouter, x, max_bits)?;
         bits.append(&mut new_bits);
     }
     let mut rounded_bits = bits;
@@ -250,7 +248,8 @@ where
         || "constant 0",
         |mut region| {
             let zero_cells = vec![Constant(F::from(0))];
-            let zero_cells_assigned = range.qap_config.assign_region(zero_cells, 0, &mut region)?;
+            let (zero_cells_assigned, _) =
+                chip.range().gate().assign_region(zero_cells, 0, &mut region)?;
             Ok(zero_cells_assigned[0].clone())
         },
     )?;
@@ -265,7 +264,7 @@ where
     }
     is_started.push(zero_cell.clone());
     for idx in 1..total_bits {
-        let or = range.qap_config.or(
+        let or = chip.range().gate().or(
             layouter,
             &Existing(&is_started[rounded_bitlen - total_bits + idx - 1]),
             &Existing(&rounded_bits[total_bits - idx]),
@@ -285,8 +284,8 @@ where
             .iter()
             .map(|x| Existing(&x))
             .collect();
-        let bit_sum = range.qap_config.inner_product(layouter, &ones_vec, &temp_bits)?;
-        let is_zero = range.is_zero(layouter, &bit_sum.2)?;
+        let bit_sum = chip.range().gate().inner_product(layouter, &ones_vec, &temp_bits)?;
+        let is_zero = chip.range().is_zero(layouter, &bit_sum.2)?;
         is_zero_window.push(is_zero.clone());
     }
 
@@ -308,7 +307,6 @@ where
     // if all the starting window bits are 0, get start_point = P
     let mut curr_point = select_from_bits(
         chip,
-        range,
         layouter,
         &cached_points,
         &rounded_bits[rounded_bitlen - window_bits..rounded_bitlen].to_vec(),
@@ -321,7 +319,6 @@ where
         }
         let add_point = select_from_bits(
             chip,
-            range,
             layouter,
             &cached_points,
             &rounded_bits
@@ -343,15 +340,14 @@ where
 // - `scalars` is vector of same length as `P`
 // - each `scalar` in `scalars` satisfies same assumptions as in `scalar_multiply` above
 pub fn multi_scalar_multiply<F: FieldExt, FC, GA, const LANE: usize>(
-    chip: &FC,
-    range: &range::RangeConfig<F>,
+    chip: &mut FC,
     layouter: &mut impl Layouter<F>,
-    P: &Vec<EccPoint<F, FC>>,
+    P: &Vec<EccPoint<F, FC::FieldPoint>>,
     scalars: &Vec<[AssignedCell<F, F>; LANE]>,
     b: F,
     max_bits: usize,
     window_bits: usize,
-) -> Result<EccPoint<F, FC>, Error>
+) -> Result<EccPoint<F, FC::FieldPoint>, Error>
 where
     FC: FieldChip<F> + Selectable<F, Point = FC::FieldPoint>,
     GA: CurveAffine<Base = FC::FieldType>,
@@ -370,7 +366,8 @@ where
         || "constant 0",
         |mut region| {
             let zero_cells = vec![Constant(F::from(0))];
-            let zero_cells_assigned = range.qap_config.assign_region(zero_cells, 0, &mut region)?;
+            let (zero_cells_assigned, _) =
+                chip.range().gate().assign_region(zero_cells, 0, &mut region)?;
             Ok(zero_cells_assigned[0].clone())
         },
     )?;
@@ -378,7 +375,7 @@ where
     for scalar in scalars {
         let mut bits = Vec::with_capacity(rounded_bitlen);
         for x in scalar {
-            let mut new_bits = range.num_to_bits(layouter, x, max_bits)?;
+            let mut new_bits = chip.range().num_to_bits(layouter, x, max_bits)?;
             bits.append(&mut new_bits);
         }
         let mut rounded_bits = bits;
@@ -401,8 +398,8 @@ where
                 .iter()
                 .map(|x| Existing(&x))
                 .collect();
-            let bit_sum = range.qap_config.inner_product(layouter, &ones_vec, &temp_bits)?;
-            let is_zero = range.is_zero(layouter, &bit_sum.2)?;
+            let bit_sum = chip.range().gate().inner_product(layouter, &ones_vec, &temp_bits)?;
+            let is_zero = chip.range().is_zero(layouter, &bit_sum.2)?;
             is_zero_window.push(is_zero.clone());
         }
         is_zero_window_vec.push(is_zero_window);
@@ -462,7 +459,6 @@ where
         for base_idx in 0..k {
             let add_point = select_from_bits(
                 chip,
-                range,
                 layouter,
                 &cached_points_vec[base_idx],
                 &rounded_bits_vec[base_idx]
@@ -477,21 +473,21 @@ where
     Ok(curr_point.clone())
 }
 
-pub struct EccChip<F: FieldExt, FC: FieldChip<F>> {
-    pub field_chip: FC,
-    pub range: range::RangeConfig<F>,
+pub struct EccChip<'a, F: FieldExt, FC: FieldChip<F>> {
+    pub field_chip: &'a mut FC,
+    _marker: PhantomData<F>,
 }
 
-impl<F: FieldExt, FC: FieldChip<F>> EccChip<F, FC> {
-    pub fn construct(field_chip: FC, range: range::RangeConfig<F>) -> Self {
-        Self { field_chip, range }
+impl<'a, F: FieldExt, FC: FieldChip<F>> EccChip<'a, F, FC> {
+    pub fn construct(field_chip: &'a mut FC) -> Self {
+        Self { field_chip, _marker: PhantomData }
     }
 
     pub fn load_private(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         point: (Option<FC::FieldType>, Option<FC::FieldType>),
-    ) -> Result<EccPoint<F, FC>, Error> {
+    ) -> Result<EccPoint<F, FC::FieldPoint>, Error> {
         let (x, y) = (FC::fe_to_witness(&point.0), FC::fe_to_witness(&point.1));
 
         let x_assigned = self.field_chip.load_private(layouter, x)?;
@@ -501,10 +497,10 @@ impl<F: FieldExt, FC: FieldChip<F>> EccChip<F, FC> {
     }
 
     pub fn negate(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
-        P: &EccPoint<F, FC>,
-    ) -> Result<EccPoint<F, FC>, Error> {
+        P: &EccPoint<F, FC::FieldPoint>,
+    ) -> Result<EccPoint<F, FC::FieldPoint>, Error> {
         Ok(EccPoint::construct(
             P.x.clone(),
             self.field_chip.negate(layouter, &P.y).expect("negating field point should not fail"),
@@ -512,63 +508,53 @@ impl<F: FieldExt, FC: FieldChip<F>> EccChip<F, FC> {
     }
 
     pub fn add_unequal(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
-        P: &EccPoint<F, FC>,
-        Q: &EccPoint<F, FC>,
-    ) -> Result<EccPoint<F, FC>, Error> {
-        ecc_add_unequal(&self.field_chip, layouter, P, Q)
+        P: &EccPoint<F, FC::FieldPoint>,
+        Q: &EccPoint<F, FC::FieldPoint>,
+    ) -> Result<EccPoint<F, FC::FieldPoint>, Error> {
+        ecc_add_unequal(self.field_chip, layouter, P, Q)
     }
 
     pub fn double(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
-        P: &EccPoint<F, FC>,
-    ) -> Result<EccPoint<F, FC>, Error> {
-        ecc_double(&self.field_chip, layouter, P)
+        P: &EccPoint<F, FC::FieldPoint>,
+    ) -> Result<EccPoint<F, FC::FieldPoint>, Error> {
+        ecc_double(self.field_chip, layouter, P)
     }
 }
 
-impl<F: FieldExt, FC: FieldChip<F>> EccChip<F, FC>
+impl<F: FieldExt, FC: FieldChip<F>> EccChip<'_, F, FC>
 where
     FC: Selectable<F, Point = FC::FieldPoint>,
 {
     pub fn scalar_mult<const LANE: usize>(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
-        P: &EccPoint<F, FC>,
+        P: &EccPoint<F, FC::FieldPoint>,
         scalar: &[AssignedCell<F, F>; LANE],
         b: F,
         max_bits: usize,
         window_bits: usize,
-    ) -> Result<EccPoint<F, FC>, Error> {
-        scalar_multiply(
-            &self.field_chip,
-            &self.range,
-            layouter,
-            P,
-            scalar,
-            b,
-            max_bits,
-            window_bits,
-        )
+    ) -> Result<EccPoint<F, FC::FieldPoint>, Error> {
+        scalar_multiply(self.field_chip, layouter, P, scalar, b, max_bits, window_bits)
     }
 
     pub fn multi_scalar_mult<GA, const LANE: usize>(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
-        P: &Vec<EccPoint<F, FC>>,
+        P: &Vec<EccPoint<F, FC::FieldPoint>>,
         scalars: &Vec<[AssignedCell<F, F>; LANE]>,
         b: F,
         max_bits: usize,
         window_bits: usize,
-    ) -> Result<EccPoint<F, FC>, Error>
+    ) -> Result<EccPoint<F, FC::FieldPoint>, Error>
     where
         GA: CurveAffine<Base = FC::FieldType>,
     {
         multi_scalar_multiply::<F, FC, GA, LANE>(
-            &self.field_chip,
-            &self.range,
+            self.field_chip,
             layouter,
             P,
             scalars,
@@ -579,18 +565,25 @@ where
     }
 }
 
-impl<F: FieldExt, Fp: FieldExt> EccChip<F, FpChip<F, Fp>> {
-    pub fn fixed_base_scalar_mult<GA: CurveAffine<Base = Fp>, const LANE: usize>(
-        &self,
+impl<F: FieldExt, FC: PrimeFieldChip<F>> EccChip<'_, F, FC> {
+    pub fn fixed_base_scalar_mult<GA, const LANE: usize>(
+        &mut self,
         layouter: &mut impl Layouter<F>,
         P: &FixedEccPoint<F, GA>,
         scalar: &[AssignedCell<F, F>; LANE],
         b: F,
         max_bits: usize,
         window_bits: usize,
-    ) -> Result<EccPoint<F, FpChip<F, Fp>>, Error> {
-        fixed_base_scalar_multiply(&self.field_chip, layouter, P, scalar, b, max_bits, window_bits)
+    ) -> Result<EccPoint<F, FC::FieldPoint>, Error>
+    where
+        GA: CurveAffine,
+        GA::Base: PrimeField,
+        FC: PrimeFieldChip<F, FieldType = GA::Base, FieldPoint = CRTInteger<F>>
+            + Selectable<F, Point = FC::FieldPoint>,
+    {
+        fixed_base_scalar_multiply(self.field_chip, layouter, P, scalar, b, max_bits, window_bits)
     }
 }
 
+#[cfg(test)]
 pub mod tests;

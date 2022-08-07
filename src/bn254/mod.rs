@@ -2,19 +2,20 @@ use halo2_proofs::arithmetic::FieldExt;
 use halo2curves::bn254::{Fq, Fq12, Fq2, Fq6};
 
 use crate::{
-    fields::{
-        fp, fp12,
-        fp2::{self, FieldExtConstructor},
-    },
+    fields::{fp, fp12, fp2, FieldExtConstructor},
     utils::{biguint_to_fe, fe_to_biguint},
 };
 
 pub mod final_exp;
 pub mod pairing;
 
-type FpChip<F> = fp::FpChip<F, Fq>;
-type Fp2Chip<F> = fp2::Fp2Chip<F, Fq, Fq2>;
-type Fp12Chip<F> = fp12::Fp12Chip<F, Fq, Fq12>;
+const NUM_ADVICE: usize = 2;
+const NUM_FIXED: usize = 1;
+
+type FpConfig<F> = fp::FpConfig<F, NUM_ADVICE, NUM_FIXED>;
+type FpChip<F> = fp::FpChip<F, NUM_ADVICE, NUM_FIXED, Fq>;
+type Fp2Chip<'a, F> = fp2::Fp2Chip<'a, F, FpChip<F>, Fq2>;
+type Fp12Chip<'a, F> = fp12::Fp12Chip<'a, F, FpChip<F>, Fq12>;
 
 impl FieldExtConstructor<Fq, 2> for Fq2 {
     fn new(c: [Fq; 2]) -> Self {

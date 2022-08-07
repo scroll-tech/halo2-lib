@@ -5,7 +5,7 @@ use super::{FpChip, Secp256k1Chip, SECP_B};
 use crate::{
     ecc::fixed::FixedEccPoint,
     fields::{fp::FpConfig, FieldChip},
-    gates::qap_gate::QuantumCell::Witness,
+    gates::QuantumCell::Witness,
     utils::{bigint_to_fe, biguint_to_fe, decompose_biguint_option, fe_to_biguint, modulus},
 };
 use ff::{Field, PrimeField};

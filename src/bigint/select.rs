@@ -3,11 +3,11 @@ use num_bigint::BigInt;
 use std::cmp;
 
 use super::{CRTInteger, OverflowInteger};
-use crate::{gates::qap_gate, utils::fe_to_bigint};
-use crate::gates::qap_gate::QuantumCell::Existing;
+use crate::gates::{GateInstructions, QuantumCell::Existing};
+use crate::utils::fe_to_bigint;
 
 pub fn assign<F: FieldExt>(
-    gate: &qap_gate::Config<F>,
+    gate: &mut impl GateInstructions<F>,
     layouter: &mut impl Layouter<F>,
     a: &OverflowInteger<F>,
     b: &OverflowInteger<F>,
@@ -18,7 +18,8 @@ pub fn assign<F: FieldExt>(
     let mut out_limbs = Vec::with_capacity(k);
 
     for (a_limb, b_limb) in a.limbs.iter().zip(b.limbs.iter()) {
-        let out_limb = gate.select(layouter, &Existing(&a_limb), &Existing(&b_limb), &Existing(&sel))?;
+        let out_limb =
+            gate.select(layouter, &Existing(&a_limb), &Existing(&b_limb), &Existing(&sel))?;
         out_limbs.push(out_limb);
     }
 
@@ -30,7 +31,7 @@ pub fn assign<F: FieldExt>(
 }
 
 pub fn crt<F: FieldExt>(
-    gate: &qap_gate::Config<F>,
+    gate: &mut impl GateInstructions<F>,
     layouter: &mut impl Layouter<F>,
     a: &CRTInteger<F>,
     b: &CRTInteger<F>,
@@ -41,29 +42,23 @@ pub fn crt<F: FieldExt>(
     let mut out_limbs = Vec::with_capacity(k);
 
     for (a_limb, b_limb) in a.truncation.limbs.iter().zip(b.truncation.limbs.iter()) {
-        let out_limb = gate.select(layouter, &Existing(a_limb), &Existing(b_limb), &Existing(sel))?;
+        let out_limb =
+            gate.select(layouter, &Existing(a_limb), &Existing(b_limb), &Existing(sel))?;
         out_limbs.push(out_limb);
     }
 
     let out_trunc = OverflowInteger::construct(
         out_limbs,
-        cmp::max(
-            a.truncation.max_limb_size.clone(),
-            b.truncation.max_limb_size.clone(),
-        ),
+        cmp::max(a.truncation.max_limb_size.clone(), b.truncation.max_limb_size.clone()),
         a.truncation.limb_bits,
     );
 
-    let out_native = gate.select(layouter, &Existing(&a.native), &Existing(&b.native), &Existing(&sel))?;
-    let out_val = a
-        .value
-        .as_ref()
-        .zip(b.value.as_ref())
-        .zip(sel.value())
-        .map(|((a, b), s)| {
-            let s = fe_to_bigint(s);
-            (a * &s) + ((BigInt::from(1) - &s) * b)
-        });
+    let out_native =
+        gate.select(layouter, &Existing(&a.native), &Existing(&b.native), &Existing(&sel))?;
+    let out_val = a.value.as_ref().zip(b.value.as_ref()).zip(sel.value()).map(|((a, b), s)| {
+        let s = fe_to_bigint(s);
+        (a * &s) + ((BigInt::from(1) - &s) * b)
+    });
     Ok(CRTInteger::construct(
         out_trunc,
         out_native,

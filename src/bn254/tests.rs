@@ -4,13 +4,14 @@ use std::marker::PhantomData;
 
 use super::pairing::PairingChip;
 use super::*;
-use crate::fields::fp::FpConfig;
+use crate::ecc::EccChip;
+use crate::fields::PrimeFieldChip;
+use ff::PrimeField;
 use halo2_proofs::arithmetic::BaseExt;
 use halo2_proofs::circuit::floor_planner::V1;
 use halo2_proofs::pairing::bn256::{
     multi_miller_loop, pairing, G1Affine, G2Affine, G2Prepared, Gt, G1, G2,
 };
-use halo2_proofs::pairing::group::ff::PrimeField;
 use halo2_proofs::pairing::group::Group;
 use halo2_proofs::{
     arithmetic::FieldExt,
@@ -20,7 +21,7 @@ use halo2_proofs::{
     plonk::*,
 };
 use halo2curves::bn254::Fq12;
-use num_bigint::{BigInt, RandBigInt};
+use num_bigint::BigInt;
 
 #[derive(Default)]
 struct PairingCircuit<F> {
@@ -29,9 +30,10 @@ struct PairingCircuit<F> {
     _marker: PhantomData<F>,
 }
 
+// Adjust NUM_ADVICE and NUM_FIXED in bn254/mod.rs
 impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
     type Config = FpConfig<F>;
-    type FloorPlanner = SimpleFloorPlanner;
+    type FloorPlanner = SimpleFloorPlanner; // V1;
 
     fn without_witnesses(&self) -> Self {
         Self::default()
@@ -48,8 +50,8 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
-        let chip = PairingChip::construct(config);
-        chip.fp12_chip.fp_chip.load_lookup_table(&mut layouter)?;
+        let mut chip = PairingChip::construct(config, true);
+        chip.fp_chip.load_lookup_table(&mut layouter)?;
 
         let P_assigned = chip.load_private_g1(&mut layouter, self.P.clone())?;
         let Q_assigned = chip.load_private_g2(&mut layouter, self.Q.clone())?;
@@ -66,11 +68,8 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
                     &self.P.unwrap(),
                     &G2Prepared::from_affine(self.Q.unwrap()),
                 )]);
-                let f_val: Vec<String> = f
-                    .coeffs
-                    .iter()
-                    .map(|x| x.value.clone().unwrap().to_str_radix(16))
-                    .collect();
+                let f_val: Vec<String> =
+                    f.coeffs.iter().map(|x| x.value.clone().unwrap().to_str_radix(16)).collect();
                 println!("single miller loop:");
                 println!("actual f: {:#?}", actual_f);
                 println!("circuit f: {:#?}", f_val);
@@ -94,6 +93,14 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
             }
         }
 
+        println!("Using {} advice columns and {} fixed columns", NUM_ADVICE, NUM_FIXED);
+        let advice_rows = chip.fp_chip.range.gate_chip.advice_rows.iter();
+        println!("maximum rows used by an advice column: {}", advice_rows.clone().max().unwrap());
+        println!("minimum rows used by an advice column: {}", advice_rows.min().unwrap());
+        // IMPORTANT: this assigns all constants to the fixed columns
+        // This is not optional.
+        let const_rows = chip.fp_chip.range.gate_chip.load_constants(&mut layouter)?;
+        println!("maximum rows used by a fixed column: {}", const_rows);
         Ok(())
     }
 }
@@ -116,14 +123,14 @@ fn test_pairing() {
 #[cfg(feature = "dev-graph")]
 #[test]
 fn plot_pairing() {
-    let k = 12;
+    let k = 23;
     use plotters::prelude::*;
 
-    let root = BitMapBackend::new("layout.png", (512, 16384)).into_drawing_area();
+    let root = BitMapBackend::new("layout.png", (512, 40384)).into_drawing_area();
     root.fill(&WHITE).unwrap();
     let root = root.titled("Pairing Layout", ("sans-serif", 60)).unwrap();
 
-    let circuit = PairingCircuit::<Fn>::default();
+    let circuit = PairingCircuit::<Fr>::default();
 
     halo2_proofs::dev::CircuitLayout::default().render(k, &circuit, &root).unwrap();
 }

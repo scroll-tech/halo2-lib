@@ -9,11 +9,8 @@ use halo2_proofs::{
 use num_bigint::{BigInt, BigUint};
 use num_traits::Num;
 
-use crate::fields::fp::{FpChip, FpConfig};
 use crate::fields::fp2::Fp2Chip;
 use crate::fields::FqPoint;
-use crate::gates::qap_gate;
-use crate::gates::range;
 use crate::utils::decompose_bigint_option;
 use crate::utils::{bigint_to_fe, fe_to_biguint};
 use crate::{
@@ -24,27 +21,35 @@ use crate::{
     utils::modulus,
 };
 
-use super::{fp2::FieldExtConstructor, FieldChip};
+use super::{FieldChip, FieldExtConstructor, PrimeFieldChip};
 
 const XI_0: u64 = 9;
-// Represent Fp12 point as FqPoint with degree = 12
-// `Fp12 = Fp2[w] / (w^6 - u - xi)`
-// This implementation assumes p = 3 (mod 4) in order for the polynomial u^2 + 1 to
-// be irreducible over Fp; i.e., in order for -1 to not be a square (quadratic residue) in Fp
-// This means we store an Fp12 point as `\sum_{i = 0}^6 (a_{i0} + a_{i1} * u) * w^i`
-// This is encoded in an FqPoint of degree 12 as `(a_{00}, ..., a_{50}, a_{01}, ..., a_{51})`
-pub struct Fp12Chip<F: FieldExt, Fp: PrimeField, Fp12: Field> {
-    pub fp_chip: FpChip<F, Fp>,
-    _marker: PhantomData<Fp12>,
+/// Represent Fp12 point as FqPoint with degree = 12
+/// `Fp12 = Fp2[w] / (w^6 - u - xi)`
+/// This implementation assumes p = 3 (mod 4) in order for the polynomial u^2 + 1 to
+/// be irreducible over Fp; i.e., in order for -1 to not be a square (quadratic residue) in Fp
+/// This means we store an Fp12 point as `\sum_{i = 0}^6 (a_{i0} + a_{i1} * u) * w^i`
+/// This is encoded in an FqPoint of degree 12 as `(a_{00}, ..., a_{50}, a_{01}, ..., a_{51})`
+pub struct Fp12Chip<'a, F: FieldExt, FpChip: PrimeFieldChip<F>, Fp12: Field> {
+    pub fp_chip: &'a mut FpChip,
+    _f: PhantomData<F>,
+    _fp12: PhantomData<Fp12>,
 }
 
-impl<F: FieldExt, Fp: PrimeField, Fp12: Field> Fp12Chip<F, Fp, Fp12> {
-    pub fn construct(config: FpConfig<F>) -> Self {
-        Self { fp_chip: FpChip::construct(config), _marker: PhantomData }
+impl<'a, F, FpChip, Fp12> Fp12Chip<'a, F, FpChip, Fp12>
+where
+    F: FieldExt,
+    FpChip: PrimeFieldChip<F, FieldPoint = CRTInteger<F>>,
+    FpChip::FieldType: PrimeField,
+    Fp12: Field + FieldExtConstructor<FpChip::FieldType, 12>,
+{
+    /// User must construct an `FpChip` first using a config. This is intended so everything shares a single `FlexGateChip`, which is needed for the column allocation to work.
+    pub fn construct(fp_chip: &'a mut FpChip) -> Self {
+        Self { fp_chip, _f: PhantomData, _fp12: PhantomData }
     }
 
     pub fn fp2_mul_no_carry(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
         fp2_pt: &FqPoint<F>,
@@ -73,7 +78,7 @@ impl<F: FieldExt, Fp: PrimeField, Fp12: Field> Fp12Chip<F, Fp, Fp12> {
 
     // for \sum_i (a_i + b_i u) w^i, returns \sum_i (-1)^i (a_i + b_i u) w^i
     pub fn conjugate(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
     ) -> Result<FqPoint<F>, Error> {
@@ -95,12 +100,27 @@ impl<F: FieldExt, Fp: PrimeField, Fp12: Field> Fp12Chip<F, Fp, Fp12> {
     }
 }
 
-impl<F: FieldExt, Fp: PrimeField, Fp12: Field + FieldExtConstructor<Fp, 12>> FieldChip<F>
-    for Fp12Chip<F, Fp, Fp12>
+impl<F, FpChip, Fp12> FieldChip<F> for Fp12Chip<'_, F, FpChip, Fp12>
+where
+    F: FieldExt,
+    FpChip: PrimeFieldChip<
+        F,
+        FieldPoint = CRTInteger<F>,
+        WitnessType = Option<BigInt>,
+        ConstantType = BigInt,
+    >,
+    FpChip::FieldType: PrimeField,
+    Fp12: Field + FieldExtConstructor<FpChip::FieldType, 12>,
 {
+    type ConstantType = Fp12;
     type WitnessType = Vec<Option<BigInt>>;
     type FieldPoint = FqPoint<F>;
     type FieldType = Fp12;
+    type RangeChip = FpChip::RangeChip;
+
+    fn range(&mut self) -> &mut Self::RangeChip {
+        self.fp_chip.range()
+    }
 
     fn get_assigned_value(x: &FqPoint<F>) -> Option<Fp12> {
         assert_eq!(x.coeffs.len(), 12);
@@ -108,7 +128,7 @@ impl<F: FieldExt, Fp: PrimeField, Fp12: Field + FieldExtConstructor<Fp, 12>> Fie
         let values_collected: Option<Vec<BigInt>> = values.into_iter().collect();
         match values_collected {
             Some(c_bigint) => {
-                let mut c = [Fp::zero(); 12];
+                let mut c = [FpChip::FieldType::zero(); 12];
                 for i in 0..12 {
                     c[i] = bigint_to_fe(&c_bigint[i])
                 }
@@ -126,7 +146,7 @@ impl<F: FieldExt, Fp: PrimeField, Fp12: Field + FieldExtConstructor<Fp, 12>> Fie
     }
 
     fn load_private(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         coeffs: Vec<Option<BigInt>>,
     ) -> Result<FqPoint<F>, Error> {
@@ -138,9 +158,23 @@ impl<F: FieldExt, Fp: PrimeField, Fp12: Field + FieldExtConstructor<Fp, 12>> Fie
         Ok(FqPoint::construct(assigned_coeffs, 12))
     }
 
+    fn load_constant(
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        c: Fp12,
+    ) -> Result<FqPoint<F>, Error> {
+        let mut assigned_coeffs = Vec::with_capacity(12);
+        for a in &c.coeffs() {
+            let assigned_coeff =
+                self.fp_chip.load_constant(layouter, BigInt::from(fe_to_biguint(a)))?;
+            assigned_coeffs.push(assigned_coeff);
+        }
+        Ok(FqPoint::construct(assigned_coeffs, 12))
+    }
+
     // signed overflow BigInt functions
     fn add_no_carry(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
         b: &FqPoint<F>,
@@ -155,7 +189,7 @@ impl<F: FieldExt, Fp: PrimeField, Fp12: Field + FieldExtConstructor<Fp, 12>> Fie
     }
 
     fn sub_no_carry(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
         b: &FqPoint<F>,
@@ -169,7 +203,11 @@ impl<F: FieldExt, Fp: PrimeField, Fp12: Field + FieldExtConstructor<Fp, 12>> Fie
         Ok(FqPoint::construct(out_coeffs, a.degree))
     }
 
-    fn negate(&self, layouter: &mut impl Layouter<F>, a: &FqPoint<F>) -> Result<FqPoint<F>, Error> {
+    fn negate(
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        a: &FqPoint<F>,
+    ) -> Result<FqPoint<F>, Error> {
         let mut out_coeffs = Vec::with_capacity(a.degree);
         for a_coeff in &a.coeffs {
             let out_coeff = self.fp_chip.negate(layouter, a_coeff)?;
@@ -179,7 +217,7 @@ impl<F: FieldExt, Fp: PrimeField, Fp12: Field + FieldExtConstructor<Fp, 12>> Fie
     }
 
     fn scalar_mul_no_carry(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
         b: F,
@@ -194,7 +232,7 @@ impl<F: FieldExt, Fp: PrimeField, Fp12: Field + FieldExtConstructor<Fp, 12>> Fie
 
     // w^6 = u + xi for xi = 9
     fn mul_no_carry(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
         b: &FqPoint<F>,
@@ -212,8 +250,7 @@ impl<F: FieldExt, Fp: PrimeField, Fp12: Field + FieldExtConstructor<Fp, 12>> Fie
         let mut a1b1_coeffs = Vec::with_capacity(11);
         for i in 0..6 {
             for j in 0..6 {
-                let mut coeff00 =
-                    self.fp_chip.mul_no_carry(layouter, &a.coeffs[i], &b.coeffs[j])?;
+                let coeff00 = self.fp_chip.mul_no_carry(layouter, &a.coeffs[i], &b.coeffs[j])?;
                 let coeff01 =
                     self.fp_chip.mul_no_carry(layouter, &a.coeffs[i], &b.coeffs[j + 6])?;
                 let coeff10 =
@@ -293,7 +330,7 @@ impl<F: FieldExt, Fp: PrimeField, Fp12: Field + FieldExtConstructor<Fp, 12>> Fie
     }
 
     fn check_carry_mod_to_zero(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
     ) -> Result<(), Error> {
@@ -304,7 +341,7 @@ impl<F: FieldExt, Fp: PrimeField, Fp12: Field + FieldExtConstructor<Fp, 12>> Fie
     }
 
     fn carry_mod(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
     ) -> Result<FqPoint<F>, Error> {
@@ -316,12 +353,124 @@ impl<F: FieldExt, Fp: PrimeField, Fp12: Field + FieldExtConstructor<Fp, 12>> Fie
         Ok(FqPoint::construct(out_coeffs, a.degree))
     }
 
-    fn range_check(&self, layouter: &mut impl Layouter<F>, a: &FqPoint<F>) -> Result<(), Error> {
+    fn range_check(
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        a: &FqPoint<F>,
+    ) -> Result<(), Error> {
         let mut out_coeffs = Vec::with_capacity(a.degree);
         for a_coeff in &a.coeffs {
             let coeff = self.fp_chip.range_check(layouter, a_coeff)?;
             out_coeffs.push(coeff);
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
+    use std::marker::PhantomData;
+
+    use halo2_proofs::arithmetic::BaseExt;
+    use halo2_proofs::circuit::floor_planner::V1;
+    use halo2_proofs::{
+        arithmetic::FieldExt, circuit::*, dev::MockProver, pairing::bn256::Fr, plonk::*,
+    };
+    use halo2curves::bn254::{Fq, Fq12};
+    use num_traits::One;
+    use rand::Rng;
+
+    use super::*;
+    use crate::fields::fp::{FpChip, FpConfig};
+    use crate::fields::{FieldChip, PrimeFieldChip};
+    use crate::gates::RangeInstructions;
+    use crate::utils::{fe_to_bigint, modulus};
+    use num_bigint::{BigInt, BigUint};
+
+    #[derive(Default)]
+    struct MyCircuit<F> {
+        a: Option<Fq12>,
+        b: Option<Fq12>,
+        _marker: PhantomData<F>,
+    }
+
+    const NUM_ADVICE: usize = 2;
+    const NUM_FIXED: usize = 2;
+
+    impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
+        type Config = FpConfig<F, NUM_ADVICE, NUM_FIXED>;
+        type FloorPlanner = SimpleFloorPlanner;
+
+        fn without_witnesses(&self) -> Self {
+            Self::default()
+        }
+
+        fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+            FpConfig::configure(meta, 17, 68, 4, modulus::<Fq>())
+        }
+
+        fn synthesize(
+            &self,
+            config: Self::Config,
+            mut layouter: impl Layouter<F>,
+        ) -> Result<(), Error> {
+            let mut fp_chip = FpChip::<F, NUM_ADVICE, NUM_FIXED, Fq>::construct(config, true);
+            fp_chip.load_lookup_table(&mut layouter)?;
+            let mut chip =
+                Fp12Chip::<F, FpChip<F, NUM_ADVICE, NUM_FIXED, Fq>, Fq12>::construct(&mut fp_chip);
+
+            let a_assigned = chip.load_private(
+                &mut layouter,
+                Fp12Chip::<F, FpChip<F, NUM_ADVICE, NUM_FIXED, Fq>, Fq12>::fe_to_witness(&self.a),
+            )?;
+            let b_assigned = chip.load_private(
+                &mut layouter,
+                Fp12Chip::<F, FpChip<F, NUM_ADVICE, NUM_FIXED, Fq>, Fq12>::fe_to_witness(&self.b),
+            )?;
+
+            // test fp_multiply
+            {
+                chip.mul(&mut layouter.namespace(|| "fp12 multiply"), &a_assigned, &b_assigned)?;
+            }
+
+            println!("Using {} advice columns and {} fixed columns", NUM_ADVICE, NUM_FIXED);
+            println!(
+                "maximum rows used by an advice column: {}",
+                chip.fp_chip.range.gate().advice_rows.iter().max().unwrap()
+            );
+            // IMPORTANT: this assigns all constants to the fixed columns
+            // This is not optional.
+            let const_rows = chip.fp_chip.range.gate().load_constants(&mut layouter)?;
+            println!("maximum rows used by a fixed column: {}", const_rows);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn test_fp12() {
+        let k = 18;
+        let mut rng = rand::thread_rng();
+        let a = Fq12::random(&mut rng);
+        let b = Fq12::random(&mut rng);
+
+        let circuit = MyCircuit::<Fr> { a: Some(a), b: Some(b), _marker: PhantomData };
+
+        let prover = MockProver::run(k, &circuit, vec![]).unwrap();
+        //prover.assert_satisfied();
+        assert_eq!(prover.verify(), Ok(()));
+    }
+
+    #[cfg(feature = "dev-graph")]
+    #[test]
+    fn plot_fp() {
+        let k = 9;
+        use plotters::prelude::*;
+
+        let root = BitMapBackend::new("layout.png", (1024, 1024)).into_drawing_area();
+        root.fill(&WHITE).unwrap();
+        let root = root.titled("Fp Layout", ("sans-serif", 60)).unwrap();
+
+        let circuit = MyCircuit::<Fr>::default();
+        halo2_proofs::dev::CircuitLayout::default().render(k, &circuit, &root).unwrap();
     }
 }
