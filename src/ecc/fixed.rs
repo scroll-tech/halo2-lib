@@ -80,11 +80,11 @@ where
 // - `scalar_i < 2^{max_bits} for all i` (constrained by num_to_bits)
 // - `max_bits <= modulus::<F>.bits()`
 
-pub fn fixed_base_scalar_multiply<F: FieldExt, GA: CurveAffine, const LANE: usize>(
+pub fn fixed_base_scalar_multiply<F: FieldExt, GA: CurveAffine>(
     chip: &FpChip<F, GA::Base>,
     layouter: &mut impl Layouter<F>,
     P: &FixedEccPoint<F, GA>,
-    scalar: &[AssignedCell<F, F>; LANE],
+    scalar: &Vec<AssignedCell<F, F>>,
     b: F,
     max_bits: usize,
     window_bits: usize,

@@ -287,6 +287,23 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpChip<F, Fp> {
         }
         Ok(())
     }
+
+    fn is_zero(
+	&self,
+	layouter: &mut impl Layouter<F>,
+	a: &CRTInteger<F>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+	big_is_zero::crt(&self.config.range, layouter, a)
+    }
+
+    fn is_equal(
+	&self,
+	layouter: &mut impl Layouter<F>,
+	a: &CRTInteger<F>,
+	b: &CRTInteger<F>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+	big_is_equal::crt(&self.config.range, layouter, a, b)
+    }
 }
 
 impl<F: FieldExt, Fp: PrimeField> Selectable<F> for FpChip<F, Fp> {

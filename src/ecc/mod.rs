@@ -220,12 +220,12 @@ where
 // - `scalar_i < 2^{max_bits} for all i` (constrained by num_to_bits)
 // - `max_bits <= modulus::<F>.bits()`
 //   * P has order given by the scalar field modulus
-pub fn scalar_multiply<F: FieldExt, FC, const LANE: usize>(
+pub fn scalar_multiply<F: FieldExt, FC>(
     chip: &FC,
     range: &range::RangeConfig<F>,
     layouter: &mut impl Layouter<F>,
     P: &EccPoint<F, FC>,
-    scalar: &[AssignedCell<F, F>; LANE],
+    scalar: &Vec<AssignedCell<F, F>>,
     b: F,
     max_bits: usize,
     window_bits: usize,
@@ -342,12 +342,12 @@ where
 // Input:
 // - `scalars` is vector of same length as `P`
 // - each `scalar` in `scalars` satisfies same assumptions as in `scalar_multiply` above
-pub fn multi_scalar_multiply<F: FieldExt, FC, GA, const LANE: usize>(
+pub fn multi_scalar_multiply<F: FieldExt, FC, GA>(
     chip: &FC,
     range: &range::RangeConfig<F>,
     layouter: &mut impl Layouter<F>,
     P: &Vec<EccPoint<F, FC>>,
-    scalars: &Vec<[AssignedCell<F, F>; LANE]>,
+    scalars: &Vec<Vec<AssignedCell<F, F>>>,
     b: F,
     max_bits: usize,
     window_bits: usize,
@@ -477,6 +477,51 @@ where
     Ok(curr_point.clone())
 }
 
+// FC implements the coordinate field of GA
+// FNC implements the scalar field of GA (must use OverflowInteger<F>)
+// TODO: Update to OverflowInteger<F> everywhere...
+pub fn ecdsa_verify_no_pubkey_check<F: FieldExt, FC, FNC, GA>(
+    chip: &FC,
+    scalar_chip: &FNC,
+    range: &range::RangeConfig<F>,
+    layouter: &mut impl Layouter<F>,
+    pubkey: &EccPoint<F, FC>,
+    r: &FNC::FieldPoint,
+    s: &FNC::FieldPoint,
+    msghash: &OverflowInteger<F>,
+    b: F,
+    var_max_bits: usize,
+    var_window_bits: usize,
+    fixed_max_bits: usize,
+    fixed_window_bits: usize,
+) -> Result<AssignedCell<F, F>, Error>
+where
+    FC: FieldChip<F> + Selectable<F, Point = FC::FieldPoint>,
+    FNC: FieldChip<F, FieldType = OverflowInteger<F>> + Selectable<F, Point = FNC::FieldPoint>,
+    GA: CurveAffine<Base = FC::FieldType, ScalarExt = FNC::FieldType>,
+{
+    let G = FixedEccPoint::from_g1(GA::generator(), pubkey.x.truncation.limbs.len(), pubkey.x.truncation.limb_bits);
+    let G_assigned = G.assign(&chip, layouter)?;
+    
+    // check r,s are in [1, n - 1]
+    let r_is_zero = scalar_chip.is_zero(layouter, &r)?;
+    let s_is_zero = scalar_chip.is_zero(layouter, &s)?;
+
+    // compute u1 = m s^{-1} mod n
+    let m_mod = ;
+    let u1 = scalar_chip.divide(layouter, &m_mod, &s)?;
+
+    // compute u2 = r s^{-1} mod n
+    let u2 = scalar_chip.divide(layouter, &r, &s)?;
+
+    // compute (x1, y1) = u1 * G + u2 * pubkey
+    let u1_mul = fixed_base_scalar_multiply(chip, layouter, &G_assigned, &u1.limbs, b, fixed_max_bits, fixed_window_bits)?;
+    let u2_mul = scalar_multiply(chip, range, layouter, pubkey, &u2.limbs, b, var_max_bits, var_window_bits)?;
+    let sum = ecc_add_unequal(chip, layouter, &u1_mul, &u2_mul)?;
+
+    // check (x1, y1) != O and r == x1 mod n
+}
+
 pub struct EccChip<F: FieldExt, FC: FieldChip<F>> {
     pub field_chip: FC,
     pub range: range::RangeConfig<F>,
@@ -533,11 +578,11 @@ impl<F: FieldExt, FC: FieldChip<F>> EccChip<F, FC>
 where
     FC: Selectable<F, Point = FC::FieldPoint>,
 {
-    pub fn scalar_mult<const LANE: usize>(
+    pub fn scalar_mult(
         &self,
         layouter: &mut impl Layouter<F>,
         P: &EccPoint<F, FC>,
-        scalar: &[AssignedCell<F, F>; LANE],
+        scalar: &Vec<AssignedCell<F, F>>,
         b: F,
         max_bits: usize,
         window_bits: usize,
@@ -554,11 +599,11 @@ where
         )
     }
 
-    pub fn multi_scalar_mult<GA, const LANE: usize>(
+    pub fn multi_scalar_mult<GA>(
         &self,
         layouter: &mut impl Layouter<F>,
         P: &Vec<EccPoint<F, FC>>,
-        scalars: &Vec<[AssignedCell<F, F>; LANE]>,
+        scalars: &Vec<Vec<AssignedCell<F, F>>>,
         b: F,
         max_bits: usize,
         window_bits: usize,
@@ -566,7 +611,7 @@ where
     where
         GA: CurveAffine<Base = FC::FieldType>,
     {
-        multi_scalar_multiply::<F, FC, GA, LANE>(
+        multi_scalar_multiply::<F, FC, GA>(
             &self.field_chip,
             &self.range,
             layouter,
@@ -580,11 +625,11 @@ where
 }
 
 impl<F: FieldExt, Fp: FieldExt> EccChip<F, FpChip<F, Fp>> {
-    pub fn fixed_base_scalar_mult<GA: CurveAffine<Base = Fp>, const LANE: usize>(
+    pub fn fixed_base_scalar_mult<GA: CurveAffine<Base = Fp>>(
         &self,
         layouter: &mut impl Layouter<F>,
         P: &FixedEccPoint<F, GA>,
-        scalar: &[AssignedCell<F, F>; LANE],
+        scalar: &Vec<AssignedCell<F, F>>,
         b: F,
         max_bits: usize,
         window_bits: usize,

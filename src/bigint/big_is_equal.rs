@@ -43,3 +43,15 @@ pub fn assign<F: FieldExt>(
     }
     Ok(partials[k - 1].clone())
 }
+
+pub fn crt<F: FieldExt>(
+    range: &range::RangeConfig<F>,
+    layouter: &mut impl Layouter<F>,
+    a: &CRTInteger<F>,
+    b: &CRTInteger<F>,
+) -> Result<AssignedCell<F, F>, Error> {
+    let out_trunc = assign(range, layouter, &a.truncation, &b.truncation)?;
+    let out_native = range.is_equal(layouter, &a.native, &b.native)?;
+    let out = range.qap_config.and(layouter, &Existing(&out_trunc), &Existing(&out_native))?;
+    Ok(out)
+}

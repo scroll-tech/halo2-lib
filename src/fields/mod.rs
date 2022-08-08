@@ -100,6 +100,19 @@ pub trait FieldChip<F: FieldExt> {
         a: &Self::FieldPoint,
     ) -> Result<(), Error>;
 
+    fn is_zero(
+	&self,
+	layouter: &mut impl Layouter<F>,
+	a: &Self::FieldPoint,
+    ) -> Result<AssignedCell<F, F>, Error>;
+
+    fn is_equal(
+	&self,
+	layouter: &mut impl Layouter<F>,
+	a: &Self::FieldPoint,
+	b: &Self::FieldPoint,
+    ) -> Result<AssignedCell<F, F>, Error>;
+    
     fn mul(
         &self,
         layouter: &mut impl Layouter<F>,

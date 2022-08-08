@@ -269,4 +269,43 @@ impl<F: FieldExt, Fp: PrimeField, Fp2: Field + FieldExtConstructor<Fp, 2>> Field
         }
         Ok(())
     }
+
+    fn is_zero(
+	&self,
+	layouter: &mut impl Layouter<F>,
+	a: &FqPoint<F>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+	let mut prev = None;
+	for a_coeff in &a.coeffs {
+	    let coeff = self.fp_chip.is_zero(layouter, a_coeff)?;
+	    if let Some(p) = prev {
+		let new = self.fp_chip.config.range
+		    .qap_config.and(layouter, &Existing(&coeff), &Existing(&prev))?;
+		prev = Some(new);
+	    } else {
+		prev = Some(coeff);
+	    }
+	}
+	Ok(prev.unwrap())
+    }
+
+    fn is_equal(
+	&self,
+	layouter: &mut impl Layouter<F>,
+	a: &FqPoint<F>,
+	b: &FqPoint<F>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+	let mut prev = None;
+	for (a_coeff, b_coeff) in &a.coeffs.zip(b.coeffs) {
+	    let coeff = self.fp_chip.is_equal(layouter, a_coeff, b_coeff)?;
+	    if let Some(p) = prev {
+		let new = self.fp_chip.config.range
+		    .qap_config.and(layouter, &Existing(&coeff), &Existing(&prev))?;
+		prev = Some(new);
+	    } else {
+		prev = Some(coeff);
+	    }
+	}
+	Ok(prev.unwrap())	
+    }    
 }

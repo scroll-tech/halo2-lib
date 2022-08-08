@@ -34,3 +34,14 @@ pub fn assign<F: FieldExt>(
 
     Ok(partial.unwrap())
 }
+
+pub fn crt<F: FieldExt>(
+    range: &range::RangeConfig<F>,
+    layouter: &mut impl Layouter<F>,
+    a: &CRTInteger<F>,
+) -> Result<AssignedCell<F, F>, Error> {
+    let out_trunc = assign(range, layouter, &a.truncation)?;
+    let out_native = range.is_zero(layouter, &a.native)?;
+    let out = range.qap_config.and(layouter, &Existing(&out_trunc), &Existing(&out_native))?;
+    Ok(out)
+}
