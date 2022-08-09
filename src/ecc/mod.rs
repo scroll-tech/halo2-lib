@@ -518,9 +518,15 @@ where
     let u2_mul = scalar_multiply(base_chip, range, layouter, pubkey, &u2.limbs, b, u2.limb_bits, var_window_bits)?;
     let sum = ecc_add_unequal(base_chip, layouter, &u1_mul, &u2_mul)?;
 
-    // check (x1, y1) != O and r == x1 mod n
+    // check (x1, y1) != O and
+    // check r == x1 mod n
     let r_crt = scalar_chip.to_crt(layouter, r)?;
     let equal_check = base_chip.is_equal(layouter, &sum.x, &r_crt)?;
+    let res1 = range.qap_config.or(
+	layouter,
+	&Existing(&r_is_zero),
+	&Existing(&s_is_zero),
+    )?;
 }
 
 pub struct EccChip<F: FieldExt, FC: FieldChip<F>> {
