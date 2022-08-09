@@ -12,7 +12,7 @@ use num_traits::Num;
 use super::{FieldChip, Selectable};
 use crate::{
     bigint::{
-        add_no_carry, big_is_zero, carry_mod, check_carry_mod_to_zero, inner_product, mul_no_carry,
+        add_no_carry, big_is_equal, big_is_zero, carry_mod, check_carry_mod_to_zero, inner_product, mul_no_carry,
         scalar_mul_no_carry, select, sub, sub_no_carry, CRTInteger, FixedCRTInteger,
         OverflowInteger,
     },

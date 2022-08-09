@@ -1,6 +1,7 @@
 #![allow(non_snake_case)]
 use std::marker::PhantomData;
 
+use ff::PrimeField;
 use group::{Curve, Group};
 use halo2_proofs::{
     arithmetic::{BaseExt, CurveAffine, Field, FieldExt},
@@ -19,6 +20,7 @@ use crate::bigint::{
 use crate::fields::FieldChip;
 use crate::fields::{
     fp::{FpChip, FpConfig},
+    fp_overflow::{FpOverflowChip},
     Selectable,
 };
 use crate::gates::qap_gate::QuantumCell;
@@ -477,49 +479,48 @@ where
     Ok(curr_point.clone())
 }
 
-// FC implements the coordinate field of GA
-// FNC implements the scalar field of GA (must use OverflowInteger<F>)
-// TODO: Update to OverflowInteger<F> everywhere...
-pub fn ecdsa_verify_no_pubkey_check<F: FieldExt, FC, FNC, GA>(
-    chip: &FC,
-    scalar_chip: &FNC,
+// CF is the coordinate field of GA
+// SF is the scalar field of GA
+pub fn ecdsa_verify_no_pubkey_check<F: FieldExt, CF: PrimeField, SF: PrimeField, GA>(
+    base_chip: &FpChip<F, CF>,
+    scalar_chip: &FpOverflowChip<F, SF>,
     range: &range::RangeConfig<F>,
     layouter: &mut impl Layouter<F>,
-    pubkey: &EccPoint<F, FC>,
-    r: &FNC::FieldPoint,
-    s: &FNC::FieldPoint,
+    pubkey: &EccPoint<F, FpChip<F, CF>>,
+    r: &OverflowInteger<F>,
+    s: &OverflowInteger<F>,
     msghash: &OverflowInteger<F>,
     b: F,
-    var_max_bits: usize,
     var_window_bits: usize,
-    fixed_max_bits: usize,
     fixed_window_bits: usize,
 ) -> Result<AssignedCell<F, F>, Error>
 where
-    FC: FieldChip<F> + Selectable<F, Point = FC::FieldPoint>,
-    FNC: FieldChip<F, FieldType = OverflowInteger<F>> + Selectable<F, Point = FNC::FieldPoint>,
-    GA: CurveAffine<Base = FC::FieldType, ScalarExt = FNC::FieldType>,
+    GA: CurveAffine<Base = CF, ScalarExt = SF>,
 {
-    let G = FixedEccPoint::from_g1(GA::generator(), pubkey.x.truncation.limbs.len(), pubkey.x.truncation.limb_bits);
-    let G_assigned = G.assign(&chip, layouter)?;
+    let G = FixedEccPoint::from_g1(
+	&GA::generator(),
+	pubkey.x.truncation.limbs.len(),
+	pubkey.x.truncation.limb_bits
+    );
     
     // check r,s are in [1, n - 1]
     let r_is_zero = scalar_chip.is_zero(layouter, &r)?;
     let s_is_zero = scalar_chip.is_zero(layouter, &s)?;
 
     // compute u1 = m s^{-1} mod n
-    let m_mod = ;
-    let u1 = scalar_chip.divide(layouter, &m_mod, &s)?;
+    let u1 = scalar_chip.divide(layouter, &msghash, &s)?;
 
     // compute u2 = r s^{-1} mod n
     let u2 = scalar_chip.divide(layouter, &r, &s)?;
 
     // compute (x1, y1) = u1 * G + u2 * pubkey
-    let u1_mul = fixed_base_scalar_multiply(chip, layouter, &G_assigned, &u1.limbs, b, fixed_max_bits, fixed_window_bits)?;
-    let u2_mul = scalar_multiply(chip, range, layouter, pubkey, &u2.limbs, b, var_max_bits, var_window_bits)?;
-    let sum = ecc_add_unequal(chip, layouter, &u1_mul, &u2_mul)?;
+    let u1_mul = fixed_base_scalar_multiply(base_chip, layouter, &G, &u1.limbs, b, u1.limb_bits, fixed_window_bits)?;
+    let u2_mul = scalar_multiply(base_chip, range, layouter, pubkey, &u2.limbs, b, u2.limb_bits, var_window_bits)?;
+    let sum = ecc_add_unequal(base_chip, layouter, &u1_mul, &u2_mul)?;
 
     // check (x1, y1) != O and r == x1 mod n
+    let r_crt = scalar_chip.to_crt(layouter, r)?;
+    let equal_check = base_chip.is_equal(layouter, &sum.x, &r_crt)?;
 }
 
 pub struct EccChip<F: FieldExt, FC: FieldChip<F>> {

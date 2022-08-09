@@ -1,4 +1,4 @@
-use super::OverflowInteger;
+use super::{CRTInteger, OverflowInteger};
 use crate::gates::qap_gate;
 use crate::gates::qap_gate::QuantumCell::Existing;
 use crate::gates::range;
@@ -9,8 +9,7 @@ use halo2_proofs::{
     plonk::*,
 };
 
-// given OverflowInteger<F>'s `a` and `b` of the same shape,
-// returns whether `a == b`
+// given OverflowInteger<F> `a`, returns whether `a == 0`
 pub fn assign<F: FieldExt>(
     range: &range::RangeConfig<F>,
     layouter: &mut impl Layouter<F>,

@@ -9,6 +9,7 @@ use halo2_proofs::{
 use num_bigint::BigUint;
 
 pub mod fp;
+pub mod fp_overflow;
 pub mod fp12;
 pub mod fp2;
 // pub mod fp_crt_vec;
