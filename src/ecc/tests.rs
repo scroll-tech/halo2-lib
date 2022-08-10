@@ -1,5 +1,6 @@
 use std::marker::PhantomData;
 
+use crate::fields::fp::{FpChip, FpConfig};
 use crate::fields::fp2::Fp2Chip;
 
 use super::*;
@@ -9,46 +10,33 @@ use halo2_proofs::pairing::bn256::{G1Affine, G2Affine, G1, G2};
 use halo2_proofs::pairing::group::ff::PrimeField;
 use halo2_proofs::pairing::group::Group;
 use halo2_proofs::{
-    arithmetic::FieldExt, circuit::*, dev::MockProver, pairing::bn256::Fq as Fp,
-    pairing::bn256::Fr as Fn, plonk::*,
+    arithmetic::FieldExt, circuit::*, dev::MockProver, pairing::bn256::Fq, pairing::bn256::Fr,
+    plonk::*,
 };
-use halo2curves::bn254::{Fq, Fq2};
 use num_bigint::{BigInt, RandBigInt};
 
 #[derive(Default)]
 pub struct MyCircuit<F> {
     pub P: Option<G1Affine>,
     pub Q: Option<G1Affine>,
-    pub P_batch: Vec<Option<G1Affine>>,
-    pub x: Option<F>,
-    pub x_batch: Vec<Option<F>>,
-    pub batch_size: usize,
     pub _marker: PhantomData<F>,
 }
 
-pub const BATCH_SIZE: usize = 4;
+const NUM_ADVICE: usize = 2;
+const NUM_FIXED: usize = 2;
 
 impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
-    type Config = FpConfig<F>;
+    type Config = FpConfig<F, NUM_ADVICE, NUM_FIXED>;
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
-        let batch_size = BATCH_SIZE;
-        Self {
-            P: None,
-            Q: None,
-            P_batch: vec![None; batch_size],
-            x: None,
-            x_batch: vec![None; batch_size],
-            batch_size,
-            _marker: PhantomData,
-        }
+        Self { P: None, Q: None, _marker: PhantomData }
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         let value = meta.advice_column();
         let constant = meta.fixed_column();
-        FpConfig::configure(meta, value, constant, 22, 88, 3, modulus::<Fq>())
+        FpConfig::configure(meta, 22, 88, 3, modulus::<Fq>())
     }
 
     fn synthesize(
@@ -56,10 +44,9 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
-        let fp_chip = FpChip::construct(config.clone());
+        let mut fp_chip = FpChip::<F, NUM_ADVICE, NUM_FIXED, Fq>::construct(config, true);
         fp_chip.load_lookup_table(&mut layouter)?;
-        let range = fp_chip.config.range.clone();
-        let chip = EccChip::construct(fp_chip, range);
+        let mut chip = EccChip::construct(&mut fp_chip);
 
         let P_assigned = chip.load_private(
             &mut layouter,
@@ -75,49 +62,6 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
                 None => (None, None),
             },
         )?;
-        let mut pt = G1Affine::default();
-        let mut P_fixed = FixedEccPoint::from_g1(&pt, 3, 88);
-        if let Some(P_point) = &self.P {
-            pt = P_point.clone();
-            P_fixed = FixedEccPoint::<F, G1Affine>::from_g1(&P_point, 3, 88);
-        }
-
-        let x_assigned = layouter.assign_region(
-            || "input scalar x",
-            |mut region| {
-                region.assign_advice(
-                    || "assign x",
-                    config.value,
-                    0,
-                    || self.x.ok_or(Error::Synthesis),
-                )
-            },
-        )?;
-        let mut P_batch_assigned = Vec::with_capacity(self.batch_size);
-        let mut x_batch_assigned = Vec::with_capacity(self.batch_size);
-        for i in 0..self.batch_size {
-            let assigned = chip.load_private(
-                &mut layouter,
-                match self.P_batch[i] {
-                    Some(P) => (Some(P.x), Some(P.y)),
-                    None => (None, None),
-                },
-            )?;
-            P_batch_assigned.push(assigned);
-
-            let xb_assigned = layouter.assign_region(
-                || "input scalar x",
-                |mut region| {
-                    region.assign_advice(
-                        || format!("assign x_{}", i),
-                        config.value,
-                        0,
-                        || self.x_batch[i].clone().ok_or(Error::Synthesis),
-                    )
-                },
-            )?;
-            x_batch_assigned.push([xb_assigned]);
-        }
 
         /*
         // test fp mul
@@ -133,7 +77,6 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         }
         */
 
-        /*
         // test add_unequal
         {
             let sum = chip.add_unequal(
@@ -145,8 +88,8 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
             assert_eq!(sum.y.truncation.to_bigint(), sum.y.value);
             if self.P != None {
                 let actual_sum = G1Affine::from(self.P.unwrap() + self.Q.unwrap());
-                assert_eq!(bigint_to_fe::<Fp>(&sum.x.value.unwrap()), actual_sum.x);
-                assert_eq!(bigint_to_fe::<Fp>(&sum.y.value.unwrap()), actual_sum.y);
+                assert_eq!(bigint_to_fe::<Fq>(&sum.x.value.unwrap()), actual_sum.x);
+                assert_eq!(bigint_to_fe::<Fq>(&sum.y.value.unwrap()), actual_sum.y);
             }
             println!("add unequal witness OK");
         }
@@ -155,93 +98,24 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         {
             let doub = chip.double(&mut layouter.namespace(|| "double"), &P_assigned)?;
             if self.P != None {
-                let actual_doub = G1Affine::from(self.P.unwrap() * Fn::from(2));
-                assert_eq!(bigint_to_fe::<Fp>(&doub.x.value.unwrap()), actual_doub.x);
-                assert_eq!(bigint_to_fe::<Fp>(&doub.y.value.unwrap()), actual_doub.y);
+                let actual_doub = G1Affine::from(self.P.unwrap() * Fr::from(2));
+                assert_eq!(bigint_to_fe::<Fq>(&doub.x.value.unwrap()), actual_doub.x);
+                assert_eq!(bigint_to_fe::<Fq>(&doub.y.value.unwrap()), actual_doub.y);
             }
             println!("double witness OK");
         }
-        */
 
-        // test scalar mult
-        {
-            let scalar_mult = chip.scalar_mult(
-                &mut layouter.namespace(|| "scalar_mult"),
-                &P_assigned,
-                &[x_assigned],
-                F::from(3),
-                254,
-                4,
-            )?;
-            assert_eq!(scalar_mult.x.truncation.to_bigint(), scalar_mult.x.value);
-            assert_eq!(scalar_mult.y.truncation.to_bigint(), scalar_mult.y.value);
-            if self.P != None {
-                let actual = G1Affine::from(
-                    &self.P.unwrap()
-                        * Fn::from_repr_vartime(
-                            self.x.unwrap().to_repr().as_ref()[..32].try_into().unwrap(),
-                        )
-                        .unwrap(),
-                );
-                assert_eq!(actual.x, bigint_to_fe(&scalar_mult.x.value.unwrap()));
-                assert_eq!(actual.y, bigint_to_fe(&scalar_mult.y.value.unwrap()));
-                println!("scalar mult witness OK");
-            }
-        }
+        println!("Using {} advice columns and {} fixed columns", NUM_ADVICE, NUM_FIXED);
+        println!(
+            "maximum rows used by an advice column: {}",
+            chip.field_chip.range.gate().advice_rows.iter().max().unwrap()
+        );
+        // IMPORTANT: this assigns all constants to the fixed columns
+        // This is not optional.
+        let const_rows =
+            chip.field_chip.range.gate().assign_and_constrain_constants(&mut layouter)?;
+        println!("maximum rows used by a fixed column: {}", const_rows);
 
-        /*
-            // test fixed base scalar mult
-            {
-                let fixed_base_scalar_mult = chip.fixed_base_scalar_mult(
-                    &mut layouter.namespace(|| "fixed_base_scalar_mult"),
-                    &P_fixed,
-                    &x_assigned,
-                    F::from(3),
-                    254,
-                    4,
-                )?;
-        if let Some(xv) = &self.x {
-            println!("answer {:?}", G1Affine::from(pt * Fr::from_repr(
-            (*xv).to_repr().as_ref()[..32].try_into().unwrap()).unwrap()));
-            let xx = fixed_base_scalar_mult.x.value;
-            let yy = fixed_base_scalar_mult.y.value;
-            if let Some(xxx) = &xx {
-            if let Some(yyy) = &yy {
-                println!("result {:#01x} {:#01x}", xxx, yyy);
-            }
-            }
-        }
-            }
-         */
-
-        /*
-        // test multi scalar mult
-        {
-            let multi_scalar_mult = chip.multi_scalar_mult::<G1Affine, 1>(
-                &mut layouter.namespace(|| "multi_scalar_mult"),
-                &P_batch_assigned,
-                &x_batch_assigned,
-                F::from(3),
-                254,
-                4,
-            )?;
-            assert_eq!(multi_scalar_mult.x.truncation.to_bigint(), multi_scalar_mult.x.value);
-            assert_eq!(multi_scalar_mult.y.truncation.to_bigint(), multi_scalar_mult.y.value);
-            if self.P_batch[0] != None {
-                let mut msm = G1::identity();
-                for (P, x) in self.P_batch.iter().zip(self.x_batch.iter()) {
-                    msm = msm
-                        + P.as_ref().unwrap()
-                            * Fn::from_repr(
-                                x.as_ref().unwrap().to_repr().as_ref()[..32].try_into().unwrap(),
-                            )
-                            .unwrap();
-                }
-                let actual = G1Affine::from(msm);
-                assert_eq!(actual.x, bigint_to_fe(&multi_scalar_mult.x.value.unwrap()));
-                assert_eq!(actual.y, bigint_to_fe(&multi_scalar_mult.y.value.unwrap()));
-            }
-        } */
         Ok(())
     }
 }
@@ -252,19 +126,10 @@ fn test_ecc() {
     let k = 23;
     let mut rng = rand::thread_rng();
 
-    let batch_size = BATCH_SIZE;
-
     let P = Some(G1Affine::random(&mut rng));
     let Q = Some(G1Affine::random(&mut rng));
-    let x = Some(Fn::random(&mut rng));
-    let mut P_batch = Vec::with_capacity(batch_size);
-    let mut x_batch = Vec::with_capacity(batch_size);
-    for _ in 0..batch_size {
-        P_batch.push(Some(G1Affine::random(&mut rng)));
-        x_batch.push(Some(Fn::random(&mut rng)));
-    }
 
-    let circuit = MyCircuit::<Fn> { P, Q, P_batch, x, x_batch, batch_size, _marker: PhantomData };
+    let circuit = MyCircuit::<Fr> { P, Q, _marker: PhantomData };
 
     let prover = MockProver::run(k, &circuit, vec![]).unwrap();
     //prover.assert_satisfied();
@@ -282,20 +147,12 @@ fn plot_ecc() {
     root.fill(&WHITE).unwrap();
     let root = root.titled("Ecc Layout", ("sans-serif", 60)).unwrap();
 
-    let batch_size = BATCH_SIZE;
-    let circuit = MyCircuit::<Fn> {
-        P: None,
-        Q: None,
-        P_batch: vec![None; batch_size],
-        x: None,
-        x_batch: vec![None; batch_size],
-        batch_size,
-        _marker: PhantomData,
-    };
+    let circuit = MyCircuit::<Fr>::default();
 
     halo2_proofs::dev::CircuitLayout::default().render(k, &circuit, &root).unwrap();
 }
 
+/*
 #[derive(Default)]
 pub struct G2Circuit<F> {
     P: Option<G2Affine>,
@@ -308,7 +165,7 @@ pub struct G2Circuit<F> {
 }
 
 impl<F: FieldExt> Circuit<F> for G2Circuit<F> {
-    type Config = FpConfig<F>;
+    type Config = FpConfig<F, NUM_ADVICE, NUM_FIXED>;
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
@@ -327,7 +184,7 @@ impl<F: FieldExt> Circuit<F> for G2Circuit<F> {
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         let value = meta.advice_column();
         let constant = meta.fixed_column();
-        FpConfig::configure(meta, value, constant, 22, 88, 3, modulus::<Fq>())
+        FpConfig::configure(meta, 22, 88, 3, modulus::<Fq>())
     }
 
     fn synthesize(
@@ -335,7 +192,7 @@ impl<F: FieldExt> Circuit<F> for G2Circuit<F> {
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
-        let fp2_chip = Fp2Chip::construct(config.clone());
+        let fp2_chip = Fp2Chip::construct(config, true);
         config.range.load_lookup_table(&mut layouter)?;
         let range = config.range.clone();
         let chip = EccChip::construct(fp2_chip, range);
@@ -459,3 +316,4 @@ fn plot_ecc_g2() {
 
     halo2_proofs::dev::CircuitLayout::default().render(k, &circuit, &root).unwrap();
 }
+*/

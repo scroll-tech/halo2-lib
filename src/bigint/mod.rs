@@ -1,7 +1,9 @@
 use std::io::ErrorKind;
 
-use crate::gates::qap_gate;
-use crate::gates::qap_gate::QuantumCell::{Constant, Existing};
+use crate::gates::{
+    GateInstructions,
+    QuantumCell::{self, Constant, Existing},
+};
 use crate::utils::*;
 use halo2_proofs::{
     arithmetic::{Field, FieldExt},
@@ -41,25 +43,17 @@ impl<F: FieldExt> OverflowInteger<F> {
         max_limb_size: BigUint,
         limb_bits: usize,
     ) -> Self {
-        Self {
-            limbs,
-            max_limb_size,
-            limb_bits,
-        }
+        Self { limbs, max_limb_size, limb_bits }
     }
 
     pub fn to_bigint(&self) -> Option<BigInt> {
-        self.limbs
-            .iter()
-            .rev()
-            .fold(Some(BigInt::zero()), |acc, acell| {
-                acc.zip(acell.value())
-                    .map(|(acc, x)| (acc << self.limb_bits) + fe_to_bigint(x))
-            })
+        self.limbs.iter().rev().fold(Some(BigInt::zero()), |acc, acell| {
+            acc.zip(acell.value()).map(|(acc, x)| (acc << self.limb_bits) + fe_to_bigint(x))
+        })
     }
 
     pub fn evaluate(
-        config: &qap_gate::Config<F>,
+        gate: &mut impl GateInstructions<F>,
         layouter: &mut impl Layouter<F>,
         limbs: &Vec<AssignedCell<F, F>>,
         limb_bits: usize,
@@ -74,11 +68,8 @@ impl<F: FieldExt> OverflowInteger<F> {
             running_pow = running_pow * &limb_base;
         }
         // Constrain `out_native = sum_i out_assigned[i] * 2^{n*i}` in `F`
-        let (_, _, native) = config.inner_product(
-            layouter,
-            &limbs.iter().map(|a| Existing(a)).collect(),
-            &pows,
-        )?;
+        let (_, _, native) =
+            gate.inner_product(layouter, &limbs.iter().map(|a| Existing(a)).collect(), &pows)?;
         Ok(native)
     }
 }
@@ -92,32 +83,24 @@ pub struct FixedOverflowInteger<F: FieldExt> {
 
 impl<F: FieldExt> FixedOverflowInteger<F> {
     pub fn construct(limbs: Vec<F>, max_limb_size: BigUint, limb_bits: usize) -> Self {
-        Self {
-            limbs,
-            max_limb_size,
-            limb_bits,
-        }
+        Self { limbs, max_limb_size, limb_bits }
     }
 
     pub fn from_native(value: BigInt, num_limbs: usize, limb_bits: usize) -> Self {
         let limbs = decompose_bigint(&value, num_limbs, limb_bits);
-        Self {
-            limbs,
-            max_limb_size: BigUint::from(1u64) << limb_bits,
-            limb_bits,
-        }
+        Self { limbs, max_limb_size: BigUint::from(1u64) << limb_bits, limb_bits }
     }
 
     pub fn assign(
         &self,
-        config: &qap_gate::Config<F>,
+        gate: &mut impl GateInstructions<F>,
         layouter: &mut impl Layouter<F>,
     ) -> Result<OverflowInteger<F>, Error> {
-        let assigned_limbs = layouter.assign_region(
+        let (assigned_limbs, _) = layouter.assign_region(
             || "assign limbs",
             |mut region| {
                 let limb_cells = self.limbs.iter().map(|x| Constant(*x)).collect();
-                let limb_cells_assigned = config.assign_region(limb_cells, 0, &mut region)?;
+                let limb_cells_assigned = gate.assign_region(limb_cells, 0, &mut region)?;
                 Ok(limb_cells_assigned)
             },
         )?;
@@ -153,12 +136,7 @@ impl<F: FieldExt> CRTInteger<F> {
         value: Option<BigInt>,
         max_size: BigUint,
     ) -> Self {
-        Self {
-            truncation,
-            native,
-            value,
-            max_size,
-        }
+        Self { truncation, native, value, max_size }
     }
 }
 
@@ -188,12 +166,7 @@ impl<F: FieldExt> FixedCRTInteger<F> {
         value: BigInt,
         max_size: BigUint,
     ) -> Self {
-        Self {
-            truncation,
-            native,
-            value,
-            max_size,
-        }
+        Self { truncation, native, value, max_size }
     }
 
     pub fn from_native(value: BigInt, num_limbs: usize, limb_bits: usize) -> Self {
@@ -208,15 +181,16 @@ impl<F: FieldExt> FixedCRTInteger<F> {
 
     pub fn assign(
         &self,
-        config: &qap_gate::Config<F>,
+        gate: &mut impl GateInstructions<F>,
         layouter: &mut impl Layouter<F>,
     ) -> Result<CRTInteger<F>, Error> {
-        let assigned_truncation = self.truncation.assign(config, layouter)?;
+        let assigned_truncation = self.truncation.assign(gate, layouter)?;
         let assigned_native = layouter.assign_region(
             || "assign native",
             |mut region| {
                 let native_cells = vec![Constant(self.native)];
-                let native_cells_assigned = config.assign_region(native_cells, 0, &mut region)?;
+                let (native_cells_assigned, _) =
+                    gate.assign_region(native_cells, 0, &mut region)?;
                 Ok(native_cells_assigned[0].clone())
             },
         )?;

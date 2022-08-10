@@ -3,13 +3,14 @@ use num_bigint::{BigInt, BigUint};
 use std::cmp;
 
 use super::{CRTInteger, OverflowInteger};
-use crate::gates::qap_gate;
-use crate::gates::qap_gate::QuantumCell;
-use crate::gates::qap_gate::QuantumCell::*;
+use crate::gates::{
+    GateInstructions,
+    QuantumCell::{self, Constant, Existing, Witness},
+};
 use crate::utils::fe_to_bigint;
 
 pub fn assign<F: FieldExt>(
-    gate: &qap_gate::Config<F>,
+    gate: &mut impl GateInstructions<F>,
     layouter: &mut impl Layouter<F>,
     a: &Vec<OverflowInteger<F>>,
     coeffs: &Vec<AssignedCell<F, F>>,
@@ -29,20 +30,15 @@ pub fn assign<F: FieldExt>(
         out_limbs.push(limb_res.2.clone());
     }
 
-    let max_limb_size = a.iter().fold(BigUint::from(0u64), |acc, x| {
-        cmp::max(acc, x.max_limb_size.clone())
-    });
+    let max_limb_size =
+        a.iter().fold(BigUint::from(0u64), |acc, x| cmp::max(acc, x.max_limb_size.clone()));
 
-    Ok(OverflowInteger::construct(
-        out_limbs,
-        max_limb_size,
-        a[0].limb_bits,
-    ))
+    Ok(OverflowInteger::construct(out_limbs, max_limb_size, a[0].limb_bits))
 }
 
 // only use case is when coeffs has only a single 1, rest are 0
 pub fn crt<F: FieldExt>(
-    gate: &qap_gate::Config<F>,
+    gate: &mut impl GateInstructions<F>,
     layouter: &mut impl Layouter<F>,
     a: &Vec<CRTInteger<F>>,
     coeffs: &Vec<AssignedCell<F, F>>,
@@ -62,27 +58,18 @@ pub fn crt<F: FieldExt>(
         out_limbs.push(limb_res);
     }
 
-    let max_limb_size = a.iter().fold(BigUint::from(0u64), |acc, x| {
-        cmp::max(acc, x.truncation.max_limb_size.clone())
-    });
+    let max_limb_size = a
+        .iter()
+        .fold(BigUint::from(0u64), |acc, x| cmp::max(acc, x.truncation.max_limb_size.clone()));
 
     let out_trunc = OverflowInteger::construct(out_limbs, max_limb_size, a[0].truncation.limb_bits);
     let a_native = a.iter().map(|x| Existing(&x.native)).collect();
     let (_, _, out_native) = gate.inner_product(layouter, &a_native, &coeffs_quantum)?;
-    let out_val = a
-        .iter()
-        .zip(coeffs.iter())
-        .fold(Some(BigInt::from(0)), |acc, (x, y)| {
-            acc.zip(x.value.as_ref())
-                .zip(y.value())
-                .map(|((a, x), y)| a + x * fe_to_bigint(y))
-        });
-
-    let max_size = a.iter().fold(BigUint::from(0u64), |acc, x| {
-        cmp::max(acc, x.max_size.clone())
+    let out_val = a.iter().zip(coeffs.iter()).fold(Some(BigInt::from(0)), |acc, (x, y)| {
+        acc.zip(x.value.as_ref()).zip(y.value()).map(|((a, x), y)| a + x * fe_to_bigint(y))
     });
 
-    Ok(CRTInteger::construct(
-        out_trunc, out_native, out_val, max_size,
-    ))
+    let max_size = a.iter().fold(BigUint::from(0u64), |acc, x| cmp::max(acc, x.max_size.clone()));
+
+    Ok(CRTInteger::construct(out_trunc, out_native, out_val, max_size))
 }

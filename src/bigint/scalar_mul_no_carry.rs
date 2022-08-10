@@ -3,14 +3,15 @@ use num_bigint::BigUint;
 use num_traits::Signed;
 
 use super::{CRTInteger, OverflowInteger};
-use crate::gates::qap_gate;
-use crate::gates::qap_gate::QuantumCell;
-use crate::gates::qap_gate::QuantumCell::*;
+use crate::gates::{
+    GateInstructions,
+    QuantumCell::{self, Constant, Existing, Witness},
+};
 use crate::utils::modulus as native_modulus;
 use crate::utils::*;
 
 pub fn assign<F: FieldExt>(
-    gate: &qap_gate::Config<F>,
+    gate: &mut impl GateInstructions<F>,
     layouter: &mut impl Layouter<F>,
     a: &OverflowInteger<F>,
     b: F,
@@ -23,15 +24,11 @@ pub fn assign<F: FieldExt>(
         let out_cell = gate.mul(layouter, &Existing(&a.limbs[i]), &Constant(b))?;
         out_limbs.push(out_cell);
     }
-    Ok(OverflowInteger::construct(
-        out_limbs,
-        &a.max_limb_size * fe_to_biguint(&b),
-        a.limb_bits,
-    ))
+    Ok(OverflowInteger::construct(out_limbs, &a.max_limb_size * fe_to_biguint(&b), a.limb_bits))
 }
 
 pub fn crt<F: FieldExt>(
-    gate: &qap_gate::Config<F>,
+    gate: &mut impl GateInstructions<F>,
     layouter: &mut impl Layouter<F>,
     a: &CRTInteger<F>,
     b: F,

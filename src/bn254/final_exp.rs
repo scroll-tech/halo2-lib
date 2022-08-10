@@ -20,15 +20,13 @@ use crate::utils::{
 use crate::{
     ecc::{EccChip, EccPoint},
     fields::{fp::FpConfig, FieldChip, FqPoint},
-    gates::{qap_gate, range},
 };
 
-impl<F: FieldExt> Fp12Chip<F> {
+impl<'a, F: FieldExt> Fp12Chip<'a, F> {
     // computes a ** (p ** power)
     // only works for p = 3 (mod 4) and p = 1 (mod 6)
     pub fn frobenius_map(
-        &self,
-        fp2_chip: &Fp2Chip<F>,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
         power: usize,
@@ -39,6 +37,7 @@ impl<F: FieldExt> Fp12Chip<F> {
         let pow = power % 12;
         let mut out_fp2 = Vec::with_capacity(6);
 
+        let mut fp2_chip = Fp2Chip::construct(self.fp_chip);
         for i in 0..6 {
             let frob_coeff = FROBENIUS_COEFF_FQ12_C1[pow].pow_vartime(&[i as u64]);
             // possible optimization (not implemented): load `frob_coeff` as we multiply instead of loading first
@@ -53,13 +52,17 @@ impl<F: FieldExt> Fp12Chip<F> {
             if frob_coeff == Fq2::one() {
                 out_fp2.push(a_fp2);
             } else if frob_coeff.c1 == Fq::zero() {
-                let frob_fixed = self
+                let frob_fixed = fp2_chip
                     .fp_chip
                     .load_constant(layouter, BigInt::from(fe_to_biguint(&frob_coeff.c0)))?;
-                let out_nocarry = fp2_chip.fp_mul_no_carry(layouter, &a_fp2, &frob_fixed)?;
-                out_fp2.push(
-                    fp2_chip.carry_mod(layouter, &out_nocarry).expect("carry mod should not fail"),
-                );
+                {
+                    let out_nocarry = fp2_chip.fp_mul_no_carry(layouter, &a_fp2, &frob_fixed)?;
+                    out_fp2.push(
+                        fp2_chip
+                            .carry_mod(layouter, &out_nocarry)
+                            .expect("carry mod should not fail"),
+                    );
+                }
             } else {
                 let frob_fixed = fp2_chip.load_constant(layouter, frob_coeff)?;
                 out_fp2.push(
@@ -79,7 +82,7 @@ impl<F: FieldExt> Fp12Chip<F> {
 
     // exp is in little-endian
     pub fn pow<S: AsRef<[u64]>>(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
         exp: S,
@@ -107,8 +110,7 @@ impl<F: FieldExt> Fp12Chip<F> {
     #[allow(non_snake_case)]
     // use equation for (p^4 - p^2 + 1)/r in Section 5 of https://eprint.iacr.org/2008/490.pdf for BN curves
     pub fn hard_part_BN(
-        &self,
-        fp2_chip: &Fp2Chip<F>,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         m: &FqPoint<F>,
     ) -> Result<FqPoint<F>, Error> {
@@ -122,17 +124,17 @@ impl<F: FieldExt> Fp12Chip<F> {
         let mx3 = self.pow(layouter, &mx2, &[BN_X])?;
 
         // m^p
-        let mp = self.frobenius_map(fp2_chip, layouter, m, 1)?;
+        let mp = self.frobenius_map(layouter, m, 1)?;
         // m^{p^2}
-        let mp2 = self.frobenius_map(fp2_chip, layouter, m, 2)?;
+        let mp2 = self.frobenius_map(layouter, m, 2)?;
         // m^{p^3}
-        let mp3 = self.frobenius_map(fp2_chip, layouter, m, 3)?;
+        let mp3 = self.frobenius_map(layouter, m, 3)?;
         // (m^x)^p
-        let mxp = self.frobenius_map(fp2_chip, layouter, &mx, 1)?;
+        let mxp = self.frobenius_map(layouter, &mx, 1)?;
         // (m^{x^2})^p
-        let mx2p = self.frobenius_map(fp2_chip, layouter, &mx2, 1)?;
+        let mx2p = self.frobenius_map(layouter, &mx2, 1)?;
         // (m^{x^3})^p
-        let mx3p = self.frobenius_map(fp2_chip, layouter, &mx3, 1)?;
+        let mx3p = self.frobenius_map(layouter, &mx3, 1)?;
 
         // y0 = m^p * m^{p^2} * m^{p^3}
         let mp2_mp3 = self.mul(layouter, &mp2, &mp3)?;
@@ -140,7 +142,7 @@ impl<F: FieldExt> Fp12Chip<F> {
         // y1 = 1/m,  inverse = frob(6) = conjugation in cyclotomic subgroup
         let y1 = self.conjugate(layouter, m)?;
         // y2 = (m^{x^2})^{p^2}
-        let y2 = self.frobenius_map(fp2_chip, layouter, &mx2, 2)?;
+        let y2 = self.frobenius_map(layouter, &mx2, 2)?;
         // y3 = 1/mxp
         let y3 = self.conjugate(layouter, &mxp)?;
         // y4 = 1/(mx * mx2p)
@@ -173,28 +175,26 @@ impl<F: FieldExt> Fp12Chip<F> {
 
     // out = in^{ (q^6 - 1)*(q^2 + 1) }
     pub fn easy_part(
-        &self,
-        fp2_chip: &Fp2Chip<F>,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
     ) -> Result<FqPoint<F>, Error> {
         // a^{q^6} = conjugate of a
         let f1 = self.conjugate(layouter, a)?;
         let f2 = self.divide(layouter, &f1, a)?;
-        let f3 = self.frobenius_map(fp2_chip, layouter, &f2, 2)?;
+        let f3 = self.frobenius_map(layouter, &f2, 2)?;
         let f = self.mul(layouter, &f3, &f2)?;
         Ok(f)
     }
 
     // out = in^{(q^12 - 1)/r}
     pub fn final_exp(
-        &self,
-        fp2_chip: &Fp2Chip<F>,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
     ) -> Result<FqPoint<F>, Error> {
-        let f0 = self.easy_part(fp2_chip, layouter, a)?;
-        let f = self.hard_part_BN(fp2_chip, layouter, &f0)?;
+        let f0 = self.easy_part(layouter, a)?;
+        let f = self.hard_part_BN(layouter, &f0)?;
         Ok(f)
     }
 }

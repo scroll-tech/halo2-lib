@@ -1,7 +1,5 @@
 use super::OverflowInteger;
-use crate::gates::qap_gate;
-use crate::gates::qap_gate::QuantumCell::Existing;
-use crate::gates::range;
+use crate::gates::{GateInstructions, QuantumCell::Existing, RangeInstructions};
 use crate::utils::*;
 use halo2_proofs::{
     arithmetic::{Field, FieldExt},
@@ -12,7 +10,7 @@ use halo2_proofs::{
 // given OverflowInteger<F>'s `a` and `b` of the same shape,
 // returns whether `a == b`
 pub fn assign<F: FieldExt>(
-    range: &range::RangeConfig<F>,
+    range: &mut impl RangeInstructions<F>,
     layouter: &mut impl Layouter<F>,
     a: &OverflowInteger<F>,
 ) -> Result<AssignedCell<F, F>, Error> {
@@ -23,9 +21,7 @@ pub fn assign<F: FieldExt>(
     for idx in 0..k {
         let limb_is_zero = range.is_zero(layouter, &a.limbs[idx])?;
         if let Some(prev) = partial {
-            let new = range
-                .qap_config
-                .and(layouter, &Existing(&limb_is_zero), &Existing(&prev))?;
+            let new = range.gate().and(layouter, &Existing(&limb_is_zero), &Existing(&prev))?;
             partial = Some(new);
         } else {
             partial = Some(limb_is_zero);

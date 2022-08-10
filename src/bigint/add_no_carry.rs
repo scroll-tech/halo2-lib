@@ -2,11 +2,13 @@ use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
 use std::cmp;
 
 use super::{CRTInteger, OverflowInteger};
-use crate::gates::qap_gate;
-use crate::gates::qap_gate::QuantumCell::{Constant, Existing};
+use crate::gates::{
+    GateInstructions,
+    QuantumCell::{Constant, Existing},
+};
 
 pub fn assign<F: FieldExt>(
-    gate: &qap_gate::Config<F>,
+    gate: &mut impl GateInstructions<F>,
     layouter: &mut impl Layouter<F>,
     a: &OverflowInteger<F>,
     b: &OverflowInteger<F>,
@@ -38,7 +40,7 @@ pub fn assign<F: FieldExt>(
 }
 
 pub fn crt<F: FieldExt>(
-    gate: &qap_gate::Config<F>,
+    gate: &mut impl GateInstructions<F>,
     layouter: &mut impl Layouter<F>,
     a: &CRTInteger<F>,
     b: &CRTInteger<F>,
@@ -47,10 +49,5 @@ pub fn crt<F: FieldExt>(
     let out_trunc = assign(gate, layouter, &a.truncation, &b.truncation)?;
     let out_native = gate.add(layouter, &Existing(&a.native), &Existing(&b.native))?;
     let out_val = a.value.as_ref().zip(b.value.as_ref()).map(|(a, b)| a + b);
-    Ok(CRTInteger::construct(
-        out_trunc,
-        out_native,
-        out_val,
-        &a.max_size + &b.max_size,
-    ))
+    Ok(CRTInteger::construct(out_trunc, out_native, out_val, &a.max_size + &b.max_size))
 }

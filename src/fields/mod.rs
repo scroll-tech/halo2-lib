@@ -1,6 +1,7 @@
 use std::fmt::Debug;
 
-use crate::bigint::CRTInteger;
+use crate::{bigint::CRTInteger, gates::RangeInstructions};
+use ff::PrimeField;
 use halo2_proofs::{
     arithmetic::{BaseExt, Field, FieldExt},
     circuit::{AssignedCell, Layouter},
@@ -11,7 +12,6 @@ use num_bigint::BigUint;
 pub mod fp;
 pub mod fp12;
 pub mod fp2;
-// pub mod fp_crt_vec;
 
 #[derive(Clone, Debug)]
 pub struct FqPoint<F: FieldExt> {
@@ -31,77 +31,87 @@ impl<F: FieldExt> FqPoint<F> {
     }
 }
 
-// Common functionality for finite field chips
+/// Common functionality for finite field chips
 pub trait FieldChip<F: FieldExt> {
+    type ConstantType: Debug;
     type WitnessType: Debug;
     type FieldPoint: Clone + Debug;
     // a type implementing `Field` trait to help with witness generation (for example with inverse)
     type FieldType: Field;
+    type RangeChip: RangeInstructions<F>;
+
+    fn range(&mut self) -> &mut Self::RangeChip;
 
     fn get_assigned_value(x: &Self::FieldPoint) -> Option<Self::FieldType>;
 
     fn fe_to_witness(x: &Option<Self::FieldType>) -> Self::WitnessType;
 
     fn load_private(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         coeffs: Self::WitnessType,
     ) -> Result<Self::FieldPoint, Error>;
 
+    fn load_constant(
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        coeffs: Self::ConstantType,
+    ) -> Result<Self::FieldPoint, Error>;
+
     fn add_no_carry(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &Self::FieldPoint,
         b: &Self::FieldPoint,
     ) -> Result<Self::FieldPoint, Error>;
 
     fn sub_no_carry(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &Self::FieldPoint,
         b: &Self::FieldPoint,
     ) -> Result<Self::FieldPoint, Error>;
 
     fn negate(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &Self::FieldPoint,
     ) -> Result<Self::FieldPoint, Error>;
 
     fn scalar_mul_no_carry(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &Self::FieldPoint,
         b: F,
     ) -> Result<Self::FieldPoint, Error>;
 
     fn mul_no_carry(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &Self::FieldPoint,
         b: &Self::FieldPoint,
     ) -> Result<Self::FieldPoint, Error>;
 
     fn check_carry_mod_to_zero(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &Self::FieldPoint,
     ) -> Result<(), Error>;
 
     fn carry_mod(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &Self::FieldPoint,
     ) -> Result<Self::FieldPoint, Error>;
 
     fn range_check(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &Self::FieldPoint,
     ) -> Result<(), Error>;
 
     fn mul(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &Self::FieldPoint,
         b: &Self::FieldPoint,
@@ -111,18 +121,15 @@ pub trait FieldChip<F: FieldExt> {
     }
 
     fn divide(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &Self::FieldPoint,
         b: &Self::FieldPoint,
     ) -> Result<Self::FieldPoint, Error> {
         let a_val = Self::get_assigned_value(a);
         let b_val = Self::get_assigned_value(b);
-        let b_inv: Option<Self::FieldType> = if let Some(bv) = b_val {
-            bv.invert().into()
-        } else {
-            None
-        };
+        let b_inv: Option<Self::FieldType> =
+            if let Some(bv) = b_val { bv.invert().into() } else { None };
         let quot_val = a_val.zip(b_inv).map(|(a, bi)| a * bi);
 
         let quot = self.load_private(layouter, Self::fe_to_witness(&quot_val))?;
@@ -139,18 +146,15 @@ pub trait FieldChip<F: FieldExt> {
     // constrain and output -a / b
     // this is usually cheaper constraint-wise than computing -a and then (-a) / b separately
     fn neg_divide(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &Self::FieldPoint,
         b: &Self::FieldPoint,
     ) -> Result<Self::FieldPoint, Error> {
         let a_val = Self::get_assigned_value(a);
         let b_val = Self::get_assigned_value(b);
-        let b_inv: Option<Self::FieldType> = if let Some(bv) = b_val {
-            bv.invert().into()
-        } else {
-            None
-        };
+        let b_inv: Option<Self::FieldType> =
+            if let Some(bv) = b_val { bv.invert().into() } else { None };
         let quot_val = a_val.zip(b_inv).map(|(a, b)| -a * b);
 
         let quot = self.load_private(layouter, Self::fe_to_witness(&quot_val))?;
@@ -169,7 +173,7 @@ pub trait Selectable<F: FieldExt> {
     type Point;
 
     fn select(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &Self::Point,
         b: &Self::Point,
@@ -177,9 +181,24 @@ pub trait Selectable<F: FieldExt> {
     ) -> Result<Self::Point, Error>;
 
     fn inner_product(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &Vec<Self::Point>,
         coeffs: &Vec<AssignedCell<F, F>>,
     ) -> Result<Self::Point, Error>;
+}
+
+// Common functionality for prime field chips
+pub trait PrimeFieldChip<F: FieldExt>: FieldChip<F> {
+    type Config;
+
+    fn construct(config: Self::Config, using_simple_floor_planner: bool) -> Self;
+}
+
+// helper trait so we can actually construct and read the Fp2 struct
+// needs to be implemented for Fp2 struct for use cases below
+pub trait FieldExtConstructor<Fp: PrimeField, const DEGREE: usize> {
+    fn new(c: [Fp; DEGREE]) -> Self;
+
+    fn coeffs(&self) -> Vec<Fp>;
 }
