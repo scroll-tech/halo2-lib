@@ -302,6 +302,14 @@ impl<F: FieldExt> Config<F> {
             },
         )
     }
+    
+    pub fn not(
+        &self,
+        layouter: &mut impl Layouter<F>,
+        a: &QuantumCell<F>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        self.sub(layouter, &QuantumCell::Constant(F::from(1)), a)
+    }
 
     // assumes sel is boolean
     // | a - b | 1 | b | a |

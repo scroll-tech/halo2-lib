@@ -83,7 +83,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
             let scalar_mult = chip.scalar_mult(
                 &mut layouter.namespace(|| "scalar_mult"),
                 &P_assigned,
-                &[scalar_cells[0].clone(), scalar_cells[1].clone()],
+                &vec![scalar_cells[0].clone(), scalar_cells[1].clone()],
                 F::from(SECP_B),
                 128,
                 4,
@@ -103,7 +103,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
             let fixed_base_scalar_mult = chip.fixed_base_scalar_mult(
                 &mut layouter.namespace(|| "fixed_base_scalar_mult"),
                 &P_fixed,
-                &[scalar_cells[0].clone(), scalar_cells[1].clone()],
+                &vec![scalar_cells[0].clone(), scalar_cells[1].clone()],
                 F::from(SECP_B),
                 128,
                 4,

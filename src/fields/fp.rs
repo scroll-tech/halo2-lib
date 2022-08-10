@@ -12,7 +12,7 @@ use num_traits::Num;
 use super::{FieldChip, Selectable};
 use crate::{
     bigint::{
-        add_no_carry, big_is_equal, big_is_zero, carry_mod, check_carry_mod_to_zero, inner_product, mul_no_carry,
+        add_no_carry, big_is_equal, big_is_zero, big_less_than, carry_mod, check_carry_mod_to_zero, inner_product, mul_no_carry,
         scalar_mul_no_carry, select, sub, sub_no_carry, CRTInteger, FixedCRTInteger,
         OverflowInteger,
     },
@@ -293,7 +293,17 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpChip<F, Fp> {
 	layouter: &mut impl Layouter<F>,
 	a: &CRTInteger<F>,
     ) -> Result<AssignedCell<F, F>, Error> {
-	big_is_zero::crt(&self.config.range, layouter, a)
+	let carry = self.carry_mod(layouter, a)?;
+	let is_carry_zero = big_is_zero::crt(&self.config.range, layouter, &carry)?;
+
+	// underflow != 0 iff carry < p
+	let p = self.load_constant(layouter, BigInt::from(self.config.p.clone()))?;
+	let (diff, underflow) = sub::crt(&self.config.range, layouter, &carry, &p)?;
+	let is_underflow_zero = self.config.range.is_zero(layouter, &underflow)?;
+	let range_check = self.config.gate.not(layouter, &Existing(&is_underflow_zero))?;
+
+	let res = self.config.gate.and(layouter, &Existing(&is_carry_zero), &Existing(&range_check))?;
+	Ok(res)	
     }
 
     fn is_equal(
@@ -302,7 +312,18 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpChip<F, Fp> {
 	a: &CRTInteger<F>,
 	b: &CRTInteger<F>,
     ) -> Result<AssignedCell<F, F>, Error> {
-	big_is_equal::crt(&self.config.range, layouter, a, b)
+	let diff = self.sub_no_carry(layouter, a, b)?;
+	let carry_res = self.carry_mod(layouter, &diff)?;
+	let is_diff_zero = big_is_zero::crt(&self.config.range, layouter, &carry_res)?;
+	
+	// underflow != 0 iff res < p
+	let p = self.load_constant(layouter, BigInt::from(self.config.p.clone()))?;
+	let (diff, underflow) = sub::crt(&self.config.range, layouter, &carry_res, &p)?;
+	let is_underflow_zero = self.config.range.is_zero(layouter, &underflow)?;
+	let range_check = self.config.gate.not(layouter, &Existing(&is_underflow_zero))?;
+
+	let res = self.config.gate.and(layouter, &Existing(&is_diff_zero), &Existing(&range_check))?;
+	Ok(res)
     }
 }
 

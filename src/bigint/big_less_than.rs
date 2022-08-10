@@ -1,4 +1,4 @@
-use super::OverflowInteger;
+use super::{CRTInteger, OverflowInteger};
 use crate::gates::qap_gate;
 use crate::gates::qap_gate::QuantumCell::Existing;
 use crate::gates::range;

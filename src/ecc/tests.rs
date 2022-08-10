@@ -1,3 +1,4 @@
+#![allow(unused_assignments, unused_imports, unused_variables)]
 use std::marker::PhantomData;
 
 use crate::fields::fp2::Fp2Chip;
@@ -163,12 +164,13 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         }
         */
 
+	/*
         // test scalar mult
         {
             let scalar_mult = chip.scalar_mult(
                 &mut layouter.namespace(|| "scalar_mult"),
                 &P_assigned,
-                &[x_assigned],
+                &vec![x_assigned],
                 F::from(3),
                 254,
                 4,
@@ -188,6 +190,12 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
                 println!("scalar mult witness OK");
             }
         }
+	 */
+
+	// test ECDSA
+	{
+
+	}
 
         /*
             // test fixed base scalar mult

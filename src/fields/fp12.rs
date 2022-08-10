@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use ff::PrimeField;
 use halo2_proofs::{
     arithmetic::{Field, FieldExt},
-    circuit::Layouter,
+    circuit::{AssignedCell, Layouter},
     plonk::Error,
 };
 use num_bigint::{BigInt, BigUint};
@@ -13,6 +13,7 @@ use crate::fields::fp::{FpChip, FpConfig};
 use crate::fields::fp2::Fp2Chip;
 use crate::fields::FqPoint;
 use crate::gates::qap_gate;
+use crate::gates::qap_gate::QuantumCell::{Constant, Existing, Witness};
 use crate::gates::range;
 use crate::utils::decompose_bigint_option;
 use crate::utils::{bigint_to_fe, fe_to_biguint};
@@ -212,7 +213,7 @@ impl<F: FieldExt, Fp: PrimeField, Fp12: Field + FieldExtConstructor<Fp, 12>> Fie
         let mut a1b1_coeffs = Vec::with_capacity(11);
         for i in 0..6 {
             for j in 0..6 {
-                let mut coeff00 =
+                let coeff00 =
                     self.fp_chip.mul_no_carry(layouter, &a.coeffs[i], &b.coeffs[j])?;
                 let coeff01 =
                     self.fp_chip.mul_no_carry(layouter, &a.coeffs[i], &b.coeffs[j + 6])?;
@@ -325,7 +326,7 @@ impl<F: FieldExt, Fp: PrimeField, Fp12: Field + FieldExtConstructor<Fp, 12>> Fie
         Ok(())
     }
 
-        fn is_zero(
+    fn is_zero(
 	&self,
 	layouter: &mut impl Layouter<F>,
 	a: &FqPoint<F>,
@@ -335,7 +336,7 @@ impl<F: FieldExt, Fp: PrimeField, Fp12: Field + FieldExtConstructor<Fp, 12>> Fie
 	    let coeff = self.fp_chip.is_zero(layouter, a_coeff)?;
 	    if let Some(p) = prev {
 		let new = self.fp_chip.config.range
-		    .qap_config.and(layouter, &Existing(&coeff), &Existing(&prev))?;
+		    .qap_config.and(layouter, &Existing(&coeff), &Existing(&p))?;
 		prev = Some(new);
 	    } else {
 		prev = Some(coeff);
@@ -351,11 +352,11 @@ impl<F: FieldExt, Fp: PrimeField, Fp12: Field + FieldExtConstructor<Fp, 12>> Fie
 	b: &FqPoint<F>,
     ) -> Result<AssignedCell<F, F>, Error> {
 	let mut prev = None;
-	for (a_coeff, b_coeff) in &a.coeffs.zip(b.coeffs) {
-	    let coeff = self.fp_chip.is_equal(layouter, a_coeff, b_coeff)?;
+	for (a_coeff, b_coeff) in a.coeffs.iter().zip(b.coeffs.clone()) {
+	    let coeff = self.fp_chip.is_equal(layouter, a_coeff, &b_coeff)?;
 	    if let Some(p) = prev {
 		let new = self.fp_chip.config.range
-		    .qap_config.and(layouter, &Existing(&coeff), &Existing(&prev))?;
+		    .qap_config.and(layouter, &Existing(&coeff), &Existing(&p))?;
 		prev = Some(new);
 	    } else {
 		prev = Some(coeff);
