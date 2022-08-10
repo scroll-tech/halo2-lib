@@ -506,13 +506,19 @@ where
 	layouter,
 	BigInt::from(scalar_chip.config.p.clone())
     )?;
+
+    println!("0");
     
     // check r,s are in [1, n - 1]
     let r_is_zero = scalar_chip.is_zero(layouter, &r)?;
     let s_is_zero = scalar_chip.is_zero(layouter, &s)?;
+
+    println!("1");
     let r_valid = range.qap_config.not(layouter, &Existing(&r_is_zero))?;
     let s_valid = range.qap_config.not(layouter, &Existing(&s_is_zero))?;
 
+    println!("a");
+    
     // compute u1 = m s^{-1} mod n and u2 = r s^{-1} mod n
     // TODO: maybe the big_less_than is optional?
     let u1 = scalar_chip.divide(layouter, &msghash, &s)?;
@@ -520,9 +526,13 @@ where
     let u1_small = big_less_than::assign(range, layouter, &u1, &n)?;
     let u2_small = big_less_than::assign(range, layouter, &u2, &n)?;
 
+    println!("b");
+    
     // compute u1 * G and u2 * pubkey
     let u1_mul = fixed_base_scalar_multiply(base_chip, layouter, &G, &u1.limbs, b, u1.limb_bits, fixed_window_bits)?;
     let u2_mul = scalar_multiply(base_chip, range, layouter, pubkey, &u2.limbs, b, u2.limb_bits, var_window_bits)?;
+
+    println!("c");
     
     // check u1 * G and u2 * pubkey are not negatives and not equal
     //     TODO: Technically they could be equal for a valid signature, but this happens with vanishing probability
@@ -530,12 +540,16 @@ where
     // coordinates of u1_mul and u2_mul are in proper bigint form, but are not constrained to [0, n)
     let u1_u2_x_eq = base_chip.is_equal(layouter, &u1_mul.x, &u2_mul.x)?;
     let u1_u2_not_neg = range.qap_config.not(layouter, &Existing(&u1_u2_x_eq))?;
+
+    println!("d");
     
     // compute (x1, y1) = u1 * G + u2 * pubkey and check r == x1 mod n
     let sum = ecc_add_unequal(base_chip, layouter, &u1_mul, &u2_mul)?;
     let r_crt = scalar_chip.to_crt(layouter, r)?;
     let equal_check = base_chip.is_equal(layouter, &sum.x, &r_crt)?;
 
+    println!("e");
+    
     // check (r in [1, n - 1]) and (s in [1, n - 1]) and (u1_mul != - u2_mul) and (r == x1 mod n)
     let res1 = range.qap_config.and(layouter, &Existing(&r_valid), &Existing(&s_valid))?;
     let res2 = range.qap_config.and(layouter, &Existing(&res1), &Existing(&u1_small))?;

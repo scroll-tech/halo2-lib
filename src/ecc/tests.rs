@@ -164,7 +164,6 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         }
         */
 
-	/*
         // test scalar mult
         {
             let scalar_mult = chip.scalar_mult(
@@ -190,12 +189,6 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
                 println!("scalar mult witness OK");
             }
         }
-	 */
-
-	// test ECDSA
-	{
-
-	}
 
         /*
             // test fixed base scalar mult
