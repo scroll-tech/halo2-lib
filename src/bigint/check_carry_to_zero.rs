@@ -4,11 +4,14 @@ use num_bigint::BigUint;
 use num_traits::One;
 
 use super::OverflowInteger;
-use crate::gates::qap_gate::QuantumCell;
-use crate::gates::qap_gate::QuantumCell::*;
-use crate::gates::range;
-use crate::utils::modulus as native_modulus;
-use crate::utils::*;
+use crate::gates::{
+    GateInstructions,
+    QuantumCell::{self, Constant, Existing, Witness},
+    RangeInstructions,
+};
+use crate::utils::biguint_to_fe;
+use crate::utils::fe_to_bigint;
+use crate::utils::{bigint_to_fe, modulus as native_modulus};
 
 // checks there exist d_i = -c_i so that
 // a0 = c0 * 2^n
@@ -28,7 +31,7 @@ use crate::utils::*;
 // which is valid as long as `(m - n + EPSILON) + n * (w+1) < native_modulus::<F>().bits() - 1`
 // so we only need to range check `c_i` every `w + 1` steps
 pub fn assign<F: FieldExt>(
-    range: &range::RangeConfig<F>,
+    range: &mut impl RangeInstructions<F>,
     layouter: &mut impl Layouter<F>,
     a: &OverflowInteger<F>,
 ) -> Result<(), Error> {
@@ -62,13 +65,12 @@ pub fn assign<F: FieldExt>(
         || "carry consistency",
         |mut region| {
             let mut cells = Vec::with_capacity(4 * k);
+            let mut enable_gates = Vec::new();
             for idx in 0..k {
-                range.qap_config.q_enable.enable(&mut region, 4 * idx)?;
+                enable_gates.push(4 * idx);
 
                 cells.push(Existing(&a.limbs[idx]));
-                cells.push(Witness(
-                    carries[idx].as_ref().map(|c| bigint_to_fe::<F>(&-c)),
-                ));
+                cells.push(Witness(carries[idx].as_ref().map(|c| bigint_to_fe::<F>(&-c))));
                 cells.push(Constant(limb_base));
                 if idx == 0 {
                     cells.push(Constant(F::from(0)));
@@ -76,11 +78,13 @@ pub fn assign<F: FieldExt>(
                     cells.push(cells[4 * idx - 3].clone());
                 }
             }
-            let assigned_cells = range.qap_config.assign_region(cells, 0, &mut region)?;
-            region.constrain_equal(
-                a.limbs[k - 1].cell(),
-                assigned_cells[4 * (k - 2) + 1].cell(),
-            )?;
+            let (assigned_cells, column_index) =
+                range.gate().assign_region(cells, 0, &mut region)?;
+            for row in enable_gates {
+                range.gate().enable(&mut region, column_index, row)?;
+            }
+            region
+                .constrain_equal(a.limbs[k - 1].cell(), assigned_cells[4 * (k - 2) + 1].cell())?;
 
             for idx in 0..k {
                 neg_carry_assignments.push(assigned_cells[4 * idx + 1].clone());
@@ -107,7 +111,6 @@ pub fn assign<F: FieldExt>(
         layouter.assign_region(
             || "shift carries",
             |mut region| {
-                range.qap_config.q_enable.enable(&mut region, 0)?;
                 let shift_carry_val = Some(shift_val).zip(carry_cell.value()).map(|(s, c)| s + c);
                 let cells = vec![
                     Existing(&carry_cell),
@@ -115,7 +118,9 @@ pub fn assign<F: FieldExt>(
                     Constant(shift_val),
                     Witness(shift_carry_val),
                 ];
-                let assigned_cells = range.qap_config.assign_region(cells, 0, &mut region)?;
+                let (assigned_cells, column_index) =
+                    range.gate().assign_region(cells, 0, &mut region)?;
+                range.gate().enable(&mut region, column_index, 0)?;
                 shifted_carry_assignments.push(assigned_cells.last().unwrap().clone());
                 Ok(())
             },
@@ -131,7 +136,7 @@ pub fn assign<F: FieldExt>(
 // check that `a` carries to `0 mod 2^{a.limb_bits * a.limbs.len()}`
 // does same thing as check_carry_to_zero::assign except skips the last check that a_{k - 1} = d_{k - 2}
 pub fn truncate<F: FieldExt>(
-    range: &range::RangeConfig<F>,
+    range: &mut impl RangeInstructions<F>,
     layouter: &mut impl Layouter<F>,
     a: &OverflowInteger<F>,
 ) -> Result<(), Error> {
@@ -165,13 +170,12 @@ pub fn truncate<F: FieldExt>(
         |mut region| {
             let mut neg_carry_assignments = Vec::with_capacity(k);
             let mut cells = Vec::with_capacity(4 * k);
+            let mut enable_gates = Vec::new();
             for idx in 0..k {
-                range.qap_config.q_enable.enable(&mut region, 4 * idx)?;
+                enable_gates.push(4 * idx);
 
                 cells.push(Existing(&a.limbs[idx]));
-                cells.push(Witness(
-                    carries[idx].as_ref().map(|c| bigint_to_fe::<F>(&-c)),
-                ));
+                cells.push(Witness(carries[idx].as_ref().map(|c| bigint_to_fe::<F>(&-c))));
                 cells.push(Constant(limb_base));
                 if idx == 0 {
                     cells.push(Constant(F::from(0)));
@@ -179,7 +183,11 @@ pub fn truncate<F: FieldExt>(
                     cells.push(cells[4 * idx - 3].clone());
                 }
             }
-            let assigned_cells = range.qap_config.assign_region(cells, 0, &mut region)?;
+            let (assigned_cells, column_index) =
+                range.gate().assign_region(cells, 0, &mut region)?;
+            for row in enable_gates {
+                range.gate().enable(&mut region, column_index, row)?;
+            }
 
             for idx in 0..k {
                 neg_carry_assignments.push(assigned_cells[4 * idx + 1].clone());
@@ -206,7 +214,6 @@ pub fn truncate<F: FieldExt>(
         let shift_cell = layouter.assign_region(
             || "shift carries",
             |mut region| {
-                range.qap_config.q_enable.enable(&mut region, 0)?;
                 let shift_carry_val = Some(shift_val).zip(carry_cell.value()).map(|(s, c)| s + c);
                 let cells = vec![
                     Existing(&carry_cell),
@@ -214,7 +221,9 @@ pub fn truncate<F: FieldExt>(
                     Constant(shift_val),
                     Witness(shift_carry_val),
                 ];
-                let assigned_cells = range.qap_config.assign_region(cells, 0, &mut region)?;
+                let (assigned_cells, column_index) =
+                    range.gate().assign_region(cells, 0, &mut region)?;
+                range.gate().enable(&mut region, column_index, 0)?;
                 Ok(assigned_cells.last().unwrap().clone())
             },
         )?;

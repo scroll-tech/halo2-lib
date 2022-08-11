@@ -1,7 +1,5 @@
 use super::{CRTInteger, OverflowInteger};
-use crate::gates::qap_gate;
-use crate::gates::qap_gate::QuantumCell::Existing;
-use crate::gates::range;
+use crate::gates::{GateInstructions, QuantumCell::Existing, RangeInstructions};
 use crate::utils::*;
 use halo2_proofs::{
     arithmetic::{Field, FieldExt},
@@ -14,7 +12,7 @@ use num_traits::One;
 // given OverflowInteger<F>'s `a` and `b` of the same shape,
 // returns whether `a < b`
 pub fn assign<F: FieldExt>(
-    range: &range::RangeConfig<F>,
+    range: &mut impl RangeInstructions<F>,
     layouter: &mut impl Layouter<F>,
     a: &OverflowInteger<F>,
     b: &OverflowInteger<F>,
@@ -31,30 +29,23 @@ pub fn assign<F: FieldExt>(
     let mut lt = Vec::with_capacity(k);
     let mut eq = Vec::with_capacity(k);
     for idx in 0..k {
-	let lt_limb = range.is_less_than(
-	    layouter,
-	    &a.limbs[idx],
-	    &b.limbs[idx],
-	    limb_bits)?;
-	lt.push(lt_limb);
+        let lt_limb = range.is_less_than(layouter, &a.limbs[idx], &b.limbs[idx], limb_bits)?;
+        lt.push(lt_limb);
 
-	let eq_limb = range.is_equal(
-	    layouter,
-	    &a.limbs[idx],
-	    &b.limbs[idx])?;
-	eq.push(eq_limb);
+        let eq_limb = range.is_equal(layouter, &a.limbs[idx], &b.limbs[idx])?;
+        eq.push(eq_limb);
     }
 
     let mut partials = Vec::with_capacity(k);
     partials.push(lt[0].clone());
     for idx in 0..(k - 1) {
-	let new = range.qap_config.or_and(
-	    layouter,
-	    &Existing(&lt[idx + 1]),
-	    &Existing(&eq[idx + 1]),
-	    &Existing(&partials[idx])
-	)?;
-	partials.push(new);
+        let new = range.gate().or_and(
+            layouter,
+            &Existing(&lt[idx + 1]),
+            &Existing(&eq[idx + 1]),
+            &Existing(&partials[idx]),
+        )?;
+        partials.push(new);
     }
     Ok(partials[k - 1].clone())
 }

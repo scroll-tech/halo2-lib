@@ -2,11 +2,10 @@ use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
 use std::cmp;
 
 use super::OverflowInteger;
-use crate::gates::qap_gate;
-use crate::gates::qap_gate::QuantumCell::Existing;
+use crate::gates::{GateInstructions, QuantumCell::Existing};
 
 pub fn assign<F: FieldExt>(
-    gate: &qap_gate::Config<F>,
+    gate: &mut impl GateInstructions<F>,
     layouter: &mut impl Layouter<F>,
     a: &OverflowInteger<F>,
 ) -> Result<OverflowInteger<F>, Error> {
@@ -18,9 +17,5 @@ pub fn assign<F: FieldExt>(
         out_limbs.push(out_limb);
     }
 
-    Ok(OverflowInteger::construct(
-        out_limbs,
-        a.max_limb_size.clone(),
-        a.limb_bits,
-    ))
+    Ok(OverflowInteger::construct(out_limbs, a.max_limb_size.clone(), a.limb_bits))
 }

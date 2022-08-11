@@ -2,13 +2,15 @@ use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
 use num_bigint::BigInt;
 
 use super::{CRTInteger, OverflowInteger};
-use crate::gates::qap_gate;
-use crate::gates::qap_gate::QuantumCell::{Constant, Existing, Witness};
-use crate::gates::range::RangeConfig;
+use crate::gates::{
+    GateInstructions,
+    QuantumCell::{Constant, Existing, Witness},
+    RangeInstructions,
+};
 use crate::utils::bigint_to_fe;
 
 pub fn assign<F: FieldExt>(
-    range: &RangeConfig<F>,
+    range: &mut impl RangeInstructions<F>,
     layouter: &mut impl Layouter<F>,
     a: &OverflowInteger<F>,
     b: &OverflowInteger<F>,
@@ -28,9 +30,7 @@ pub fn assign<F: FieldExt>(
             }
             Some(borrow) => {
                 let b_plus_borrow =
-                    range
-                        .qap_config
-                        .add(layouter, &Existing(&b.limbs[i]), &Existing(&borrow))?;
+                    range.gate().add(layouter, &Existing(&b.limbs[i]), &Existing(&borrow))?;
                 let lt =
                     range.is_less_than(layouter, &a.limbs[i], &b_plus_borrow, a.limb_bits + 1)?;
                 (b_plus_borrow, lt)
@@ -40,12 +40,10 @@ pub fn assign<F: FieldExt>(
             || format!("sub_{}", i),
             |mut region| {
                 // | a | lt | 2^n | a + lt * 2^n | -1 | bottom | a + lt * 2^n - bottom
-                let a_with_borrow_val = a.limbs[i]
-                    .value()
-                    .zip(lt.value())
-                    .map(|(&a, &lt)| a + lt * limb_base);
+                let a_with_borrow_val =
+                    a.limbs[i].value().zip(lt.value()).map(|(&a, &lt)| a + lt * limb_base);
                 let out_val = a_with_borrow_val.zip(bottom.value()).map(|(ac, &b)| ac - b);
-                let assignments = range.qap_config.assign_region(
+                let (assignments, column_index) = range.gate().assign_region(
                     vec![
                         Existing(&a.limbs[i]),
                         Existing(&lt),
@@ -58,8 +56,8 @@ pub fn assign<F: FieldExt>(
                     0,
                     &mut region,
                 )?;
-                range.qap_config.q_enable.enable(&mut region, 0)?;
-                range.qap_config.q_enable.enable(&mut region, 3)?;
+                range.gate().enable(&mut region, column_index, 0)?;
+                range.gate().enable(&mut region, column_index, 3)?;
                 Ok(assignments.last().unwrap().clone())
             },
         )?;
@@ -74,19 +72,14 @@ pub fn assign<F: FieldExt>(
 
 // returns (a-b, underflow), where underflow is nonzero iff a < b
 pub fn crt<F: FieldExt>(
-    range: &RangeConfig<F>,
+    range: &mut impl RangeInstructions<F>,
     layouter: &mut impl Layouter<F>,
     a: &CRTInteger<F>,
     b: &CRTInteger<F>,
 ) -> Result<(CRTInteger<F>, AssignedCell<F, F>), Error> {
     assert_eq!(a.truncation.limbs.len(), b.truncation.limbs.len());
     let (out_trunc, underflow) = assign(range, layouter, &a.truncation, &b.truncation)?;
-    let out_native = range
-        .qap_config
-        .sub(layouter, &Existing(&a.native), &Existing(&b.native))?;
+    let out_native = range.gate().sub(layouter, &Existing(&a.native), &Existing(&b.native))?;
     let out_val = a.value.as_ref().zip(b.value.as_ref()).map(|(a, b)| a - b);
-    Ok((
-        CRTInteger::construct(out_trunc, out_native, out_val, a.max_size.clone()),
-        underflow,
-    ))
+    Ok((CRTInteger::construct(out_trunc, out_native, out_val, a.max_size.clone()), underflow))
 }

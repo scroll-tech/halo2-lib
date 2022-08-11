@@ -13,15 +13,18 @@ use halo2curves::bn254::{Fq, Fq2, FROBENIUS_COEFF_FQ12_C1};
 use num_bigint::{BigInt, BigUint};
 use num_traits::{Num, One, Zero};
 
-use super::{Fp12Chip, Fp2Chip, FpChip};
-use crate::utils::{
-    bigint_to_fe, biguint_to_fe, decompose_bigint_option, decompose_biguint, fe_to_bigint,
-    fe_to_biguint, modulus,
+use super::{Fp12Chip, Fp2Chip, FpChip, FpConfig};
+use crate::{
+    bigint::CRTInteger,
+    utils::{
+        bigint_to_fe, biguint_to_fe, decompose_bigint_option, decompose_biguint, fe_to_bigint,
+        fe_to_biguint, modulus,
+    },
 };
 use crate::{
     ecc::{EccChip, EccPoint},
-    fields::{fp::FpConfig, FieldChip, FqPoint},
-    gates::{qap_gate, range},
+    fields::{FieldChip, FqPoint, PrimeFieldChip},
+    gates::{GateInstructions, RangeInstructions},
 };
 
 const XI_0: u64 = 9;
@@ -35,10 +38,10 @@ const XI_0: u64 = 9;
 //  - equals w^3 (y_1 - y_2) X + w^2 (x_2 - x_1) Y + w^5 (x_1 y_2 - x_2 y_1) =: out3 * w^3 + out2 * w^2 + out5 * w^5 where out2, out3, out5 are Fp2 points
 // Output is [None, None, out2, out3, None, out5] as vector of `Option<FqPoint>`s
 pub fn sparse_line_function_unequal<F: FieldExt>(
-    fp2_chip: &Fp2Chip<F>,
+    fp2_chip: &mut Fp2Chip<F>,
     layouter: &mut impl Layouter<F>,
-    Q: (&EccPoint<F, Fp2Chip<F>>, &EccPoint<F, Fp2Chip<F>>),
-    P: &EccPoint<F, FpChip<F>>,
+    Q: (&EccPoint<F, FqPoint<F>>, &EccPoint<F, FqPoint<F>>),
+    P: &EccPoint<F, CRTInteger<F>>,
 ) -> Result<Vec<Option<FqPoint<F>>>, Error> {
     let (x_1, y_1) = (&Q.0.x, &Q.0.y);
     let (x_2, y_2) = (&Q.1.x, &Q.1.y);
@@ -75,7 +78,7 @@ pub fn sparse_line_function_unequal<F: FieldExt>(
 
 // multiply (a0 + a1 * u) * (XI0 + u) without carry
 pub fn mul_no_carry_w6<F: FieldExt>(
-    fp_chip: &FpChip<F>,
+    fp_chip: &mut FpChip<F>,
     layouter: &mut impl Layouter<F>,
     a: &FqPoint<F>,
 ) -> Result<FqPoint<F>, Error> {
@@ -100,10 +103,10 @@ pub fn mul_no_carry_w6<F: FieldExt>(
 //  - equals (3x^3 - 2y^2)(XI_0 + u) + w^4 (-3 x^2 * Q.x) + w^3 (2 y * Q.y) =: out0 + out4 * w^4 + out3 * w^3 where out0, out3, out4 are Fp2 points
 // Output is [out0, None, None, out3, out4, None] as vector of `Option<FqPoint>`s
 pub fn sparse_line_function_equal<F: FieldExt>(
-    fp2_chip: &Fp2Chip<F>,
+    fp2_chip: &mut Fp2Chip<F>,
     layouter: &mut impl Layouter<F>,
-    Q: &EccPoint<F, Fp2Chip<F>>,
-    P: &EccPoint<F, FpChip<F>>,
+    Q: &EccPoint<F, FqPoint<F>>,
+    P: &EccPoint<F, CRTInteger<F>>,
 ) -> Result<Vec<Option<FqPoint<F>>>, Error> {
     let (x, y) = (&Q.x, &Q.y);
     assert_eq!(x.coeffs.len(), 2);
@@ -118,7 +121,7 @@ pub fn sparse_line_function_equal<F: FieldExt>(
     let y_sq = fp2_chip.mul_no_carry(layouter, y, y)?;
     let two_y_sq = fp2_chip.scalar_mul_no_carry(layouter, &y_sq, F::from(2))?;
     let out0_left = fp2_chip.sub_no_carry(layouter, &three_x_cu, &two_y_sq)?;
-    let out0 = mul_no_carry_w6(&fp2_chip.fp_chip, layouter, &out0_left)?;
+    let out0 = mul_no_carry_w6(&mut fp2_chip.fp_chip, layouter, &out0_left)?;
 
     let x_sq_Px = fp2_chip.fp_mul_no_carry(layouter, &x_sq, &P.x)?;
     let out4 = fp2_chip.scalar_mul_no_carry(layouter, &x_sq_Px, -F::from(3))?;
@@ -141,7 +144,7 @@ pub fn sparse_line_function_equal<F: FieldExt>(
 // multiply Fp12 point `a` with Fp12 point `b` where `b` is len 6 vector of Fp2 points, where some are `None` to represent zero.
 // Assumes `b` is not vector of all `None`s
 pub fn sparse_fp12_multiply<F: FieldExt>(
-    fp2_chip: &Fp2Chip<F>,
+    fp2_chip: &mut Fp2Chip<F>,
     layouter: &mut impl Layouter<F>,
     a: &FqPoint<F>,
     b_fp2_coeffs: &Vec<Option<FqPoint<F>>>,
@@ -178,7 +181,7 @@ pub fn sparse_fp12_multiply<F: FieldExt>(
         // prod_2d[i] + prod_2d[i+6] * w^6
         let prod_nocarry = if i != 5 {
             let eval_w6 = prod_2d[i + 6].as_ref().map(|a| {
-                mul_no_carry_w6(&fp2_chip.fp_chip, layouter, a)
+                mul_no_carry_w6(&mut fp2_chip.fp_chip, layouter, a)
                     .expect("mul_no_carry_w6 should not fail")
             });
             match (prod_2d[i].as_ref(), eval_w6) {
@@ -212,11 +215,11 @@ pub fn sparse_fp12_multiply<F: FieldExt>(
 // Output:
 // - out = g * l_{Psi(Q0), Psi(Q1)}(P) as Fp12 point
 pub fn fp12_multiply_with_line_unequal<F: FieldExt>(
-    fp2_chip: &Fp2Chip<F>,
+    fp2_chip: &mut Fp2Chip<F>,
     layouter: &mut impl Layouter<F>,
     g: &FqPoint<F>,
-    Q: (&EccPoint<F, Fp2Chip<F>>, &EccPoint<F, Fp2Chip<F>>),
-    P: &EccPoint<F, FpChip<F>>,
+    Q: (&EccPoint<F, FqPoint<F>>, &EccPoint<F, FqPoint<F>>),
+    P: &EccPoint<F, CRTInteger<F>>,
 ) -> Result<FqPoint<F>, Error> {
     let line = sparse_line_function_unequal(fp2_chip, layouter, Q, P)?;
     sparse_fp12_multiply(fp2_chip, layouter, g, &line)
@@ -229,11 +232,11 @@ pub fn fp12_multiply_with_line_unequal<F: FieldExt>(
 // Output:
 // - out = g * l_{Psi(Q), Psi(Q)}(P) as Fp12 point
 pub fn fp12_multiply_with_line_equal<F: FieldExt>(
-    fp2_chip: &Fp2Chip<F>,
+    fp2_chip: &mut Fp2Chip<F>,
     layouter: &mut impl Layouter<F>,
     g: &FqPoint<F>,
-    Q: &EccPoint<F, Fp2Chip<F>>,
-    P: &EccPoint<F, FpChip<F>>,
+    Q: &EccPoint<F, FqPoint<F>>,
+    P: &EccPoint<F, CRTInteger<F>>,
 ) -> Result<FqPoint<F>, Error> {
     let line = sparse_line_function_equal(fp2_chip, layouter, Q, P)?;
     sparse_fp12_multiply(fp2_chip, layouter, g, &line)
@@ -257,12 +260,11 @@ pub fn fp12_multiply_with_line_equal<F: FieldExt>(
 //  - `0 <= loop_count < r` and `loop_count < p` (to avoid [loop_count]Q' = Frob_p(Q'))
 //  - x^3 + b = 0 has no solution in Fp2, i.e., the y-coordinate of Q cannot be 0.
 
-pub fn miller_loop_BN<F: FieldExt>(
-    ecc_chip: &EccChip<F, Fp2Chip<F>>,
-    fp12_chip: &Fp12Chip<F>,
+pub fn miller_loop_BN<'a, F: FieldExt>(
+    ecc_chip: &mut EccChip<F, Fp2Chip<'a, F>>,
     layouter: &mut impl Layouter<F>,
-    Q: &EccPoint<F, Fp2Chip<F>>,
-    P: &EccPoint<F, FpChip<F>>,
+    Q: &EccPoint<F, FqPoint<F>>,
+    P: &EccPoint<F, CRTInteger<F>>,
     pseudo_binary_encoding: &[i8],
 ) -> Result<FqPoint<F>, Error> {
     let mut i = pseudo_binary_encoding.len() - 1;
@@ -270,7 +272,6 @@ pub fn miller_loop_BN<F: FieldExt>(
         i -= 1;
     }
     let last_index = i;
-    println!("loop len = {}", last_index);
 
     let neg_Q = ecc_chip.negate(layouter, Q)?;
     assert!(pseudo_binary_encoding[i] == 1 || pseudo_binary_encoding[i] == -1);
@@ -278,7 +279,7 @@ pub fn miller_loop_BN<F: FieldExt>(
     i -= 1;
 
     // initialize the first line function into Fq12 point
-    let sparse_f = sparse_line_function_equal(&ecc_chip.field_chip, layouter, &R, P)?;
+    let sparse_f = sparse_line_function_equal(&mut ecc_chip.field_chip, layouter, &R, P)?;
     assert_eq!(sparse_f.len(), 6);
 
     let zero_fp = ecc_chip.field_chip.fp_chip.load_constant(layouter, BigInt::from(0))?;
@@ -302,8 +303,9 @@ pub fn miller_loop_BN<F: FieldExt>(
 
     loop {
         if i != last_index - 1 {
+            let mut fp12_chip = Fp12Chip::construct(ecc_chip.field_chip.fp_chip);
             let f_sq = fp12_chip.mul(layouter, &f, &f)?;
-            f = fp12_multiply_with_line_equal(&ecc_chip.field_chip, layouter, &f_sq, &R, P)?;
+            f = fp12_multiply_with_line_equal(&mut ecc_chip.field_chip, layouter, &f_sq, &R, P)?;
         }
         R = ecc_chip.double(layouter, &R)?;
 
@@ -311,7 +313,7 @@ pub fn miller_loop_BN<F: FieldExt>(
         if pseudo_binary_encoding[i] != 0 {
             let sign_Q = if pseudo_binary_encoding[i] == 1 { &Q } else { &neg_Q };
             f = fp12_multiply_with_line_unequal(
-                &ecc_chip.field_chip,
+                &mut ecc_chip.field_chip,
                 layouter,
                 &f,
                 (&R, sign_Q),
@@ -334,9 +336,9 @@ pub fn miller_loop_BN<F: FieldExt>(
 
     let Q_1 = twisted_frobenius(ecc_chip, layouter, Q, &c2, &c3)?;
     let neg_Q_2 = neg_twisted_frobenius(ecc_chip, layouter, &Q_1, &c2, &c3)?;
-    f = fp12_multiply_with_line_unequal(&ecc_chip.field_chip, layouter, &f, (&R, &Q_1), P)?;
+    f = fp12_multiply_with_line_unequal(&mut ecc_chip.field_chip, layouter, &f, (&R, &Q_1), P)?;
     R = ecc_chip.add_unequal(layouter, &R, &Q_1)?;
-    f = fp12_multiply_with_line_unequal(&ecc_chip.field_chip, layouter, &f, (&R, &neg_Q_2), P)?;
+    f = fp12_multiply_with_line_unequal(&mut ecc_chip.field_chip, layouter, &f, (&R, &neg_Q_2), P)?;
 
     Ok(f)
 }
@@ -348,13 +350,13 @@ pub fn miller_loop_BN<F: FieldExt>(
 // - coeff[1][2], coeff[1][3] as assigned cells: this is an optimization to avoid loading new constants
 // Output:
 // - (coeff[1][2] * x^p, coeff[1][3] * y^p) point in E(Fp2)
-pub fn twisted_frobenius<F: FieldExt>(
-    ecc_chip: &EccChip<F, Fp2Chip<F>>,
+pub fn twisted_frobenius<'a, F: FieldExt>(
+    ecc_chip: &mut EccChip<F, Fp2Chip<'a, F>>,
     layouter: &mut impl Layouter<F>,
-    Q: &EccPoint<F, Fp2Chip<F>>,
+    Q: &EccPoint<F, FqPoint<F>>,
     c2: &FqPoint<F>,
     c3: &FqPoint<F>,
-) -> Result<EccPoint<F, Fp2Chip<F>>, Error> {
+) -> Result<EccPoint<F, FqPoint<F>>, Error> {
     assert_eq!(c2.coeffs.len(), 2);
     assert_eq!(c3.coeffs.len(), 2);
 
@@ -371,13 +373,13 @@ pub fn twisted_frobenius<F: FieldExt>(
 // - Q = (x, y) point in E(Fp2)
 // Output:
 // - (coeff[1][2] * x^p, coeff[1][3] * -y^p) point in E(Fp2)
-pub fn neg_twisted_frobenius<F: FieldExt>(
-    ecc_chip: &EccChip<F, Fp2Chip<F>>,
+pub fn neg_twisted_frobenius<'a, F: FieldExt>(
+    ecc_chip: &mut EccChip<F, Fp2Chip<'a, F>>,
     layouter: &mut impl Layouter<F>,
-    Q: &EccPoint<F, Fp2Chip<F>>,
+    Q: &EccPoint<F, FqPoint<F>>,
     c2: &FqPoint<F>,
     c3: &FqPoint<F>,
-) -> Result<EccPoint<F, Fp2Chip<F>>, Error> {
+) -> Result<EccPoint<F, FqPoint<F>>, Error> {
     assert_eq!(c2.coeffs.len(), 2);
     assert_eq!(c3.coeffs.len(), 2);
 
@@ -388,19 +390,15 @@ pub fn neg_twisted_frobenius<F: FieldExt>(
     Ok(EccPoint::construct(out_x, out_y))
 }
 
+// To avoid issues with mutably borrowing twice (not allowed in Rust), we only store fp_chip and construct g2_chip and fp12_chip in scope when needed for temporary mutable borrows
 pub struct PairingChip<F: FieldExt> {
-    pub g1_chip: EccChip<F, FpChip<F>>,
-    pub g2_chip: EccChip<F, Fp2Chip<F>>,
-    pub fp12_chip: Fp12Chip<F>,
+    pub fp_chip: FpChip<F>,
 }
 
 impl<F: FieldExt> PairingChip<F> {
-    pub fn construct(config: FpConfig<F>) -> Self {
-        Self {
-            g1_chip: EccChip::construct(FpChip::construct(config.clone()), config.range.clone()),
-            g2_chip: EccChip::construct(Fp2Chip::construct(config.clone()), config.range.clone()),
-            fp12_chip: Fp12Chip::construct(config),
-        }
+    pub fn construct(config: FpConfig<F>, using_simple_floor_planner: bool) -> Self {
+        let fp_chip = FpChip::construct(config, using_simple_floor_planner);
+        Self { fp_chip }
     }
 
     pub fn configure(
@@ -413,8 +411,6 @@ impl<F: FieldExt> PairingChip<F> {
     ) -> FpConfig<F> {
         FpConfig::configure(
             meta,
-            value,
-            constant,
             lookup_bits,
             limb_bits,
             num_limbs,
@@ -423,23 +419,26 @@ impl<F: FieldExt> PairingChip<F> {
     }
 
     pub fn load_private_g1(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         point: Option<G1Affine>,
-    ) -> Result<EccPoint<F, FpChip<F>>, Error> {
+    ) -> Result<EccPoint<F, CRTInteger<F>>, Error> {
         // go from pse/pairing::bn256::Fq to forked Fq
         let convert_fp = |x: bn256::Fq| biguint_to_fe(&fe_to_biguint(&x));
-        self.g1_chip.load_private(
+        let mut g1_chip = EccChip::construct(&mut self.fp_chip);
+        g1_chip.load_private(
             layouter,
             (point.map(|pt| convert_fp(pt.x)), point.map(|pt| convert_fp(pt.y))),
         )
     }
 
     pub fn load_private_g2(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         point: Option<G2Affine>,
-    ) -> Result<EccPoint<F, Fp2Chip<F>>, Error> {
+    ) -> Result<EccPoint<F, FqPoint<F>>, Error> {
+        let mut fp2_chip = Fp2Chip::construct(&mut self.fp_chip);
+        let mut g2_chip = EccChip::construct(&mut fp2_chip);
         // go from pse/pairing::bn256::Fq2 to forked public Fq2
         let convert_fp2 = |c0: bn256::Fq, c1: bn256::Fq| Fq2 {
             c0: biguint_to_fe(&fe_to_biguint(&c0)),
@@ -448,18 +447,19 @@ impl<F: FieldExt> PairingChip<F> {
         let x = point.map(|pt| convert_fp2(pt.x.c0, pt.x.c1));
         let y = point.map(|pt| convert_fp2(pt.y.c0, pt.y.c1));
 
-        self.g2_chip.load_private(layouter, (x, y))
+        g2_chip.load_private(layouter, (x, y))
     }
 
     pub fn miller_loop(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
-        Q: &EccPoint<F, Fp2Chip<F>>,
-        P: &EccPoint<F, FpChip<F>>,
+        Q: &EccPoint<F, FqPoint<F>>,
+        P: &EccPoint<F, CRTInteger<F>>,
     ) -> Result<FqPoint<F>, Error> {
+        let mut fp2_chip = Fp2Chip::construct(&mut self.fp_chip);
+        let mut g2_chip = EccChip::construct(&mut fp2_chip);
         miller_loop_BN(
-            &self.g2_chip,
-            &self.fp12_chip,
+            &mut g2_chip,
             layouter,
             Q,
             P,
@@ -469,14 +469,15 @@ impl<F: FieldExt> PairingChip<F> {
 
     // optimal Ate pairing
     pub fn pairing(
-        &self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
-        Q: &EccPoint<F, Fp2Chip<F>>,
-        P: &EccPoint<F, FpChip<F>>,
+        Q: &EccPoint<F, FqPoint<F>>,
+        P: &EccPoint<F, CRTInteger<F>>,
     ) -> Result<FqPoint<F>, Error> {
         let f0 = self.miller_loop(layouter, Q, P)?;
+        let mut fp12_chip = Fp12Chip::construct(&mut self.fp_chip);
         // final_exp implemented in final_exp module
-        let f = self.fp12_chip.final_exp(&self.g2_chip.field_chip, layouter, &f0)?;
+        let f = fp12_chip.final_exp(layouter, &f0)?;
         Ok(f)
     }
 }
