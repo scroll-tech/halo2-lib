@@ -253,21 +253,15 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeFiel
 	layouter: &mut impl Layouter<F>,
 	a: &OverflowInteger<F>,
     ) -> Result<AssignedCell<F, F>, Error> {
-	println!("0.a");
 	let carry = self.carry_mod(layouter, a)?;
-
-	println!("0.ab");
 	let is_carry_zero = big_is_zero::assign(self.range(), layouter, &carry)?;
-
-	println!("0.b");
-
+	
 	// underflow != 0 iff carry < p
 	let p = self.load_constant(layouter, BigInt::from(self.p.clone()))?;
 	let (diff, underflow) = sub::assign(self.range(), layouter, &carry, &p)?;
 	let is_underflow_zero = self.range.is_zero(layouter, &underflow)?;
 	let range_check = self.range.gate().not(layouter, &Existing(&is_underflow_zero))?;
 
-	println!("0.c");
 	let res = self.range.gate().and(layouter, &Existing(&is_carry_zero), &Existing(&range_check))?;
 	Ok(res)	
     }

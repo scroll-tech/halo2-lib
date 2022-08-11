@@ -60,10 +60,11 @@ pub fn assign<F: FieldExt>(
         carries.push(carry);
     }
 
-    let mut neg_carry_assignments = Vec::with_capacity(k);
-    layouter.assign_region(
+    println!("b1");
+    let neg_carry_assignments = layouter.assign_region(
         || "carry consistency",
         |mut region| {
+	    let mut neg_carry_assignments = Vec::new();
             let mut cells = Vec::with_capacity(4 * k);
             let mut enable_gates = Vec::new();
             for idx in 0..k {
@@ -89,10 +90,10 @@ pub fn assign<F: FieldExt>(
             for idx in 0..k {
                 neg_carry_assignments.push(assigned_cells[4 * idx + 1].clone());
             }
-            Ok(())
+            Ok(neg_carry_assignments)
         },
     )?;
-
+    println!("b2");
     // which is valid as long as `range_bits + n * w < native_modulus::<F>().bits() - 1`
     // round `max_limb_bits - limb_bits` up to the next multiple of range.lookup_bits
     const EPSILON: usize = 1;
@@ -104,13 +105,13 @@ pub fn assign<F: FieldExt>(
 
     let shift_val = biguint_to_fe::<F>(&(BigUint::one() << range_bits));
     let num_windows = (k + window - 1) / window;
-    let mut shifted_carry_assignments = Vec::with_capacity(num_windows);
-    for i in 0..num_windows {
-        let idx = std::cmp::min(window * i + window - 1, k - 1);
-        let carry_cell = &neg_carry_assignments[idx];
-        layouter.assign_region(
-            || "shift carries",
-            |mut region| {
+    let shifted_carry_assignments = layouter.assign_region(
+        || "shift carries",
+        |mut region| {
+	    let mut shifted_carry_assignments = Vec::new();
+	    for i in 0..num_windows {
+		let idx = std::cmp::min(window * i + window - 1, k - 1);
+		let carry_cell = &neg_carry_assignments[idx];
                 let shift_carry_val = Some(shift_val).zip(carry_cell.value()).map(|(s, c)| s + c);
                 let cells = vec![
                     Existing(&carry_cell),
@@ -118,15 +119,20 @@ pub fn assign<F: FieldExt>(
                     Constant(shift_val),
                     Witness(shift_carry_val),
                 ];
+		println!("b3");
+		println!("cells {:?}", cells);
                 let (assigned_cells, column_index) =
                     range.gate().assign_region(cells, 0, &mut region)?;
+		println!("b4");
                 range.gate().enable(&mut region, column_index, 0)?;
+		println!("b5");
                 shifted_carry_assignments.push(assigned_cells.last().unwrap().clone());
-                Ok(())
-            },
-        )?;
-    }
-
+		println!("b6");
+            }
+	    Ok(shifted_carry_assignments)
+	}
+    )?;
+    println!("b7");
     for shifted_carry in shifted_carry_assignments.iter() {
         range.range_check(layouter, shifted_carry, range_bits + 1)?;
     }

@@ -2,13 +2,6 @@
 #![feature(explicit_generic_args_with_impl_trait)]
 use std::marker::PhantomData;
 
-use super::{FpChip, FqOverflowChip, Secp256k1Chip, SECP_B};
-use crate::{
-    ecc::{fixed::FixedEccPoint, ecdsa_verify_no_pubkey_check},
-    fields::{fp::FpConfig, FieldChip},
-    gates::QuantumCell::Witness,
-    utils::{bigint_to_fe, biguint_to_fe, decompose_biguint_option, fe_to_biguint, modulus},
-};
 use ff::{Field, PrimeField};
 use halo2_proofs::circuit::floor_planner::*;
 use halo2_proofs::pairing::group::Group;
@@ -21,6 +14,18 @@ use halo2curves::{
 use num_bigint::{BigInt, BigUint};
 use rand_core::OsRng;
 
+use super::{FpChip, FqOverflowChip, NUM_ADVICE, NUM_FIXED, Secp256k1Chip, SECP_B};
+use crate::{
+    ecc::{fixed::FixedEccPoint, ecdsa_verify_no_pubkey_check},
+    fields::{fp::FpConfig, FieldChip, PrimeFieldChip},
+    gates::{
+	GateInstructions,
+	QuantumCell::Witness,
+	RangeInstructions
+    },
+    utils::{bigint_to_fe, biguint_to_fe, decompose_biguint_option, fe_to_biguint, modulus},
+};
+
 #[derive(Default)]
 pub struct MyCircuit<F> {
     pub P: Option<Secp256k1Affine>,
@@ -30,8 +35,8 @@ pub struct MyCircuit<F> {
 
 #[derive(Clone, Debug)]
 pub struct Secp256k1Config<F: FieldExt, CF: PrimeField, SF: PrimeField> {
-    pub base_config: FpConfig<F>,
-    pub scalar_config: FpConfig<F>,
+    pub base_config: FpConfig<F, NUM_ADVICE, NUM_FIXED>,
+    pub scalar_config: FpConfig<F, NUM_ADVICE, NUM_FIXED>,
     _marker: PhantomData<CF>,
     _marker2: PhantomData<SF>,
 }
@@ -39,25 +44,19 @@ pub struct Secp256k1Config<F: FieldExt, CF: PrimeField, SF: PrimeField> {
 impl<F: FieldExt, CF: PrimeField, SF: PrimeField> Secp256k1Config<F, CF, SF> {
     pub fn configure(
 	meta: &mut ConstraintSystem<F>,
-	value: Column<Advice>,
-	constant: Column<Fixed>,
 	lookup_bits: usize,
         limb_bits: usize,
         num_limbs: usize,
     ) -> Secp256k1Config<F, CF, SF> {
-	let base_config = FpConfig::<F>::configure(
+	let base_config = FpConfig::<F, NUM_ADVICE, NUM_FIXED>::configure(
 	    meta,
-	    value,
-	    constant,
 	    lookup_bits,
 	    limb_bits,
 	    num_limbs,
 	    modulus::<CF>()
 	);
-	let scalar_config = FpConfig::<F>::configure(
+	let scalar_config = FpConfig::<F, NUM_ADVICE, NUM_FIXED>::configure(
 	    meta,
-	    value,
-	    constant,
 	    lookup_bits,
 	    limb_bits,
 	    num_limbs,
@@ -83,7 +82,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         let value = meta.advice_column();
         let constant = meta.fixed_column();
-        Secp256k1Config::configure(meta, value, constant, 22, 88, 3)
+        Secp256k1Config::configure(meta, 22, 88, 3)
     }
 
     fn synthesize(
@@ -91,18 +90,18 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
-        let fp_chip = FpChip::construct(config.base_config.clone());
+        let mut fp_chip = FpChip::<F>::construct(config.base_config.clone(), true);
         fp_chip.load_lookup_table(&mut layouter)?;
-        let range = fp_chip.config.range.clone();
+        let mut range = fp_chip.range.clone();
 
-	let fq_chip = FqOverflowChip::construct(config.scalar_config.clone());
+	let mut fq_chip = FqOverflowChip::construct(config.scalar_config.clone(), true);
 	fq_chip.load_lookup_table(&mut layouter)?;
 	
 	let G = Secp256k1Affine::generator();
 	let sk = <Secp256k1Affine as CurveAffine>::ScalarExt::random(OsRng);
 	let pk = Secp256k1Affine::from(G * sk);
 	let pk_fixed = FixedEccPoint::from_g1(&pk, config.base_config.num_limbs, config.base_config.limb_bits);
-	let pk_assigned = pk_fixed.assign(&fp_chip, &mut layouter)?;
+	let pk_assigned = pk_fixed.assign(&mut fp_chip, &mut layouter)?;
 	
 	let msg_hash = <Secp256k1Affine as CurveAffine>::ScalarExt::random(OsRng);
 	let m_assigned = fq_chip.load_private(&mut layouter, FqOverflowChip::<F>::fe_to_witness(&Some(msg_hash)))?;
@@ -116,25 +115,15 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
 	let r = x_bigint.as_ref().map(|xv| bigint_to_fe::<Fq>(xv)).unwrap();
 	let s = k_inv * (msg_hash + (r * sk));
 
-	println!("{:?} {:?}", r, s);
-	
 	let r_assigned = fq_chip.load_private(&mut layouter, FqOverflowChip::<F>::fe_to_witness(&Some(r)))?;
 	let s_assigned = fq_chip.load_private(&mut layouter, FqOverflowChip::<F>::fe_to_witness(&Some(s)))?;
-
-	println!("r_assigned: {:?} s_assigned: {:?} m_assigned: {:?} pk_assigned x: {:?} y: {:?}",
-		 r_assigned,
-		 s_assigned,
-		 m_assigned,
-		 pk_assigned.x,
-		 pk_assigned.y,
-	);
 	
 	// test ECDSA
 	{
-	    let ecdsa = ecdsa_verify_no_pubkey_check::<F, Fp, Fq, Secp256k1Affine>(
-		&fp_chip,
-		&fq_chip,
-		&range,
+	    let ecdsa = ecdsa_verify_no_pubkey_check::<F, Fp, Fq, Secp256k1Affine, NUM_ADVICE, NUM_FIXED>(
+		&mut fp_chip,
+		&mut fq_chip,
+		&mut range,
 		&mut layouter.namespace(|| "ecdsa"),
 		&pk_assigned,
 		&r_assigned,
@@ -147,7 +136,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
 	}
 	println!("ecdsa done");
 	
-        let chip = Secp256k1Chip::construct(fp_chip, range.clone());	
+        let mut chip = Secp256k1Chip::construct(&mut fp_chip);
         let P_assigned = chip.load_private(
             &mut layouter,
             match self.P {
@@ -167,10 +156,10 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         let mask = (BigUint::from(1u32) << 128) - 1usize;
         let scalar0 = scalar_bigint.clone().map(|x| biguint_to_fe(&(x & mask)));
         let scalar1 = scalar_bigint.map(|x| biguint_to_fe(&(x >> 128)));
-        let scalar_cells = layouter.assign_region(
+        let (scalar_cells, _) = layouter.assign_region(
             || "load scalar",
             |mut region| {
-                chip.field_chip.config.gate.assign_region(
+                chip.field_chip.range.gate().assign_region(
                     vec![Witness(scalar0), Witness(scalar1)],
                     0,
                     &mut region,

@@ -6,4 +6,4 @@ pub mod gates;
 pub mod utils;
 
 pub mod bn254;
-// pub mod secp256k1;
+pub mod secp256k1;

@@ -139,7 +139,7 @@ pub trait FieldChip<F: FieldExt> {
         layouter: &mut impl Layouter<F>,
         a: &Self::FieldPoint,
         b: &Self::FieldPoint,
-    ) -> Result<Self::FieldPoint, Error> {
+    ) -> Result<Self::FieldPoint, Error> {	
         let a_val = Self::get_assigned_value(a);
         let b_val = Self::get_assigned_value(b);
         let b_inv: Option<Self::FieldType> =
@@ -149,6 +149,11 @@ pub trait FieldChip<F: FieldExt> {
         let quot = self.load_private(layouter, Self::fe_to_witness(&quot_val))?;
         self.range_check(layouter, &quot)?;
 
+	println!("a_val {:?}", a_val);
+	println!("b_val {:?}", b_val);
+	println!("b_inv {:?}", b_inv);
+	println!("quot {:?}", quot_val);
+	
         // constrain quot * b - a = 0 mod p
         let quot_b = self.mul_no_carry(layouter, &quot, b)?;
         let quot_constraint = self.sub_no_carry(layouter, &quot_b, a)?;

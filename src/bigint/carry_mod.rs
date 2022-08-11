@@ -68,10 +68,10 @@ pub fn assign<F: FieldExt>(
         mod_vec.push(biguint_to_fe(&limb));
     }
 
-    println!("a_limbs: {:?}", a.limbs);
-    println!("out_vec: {:?}", out_vec);
-    println!("quot_vec: {:?}", quotient_vec);
-    println!("mod_vec: {:?}", mod_vec);
+    //println!("a_limbs: {:?}", a.limbs);
+    //println!("out_vec: {:?}", out_vec);
+    //println!("quot_vec: {:?}", quotient_vec);
+    //println!("mod_vec: {:?}", mod_vec);
 
     // Goal: assign cells to `out - a + modulus * quotient`
     // 1. we do mul_no_carry(modulus, quotient) while assigning `modulus` and `quotient` as we go
@@ -141,11 +141,11 @@ pub fn assign<F: FieldExt>(
                 // get new assigned cells and store them
                 if i < mod_vec.len() {
                     // offset at j = i
-                    let mod_cell = Some(prod_computation_assignments[3 * (i - startj) + 1].clone());
+                    mod_cell = Some(prod_computation_assignments[3 * (i - startj) + 1].clone());
                 }
                 if i < m {
                     // offset at j = 0
-		    let quot_cell = Some(prod_computation_assignments[2].clone());
+		    quot_cell = Some(prod_computation_assignments[2].clone());
                 }
 
 		let mut out_cell = None;
@@ -178,7 +178,6 @@ pub fn assign<F: FieldExt>(
                 } else {
                     check_cell = Some(prod_computation_assignments.last().unwrap().clone());
                 }
-
                 Ok((
 		    mod_cell,
 		    quot_cell,
@@ -209,6 +208,8 @@ pub fn assign<F: FieldExt>(
         range.range_check(layouter, out_cell, n)?;
     }
 
+    println!("asdf");
+
     let limb_base: F = biguint_to_fe(&(BigUint::one() << n));
     // range check that quot_cell in quot_assigned is in [-2^n, 2^n)
     for quot_cell in quot_assigned.iter() {
@@ -236,6 +237,7 @@ pub fn assign<F: FieldExt>(
         range.range_check(layouter, &quot_shift, n + 1)?;
     }
 
+    println!("asdf2");
     let check_overflow_int = &OverflowInteger::construct(
         check_assigned,
         &out_max_limb_size
@@ -243,9 +245,11 @@ pub fn assign<F: FieldExt>(
             + (BigUint::from(std::cmp::min(mod_vec.len(), m)) << (mod_overflow + n)),
         n,
     );
+    println!("asdf3");
+    println!("overflow int {:?}", check_overflow_int);
     // check that `out - a + modulus * quotient == 0` after carry
     check_carry_to_zero::assign(range, layouter, check_overflow_int)?;
-
+    println!("asdf4");
     Ok(OverflowInteger::construct(
         out_assigned,
         out_max_limb_size,
