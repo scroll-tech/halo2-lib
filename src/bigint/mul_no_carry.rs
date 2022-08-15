@@ -34,10 +34,12 @@ pub fn assign<F: FieldExt>(
                 let mut prod_computation: Vec<QuantumCell<F>> =
                     Vec::with_capacity(1 + 3 * std::cmp::min(i + 1, k_a) - startj);
                 prod_computation.push(Constant(F::zero()));
+		let mut enable_gates = Vec::new();
 
                 let mut offset = 0;
                 let mut prod_val = Some(F::zero());
                 for j in startj..=i {
+		    enable_gates.push(offset);
                     if j >= k_a {
                         break;
                     }
@@ -57,7 +59,9 @@ pub fn assign<F: FieldExt>(
                 }
                 let (prod_computation_assignments, idx) =
                     gate.assign_region(prod_computation, 0, &mut region)?;
-		gate.enable(&mut region, idx, offset)?;
+		for row in enable_gates {
+		    gate.enable(&mut region, idx, row)?;
+		}
                 Ok(prod_computation_assignments.last().unwrap().clone())
             },
         )?;

@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 
 use super::pairing::PairingChip;
 use super::*;
+use crate::gates::range::RangeChip;
 use crate::ecc::EccChip;
 use crate::fields::PrimeFieldChip;
 use ff::PrimeField;
@@ -50,7 +51,8 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
-        let mut chip = PairingChip::construct(config, true);
+	let mut range_chip = RangeChip::construct(config.range_config.clone(), true);
+        let mut chip = PairingChip::construct(config, &mut range_chip, true);
         chip.fp_chip.load_lookup_table(&mut layouter)?;
 
         let P_assigned = chip.load_private_g1(&mut layouter, self.P.clone())?;

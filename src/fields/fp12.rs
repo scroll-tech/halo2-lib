@@ -17,6 +17,7 @@ use crate::gates::{
     RangeInstructions
 };
 use crate::gates::range;
+use crate::gates::range::RangeChip;
 use crate::utils::decompose_bigint_option;
 use crate::utils::{bigint_to_fe, fe_to_biguint};
 use crate::{
@@ -36,16 +37,16 @@ const XI_0: u64 = 9;
 /// be irreducible over Fp; i.e., in order for -1 to not be a square (quadratic residue) in Fp
 /// This means we store an Fp12 point as `\sum_{i = 0}^6 (a_{i0} + a_{i1} * u) * w^i`
 /// This is encoded in an FqPoint of degree 12 as `(a_{00}, ..., a_{50}, a_{01}, ..., a_{51})`
-pub struct Fp12Chip<'a, F: FieldExt, FpChip: PrimeFieldChip<F>, Fp12: Field> {
+pub struct Fp12Chip<'a, 'b, F: FieldExt, FpChip: PrimeFieldChip<'b, F>, Fp12: Field> {
     pub fp_chip: &'a mut FpChip,
-    _f: PhantomData<F>,
+    _f: PhantomData<&'b F>,
     _fp12: PhantomData<Fp12>,
 }
 
-impl<'a, F, FpChip, Fp12> Fp12Chip<'a, F, FpChip, Fp12>
+impl<'a, 'b, F, FpChip, Fp12> Fp12Chip<'a, 'b, F, FpChip, Fp12>
 where
     F: FieldExt,
-    FpChip: PrimeFieldChip<F, FieldPoint = CRTInteger<F>>,
+    FpChip: PrimeFieldChip<'b, F, FieldPoint = CRTInteger<F>>,
     FpChip::FieldType: PrimeField,
     Fp12: Field + FieldExtConstructor<FpChip::FieldType, 12>,
 {
@@ -106,10 +107,11 @@ where
     }
 }
 
-impl<F, FpChip, Fp12> FieldChip<F> for Fp12Chip<'_, F, FpChip, Fp12>
+impl<'a, 'b, F, FpChip, Fp12> FieldChip<F> for Fp12Chip<'a, 'b, F, FpChip, Fp12>
 where
     F: FieldExt,
     FpChip: PrimeFieldChip<
+	'b,
         F,
         FieldPoint = CRTInteger<F>,
         WitnessType = Option<BigInt>,
@@ -459,7 +461,8 @@ pub(crate) mod tests {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
-            let mut fp_chip = FpChip::<F, NUM_ADVICE, NUM_FIXED, Fq>::construct(config, true);
+	    let mut range_chip = RangeChip::<F, NUM_ADVICE, NUM_FIXED>::construct(config.range_config.clone(), true);
+            let mut fp_chip = FpChip::<F, NUM_ADVICE, NUM_FIXED, Fq>::construct(config, &mut range_chip, true);
             fp_chip.load_lookup_table(&mut layouter)?;
             let mut chip =
                 Fp12Chip::<F, FpChip<F, NUM_ADVICE, NUM_FIXED, Fq>, Fq12>::construct(&mut fp_chip);

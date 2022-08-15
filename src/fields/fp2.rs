@@ -30,16 +30,16 @@ use super::{FieldChip, FieldExtConstructor, FqPoint, PrimeFieldChip};
 /// `Fp2 = Fp[u] / (u^2 + 1)`
 /// This implementation assumes p = 3 (mod 4) in order for the polynomial u^2 + 1 to be irreducible over Fp; i.e., in order for -1 to not be a square (quadratic residue) in Fp
 /// This means we store an Fp2 point as `a_0 + a_1 * u` where `a_0, a_1 in Fp`
-pub struct Fp2Chip<'a, F: FieldExt, FpChip: PrimeFieldChip<F>, Fp2: Field> {
+pub struct Fp2Chip<'a, 'b, F: FieldExt, FpChip: PrimeFieldChip<'b, F>, Fp2: Field> {
     pub fp_chip: &'a mut FpChip,
-    _f: PhantomData<F>,
+    _f: PhantomData<&'b F>,
     _fp2: PhantomData<Fp2>,
 }
 
-impl<'a, F, FpChip, Fp2> Fp2Chip<'a, F, FpChip, Fp2>
+impl<'a, 'b, F, FpChip, Fp2> Fp2Chip<'a, 'b, F, FpChip, Fp2>
 where
     F: FieldExt,
-    FpChip: PrimeFieldChip<F, FieldPoint = CRTInteger<F>>,
+    FpChip: PrimeFieldChip<'b, F, FieldPoint = CRTInteger<F>>,
     FpChip::FieldType: PrimeField,
     Fp2: Field + FieldExtConstructor<FpChip::FieldType, 2>,
 {
@@ -88,10 +88,11 @@ where
     }
 }
 
-impl<F, FpChip, Fp2> FieldChip<F> for Fp2Chip<'_, F, FpChip, Fp2>
+impl<'a, 'b, F, FpChip, Fp2> FieldChip<F> for Fp2Chip<'a, 'b, F, FpChip, Fp2>
 where
     F: FieldExt,
     FpChip: PrimeFieldChip<
+	'b,
         F,
         FieldPoint = CRTInteger<F>,
         WitnessType = Option<BigInt>,

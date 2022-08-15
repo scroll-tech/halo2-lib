@@ -60,7 +60,6 @@ pub fn assign<F: FieldExt>(
         carries.push(carry);
     }
 
-    println!("b1");
     let neg_carry_assignments = layouter.assign_region(
         || "carry consistency",
         |mut region| {
@@ -93,7 +92,6 @@ pub fn assign<F: FieldExt>(
             Ok(neg_carry_assignments)
         },
     )?;
-    println!("b2");
     // which is valid as long as `range_bits + n * w < native_modulus::<F>().bits() - 1`
     // round `max_limb_bits - limb_bits` up to the next multiple of range.lookup_bits
     const EPSILON: usize = 1;
@@ -119,20 +117,14 @@ pub fn assign<F: FieldExt>(
                     Constant(shift_val),
                     Witness(shift_carry_val),
                 ];
-		println!("b3");
-		println!("cells {:?}", cells);
                 let (assigned_cells, column_index) =
                     range.gate().assign_region(cells, 0, &mut region)?;
-		println!("b4");
                 range.gate().enable(&mut region, column_index, 0)?;
-		println!("b5");
                 shifted_carry_assignments.push(assigned_cells.last().unwrap().clone());
-		println!("b6");
             }
 	    Ok(shifted_carry_assignments)
 	}
     )?;
-    println!("b7");
     for shifted_carry in shifted_carry_assignments.iter() {
         range.range_check(layouter, shifted_carry, range_bits + 1)?;
     }

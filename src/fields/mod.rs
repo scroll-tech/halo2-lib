@@ -148,11 +148,6 @@ pub trait FieldChip<F: FieldExt> {
 
         let quot = self.load_private(layouter, Self::fe_to_witness(&quot_val))?;
         self.range_check(layouter, &quot)?;
-
-	println!("a_val {:?}", a_val);
-	println!("b_val {:?}", b_val);
-	println!("b_inv {:?}", b_inv);
-	println!("quot {:?}", quot_val);
 	
         // constrain quot * b - a = 0 mod p
         let quot_b = self.mul_no_carry(layouter, &quot, b)?;
@@ -208,10 +203,13 @@ pub trait Selectable<F: FieldExt> {
 }
 
 // Common functionality for prime field chips
-pub trait PrimeFieldChip<F: FieldExt>: FieldChip<F> {
+pub trait PrimeFieldChip<'a, F: FieldExt>: FieldChip<F> {
     type Config;
+    type RangeChipType;
 
-    fn construct(config: Self::Config, using_simple_floor_planner: bool) -> Self;
+    fn construct(config: Self::Config,
+		 range_chip: &'a mut Self::RangeChipType,
+		 using_simple_floor_planner: bool) -> Self;
 }
 
 // helper trait so we can actually construct and read the Fp2 struct

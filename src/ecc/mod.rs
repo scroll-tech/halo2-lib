@@ -482,8 +482,6 @@ where
 // SF is the scalar field of GA
 pub fn ecdsa_verify_no_pubkey_check<F: FieldExt, CF: PrimeField, SF: PrimeField, GA, const NUM_ADVICE: usize, const NUM_FIXED: usize>(
     base_chip: &mut FpChip<F, NUM_ADVICE, NUM_FIXED, CF>,
-    scalar_chip: &mut FpOverflowChip<F, NUM_ADVICE, NUM_FIXED, SF>,
-    range: &mut impl RangeInstructions<F>,
     layouter: &mut impl Layouter<F>,
     pubkey: &EccPoint<F, <FpChip<F, NUM_ADVICE, NUM_FIXED, CF> as FieldChip<F>>::FieldPoint>,
     r: &OverflowInteger<F>,
@@ -501,31 +499,28 @@ where
 	pubkey.x.truncation.limbs.len(),
 	pubkey.x.truncation.limb_bits
     );
+
+    let mut scalar_chip = FpOverflowChip::<F, NUM_ADVICE, NUM_FIXED, SF>::from_fp_chip(
+	base_chip.range,
+	base_chip.limb_bits,
+	base_chip.num_limbs,
+	modulus::<SF>()
+    );
     let n = scalar_chip.load_constant(
 	layouter,
 	BigInt::from(scalar_chip.p.clone())
     )?;
-
+    
     // check r,s are in [1, n - 1]
     let r_is_zero = scalar_chip.is_zero(layouter, &r)?;
     let s_is_zero = scalar_chip.is_zero(layouter, &s)?;
-    println!("c");
-    
-    let r_valid = range.gate().not(layouter, &Existing(&r_is_zero))?;
-    let s_valid = range.gate().not(layouter, &Existing(&s_is_zero))?;
 
-    println!("b");
-    
     // compute u1 = m s^{-1} mod n and u2 = r s^{-1} mod n
     // TODO: maybe the big_less_than is optional?
     let u1 = scalar_chip.divide(layouter, &msghash, &s)?;
     let u2 = scalar_chip.divide(layouter, &r, &s)?;
 
-    println!("a");
-    let u1_small = big_less_than::assign(range, layouter, &u1, &n)?;
-    let u2_small = big_less_than::assign(range, layouter, &u2, &n)?;
-
-    println!("a0");
+    let r_crt = scalar_chip.to_crt(layouter, r)?;
     
     // compute u1 * G and u2 * pubkey
     let u1_mul = fixed_base_scalar_multiply(base_chip, layouter, &G, &u1.limbs, b, u1.limb_bits, fixed_window_bits)?;
@@ -536,19 +531,23 @@ where
     //           for an ECDSA signature constructed in a standard way
     // coordinates of u1_mul and u2_mul are in proper bigint form, but are not constrained to [0, n)
     let u1_u2_x_eq = base_chip.is_equal(layouter, &u1_mul.x, &u2_mul.x)?;
-    let u1_u2_not_neg = range.gate().not(layouter, &Existing(&u1_u2_x_eq))?;
+    let u1_u2_not_neg = base_chip.range.gate().not(layouter, &Existing(&u1_u2_x_eq))?;
 
     // compute (x1, y1) = u1 * G + u2 * pubkey and check r == x1 mod n
     let sum = ecc_add_unequal(base_chip, layouter, &u1_mul, &u2_mul)?;
-    let r_crt = scalar_chip.to_crt(layouter, r)?;
     let equal_check = base_chip.is_equal(layouter, &sum.x, &r_crt)?;
 
+    let u1_small = big_less_than::assign(base_chip.range, layouter, &u1, &n)?;
+    let u2_small = big_less_than::assign(base_chip.range, layouter, &u2, &n)?;
+    let r_valid = base_chip.range.gate().not(layouter, &Existing(&r_is_zero))?;
+    let s_valid = base_chip.range.gate().not(layouter, &Existing(&s_is_zero))?;
+
     // check (r in [1, n - 1]) and (s in [1, n - 1]) and (u1_mul != - u2_mul) and (r == x1 mod n)
-    let res1 = range.gate().and(layouter, &Existing(&r_valid), &Existing(&s_valid))?;
-    let res2 = range.gate().and(layouter, &Existing(&res1), &Existing(&u1_small))?;
-    let res3 = range.gate().and(layouter, &Existing(&res2), &Existing(&u2_small))?;
-    let res4 = range.gate().and(layouter, &Existing(&res3), &Existing(&u1_u2_not_neg))?;
-    let res5 = range.gate().and(layouter, &Existing(&res4), &Existing(&equal_check))?;
+    let res1 = base_chip.range.gate().and(layouter, &Existing(&r_valid), &Existing(&s_valid))?;
+    let res2 = base_chip.range.gate().and(layouter, &Existing(&res1), &Existing(&u1_small))?;
+    let res3 = base_chip.range.gate().and(layouter, &Existing(&res2), &Existing(&u2_small))?;
+    let res4 = base_chip.range.gate().and(layouter, &Existing(&res3), &Existing(&u1_u2_not_neg))?;
+    let res5 = base_chip.range.gate().and(layouter, &Existing(&res4), &Existing(&equal_check))?;
     Ok(res5)
 }
 
@@ -652,7 +651,7 @@ where
     }
 }
 
-impl<F: FieldExt, FC: PrimeFieldChip<F>> EccChip<'_, F, FC> {
+impl<'a, F: FieldExt, FC: PrimeFieldChip<'a, F>> EccChip<'a, F, FC> {
     pub fn fixed_base_scalar_mult<GA>(
         &mut self,
         layouter: &mut impl Layouter<F>,
@@ -665,7 +664,7 @@ impl<F: FieldExt, FC: PrimeFieldChip<F>> EccChip<'_, F, FC> {
     where
         GA: CurveAffine,
         GA::Base: PrimeField,
-        FC: PrimeFieldChip<F, FieldType = GA::Base, FieldPoint = CRTInteger<F>>
+        FC: PrimeFieldChip<'a, F, FieldType = GA::Base, FieldPoint = CRTInteger<F>>
             + Selectable<F, Point = FC::FieldPoint>,
     {
         fixed_base_scalar_multiply(self.field_chip, layouter, P, scalar, b, max_bits, window_bits)

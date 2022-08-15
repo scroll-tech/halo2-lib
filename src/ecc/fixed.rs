@@ -42,7 +42,7 @@ pub struct FixedEccPoint<F: FieldExt, GA: CurveAffine> {
     _marker: PhantomData<GA>,
 }
 
-impl<F: FieldExt, GA: CurveAffine> FixedEccPoint<F, GA>
+impl<'a, F: FieldExt, GA: CurveAffine> FixedEccPoint<F, GA>
 where
     GA::Base: PrimeField,
 {
@@ -70,7 +70,7 @@ where
         layouter: &mut impl Layouter<F>,
     ) -> Result<EccPoint<F, FC::FieldPoint>, Error>
     where
-        FC: PrimeFieldChip<F, FieldType = GA::Base, FieldPoint = CRTInteger<F>>,
+        FC: PrimeFieldChip<'a, F, FieldType = GA::Base, FieldPoint = CRTInteger<F>>,
     {
         let assigned_x = self.x.assign(chip.range().gate(), layouter)?;
         let assigned_y = self.y.assign(chip.range().gate(), layouter)?;
@@ -87,7 +87,7 @@ where
 // - `scalar_i < 2^{max_bits} for all i` (constrained by num_to_bits)
 // - `max_bits <= modulus::<F>.bits()`
 
-pub fn fixed_base_scalar_multiply<F, FC, GA>(
+pub fn fixed_base_scalar_multiply<'a, F, FC, GA>(
     chip: &mut FC,
     layouter: &mut impl Layouter<F>,
     P: &FixedEccPoint<F, GA>,
@@ -100,7 +100,7 @@ where
     F: FieldExt,
     GA: CurveAffine,
     GA::Base: PrimeField,
-    FC: PrimeFieldChip<F, FieldType = GA::Base, FieldPoint = CRTInteger<F>>
+    FC: PrimeFieldChip<'a, F, FieldType = GA::Base, FieldPoint = CRTInteger<F>>
         + Selectable<F, Point = FC::FieldPoint>,
 {
     assert!(scalar.len() > 0);

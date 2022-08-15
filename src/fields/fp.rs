@@ -54,9 +54,9 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize>
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct FpChip<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeField> {
-    pub range: RangeChip<F, NUM_ADVICE, NUM_FIXED>,
+#[derive(Debug)]
+pub struct FpChip<'a, F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeField> {
+    pub range: &'a mut RangeChip<F, NUM_ADVICE, NUM_FIXED>,
     pub limb_bits: usize,
     pub num_limbs: usize,
     pub p: BigUint,
@@ -64,24 +64,26 @@ pub struct FpChip<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, 
 }
 
 impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeField>
-    FpChip<F, NUM_ADVICE, NUM_FIXED, Fp>
+    FpChip<'_, F, NUM_ADVICE, NUM_FIXED, Fp>
 {
     pub fn load_lookup_table(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         self.range.load_lookup_table(layouter)
     }
 }
 
-impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeField> PrimeFieldChip<F>
-    for FpChip<F, NUM_ADVICE, NUM_FIXED, Fp>
+impl<'a, F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeField> PrimeFieldChip<'a, F>
+    for FpChip<'a, F, NUM_ADVICE, NUM_FIXED, Fp>
 {
     type Config = FpConfig<F, NUM_ADVICE, NUM_FIXED>;
+    type RangeChipType = RangeChip<F, NUM_ADVICE, NUM_FIXED>;
 
     fn construct(
         config: FpConfig<F, NUM_ADVICE, NUM_FIXED>,
+	range_chip: &'a mut RangeChip<F, NUM_ADVICE, NUM_FIXED>,
         using_simple_floor_planner: bool,
     ) -> Self {
         Self {
-            range: RangeChip::construct(config.range_config, using_simple_floor_planner),
+            range: range_chip,
             limb_bits: config.limb_bits,
             num_limbs: config.num_limbs,
             p: config.p,
@@ -91,7 +93,7 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeFiel
 }
 
 impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeField> FieldChip<F>
-    for FpChip<F, NUM_ADVICE, NUM_FIXED, Fp>
+    for FpChip<'_, F, NUM_ADVICE, NUM_FIXED, Fp>
 {
     type ConstantType = BigInt;
     type WitnessType = Option<BigInt>;
@@ -204,11 +206,11 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeFiel
     ) -> Result<CRTInteger<F>, Error> {
         // Compute p - a.truncation using carries
         let p = self.load_constant(layouter, BigInt::from(self.p.clone()))?;
-        let (out_or_p, underflow) = sub::crt(&mut self.range, layouter, &p, &a)?;
+        let (out_or_p, underflow) = sub::crt(self.range, layouter, &p, &a)?;
         // constrain underflow to equal 0
         self.range.gate().constants_to_assign.push((F::from(0), Some(underflow.cell())));
 
-        let a_is_zero = big_is_zero::assign(&mut self.range, layouter, &a.truncation)?;
+        let a_is_zero = big_is_zero::assign(self.range, layouter, &a.truncation)?;
         select::crt(self.range.gate(), layouter, a, &out_or_p, &a_is_zero)
     }
 
@@ -235,7 +237,7 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeFiel
         layouter: &mut impl Layouter<F>,
         a: &CRTInteger<F>,
     ) -> Result<(), Error> {
-        check_carry_mod_to_zero::crt(&mut self.range, layouter, a, &self.p)
+        check_carry_mod_to_zero::crt(self.range, layouter, a, &self.p)
     }
 
     fn carry_mod(
@@ -243,7 +245,7 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeFiel
         layouter: &mut impl Layouter<F>,
         a: &CRTInteger<F>,
     ) -> Result<CRTInteger<F>, Error> {
-        carry_mod::crt(&mut self.range, layouter, a, &self.p)
+        carry_mod::crt(self.range, layouter, a, &self.p)
     }
 
     fn range_check(
@@ -277,11 +279,11 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeFiel
 	a: &CRTInteger<F>,
     ) -> Result<AssignedCell<F, F>, Error> {
 	let carry = self.carry_mod(layouter, a)?;
-	let is_carry_zero = big_is_zero::crt(&mut self.range, layouter, &carry)?;
+	let is_carry_zero = big_is_zero::crt(self.range, layouter, &carry)?;
 
 	// underflow != 0 iff carry < p
 	let p = self.load_constant(layouter, BigInt::from(self.p.clone()))?;
-	let (diff, underflow) = sub::crt(&mut self.range, layouter, &carry, &p)?;
+	let (diff, underflow) = sub::crt(self.range, layouter, &carry, &p)?;
 	let is_underflow_zero = self.range.is_zero(layouter, &underflow)?;
 	let range_check = self.range.gate().not(layouter, &Existing(&is_underflow_zero))?;
 
@@ -297,11 +299,11 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeFiel
     ) -> Result<AssignedCell<F, F>, Error> {
 	let diff = self.sub_no_carry(layouter, a, b)?;
 	let carry_res = self.carry_mod(layouter, &diff)?;
-	let is_diff_zero = big_is_zero::crt(&mut self.range, layouter, &carry_res)?;
+	let is_diff_zero = big_is_zero::crt(self.range, layouter, &carry_res)?;
 	
 	// underflow != 0 iff res < p
 	let p = self.load_constant(layouter, BigInt::from(self.p.clone()))?;
-	let (diff, underflow) = sub::crt(&mut self.range, layouter, &carry_res, &p)?;
+	let (diff, underflow) = sub::crt(self.range, layouter, &carry_res, &p)?;
 	let is_underflow_zero = self.range.is_zero(layouter, &underflow)?;
 	let range_check = self.range.gate().not(layouter, &Existing(&is_underflow_zero))?;
 
@@ -311,7 +313,7 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeFiel
 }
 
 impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeField> Selectable<F>
-    for FpChip<F, NUM_ADVICE, NUM_FIXED, Fp>
+    for FpChip<'_, F, NUM_ADVICE, NUM_FIXED, Fp>
 {
     type Point = CRTInteger<F>;
 
@@ -350,6 +352,7 @@ pub(crate) mod tests {
     use crate::fields::fp::{FpChip, FpConfig};
     use crate::fields::{FieldChip, PrimeFieldChip};
     use crate::gates::RangeInstructions;
+    use crate::gates::range::RangeChip;
     use crate::utils::{fe_to_bigint, modulus};
     use num_bigint::{BigInt, BigUint};
 
@@ -380,7 +383,8 @@ pub(crate) mod tests {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
-            let mut chip = FpChip::<F, NUM_ADVICE, NUM_FIXED, Fq>::construct(config, true);
+	    let mut range_chip = RangeChip::<F, NUM_ADVICE, NUM_FIXED>::construct(config.range_config.clone(), true);
+            let mut chip = FpChip::<F, NUM_ADVICE, NUM_FIXED, Fq>::construct(config, &mut range_chip, true);
             chip.load_lookup_table(&mut layouter)?;
 
             let a_assigned =

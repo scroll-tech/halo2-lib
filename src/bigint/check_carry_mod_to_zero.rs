@@ -42,9 +42,6 @@ pub fn assign<F: FieldExt>(
     let a_val = a.to_bigint();
     // these are witness vectors:
     let quotient_vec = if let Some(a_big) = a_val {
-	println!("a: {:?}", a);	
-	println!("a_big: {:?}", a_big);
-	println!("modulus: {:?}", modulus);
         let (out, quotient) = get_carry_witness(&a_big, modulus);
         assert_eq!(out, BigUint::zero());
         decompose_bigint_option::<F>(&Some(quotient), m, n)

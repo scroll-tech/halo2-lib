@@ -27,17 +27,17 @@ use crate::utils::{
     modulus,
 };
 
-#[derive(Clone, Debug)]
-pub struct FpOverflowChip<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeField> {
-    pub range: RangeChip<F, NUM_ADVICE, NUM_FIXED>,
+#[derive(Debug)]
+pub struct FpOverflowChip<'a, F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeField> {
+    pub range: &'a mut RangeChip<F, NUM_ADVICE, NUM_FIXED>,
     pub limb_bits: usize,
     pub num_limbs: usize,
     pub p: BigUint,
     _marker: PhantomData<Fp>,
 }
 
-impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeField>
-    FpOverflowChip<F, NUM_ADVICE, NUM_FIXED, Fp>
+impl<'a, F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeField>
+    FpOverflowChip<'a, F, NUM_ADVICE, NUM_FIXED, Fp>
 {
     pub fn load_lookup_table(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         self.range.load_lookup_table(layouter)
@@ -63,19 +63,36 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeFiel
 	    (BigUint::from(1u64) << self.p.bits()) - 1usize,
 	))
     }
+
+    pub fn from_fp_chip(
+	range: &'a mut RangeChip<F, NUM_ADVICE, NUM_FIXED>,
+	limb_bits: usize,
+	num_limbs: usize,
+	p: BigUint,
+    ) -> Self {
+	Self {
+	    range,
+	    limb_bits,
+	    num_limbs,
+	    p,
+	    _marker: PhantomData,
+	}
+    }
 }
 
-impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeField> PrimeFieldChip<F>
-    for FpOverflowChip<F, NUM_ADVICE, NUM_FIXED, Fp>
+impl<'a, F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeField> PrimeFieldChip<'a, F>
+    for FpOverflowChip<'a, F, NUM_ADVICE, NUM_FIXED, Fp>
 {
     type Config = FpConfig<F, NUM_ADVICE, NUM_FIXED>;
+    type RangeChipType = RangeChip<F, NUM_ADVICE, NUM_FIXED>;
 
     fn construct(
         config: FpConfig<F, NUM_ADVICE, NUM_FIXED>,
+	range_chip: &'a mut RangeChip<F, NUM_ADVICE, NUM_FIXED>,
         using_simple_floor_planner: bool,
     ) -> Self {
         Self {
-            range: RangeChip::construct(config.range_config, using_simple_floor_planner),
+            range: range_chip,
             limb_bits: config.limb_bits,
             num_limbs: config.num_limbs,
             p: config.p,
@@ -85,8 +102,8 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeFiel
 }
 
 
-impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeField> FieldChip<F>
-    for FpOverflowChip<F, NUM_ADVICE, NUM_FIXED, Fp>
+impl<'a, F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeField> FieldChip<F>
+    for FpOverflowChip<'a, F, NUM_ADVICE, NUM_FIXED, Fp>
 {
     type ConstantType = BigInt;
     type WitnessType = Option<BigInt>;
@@ -226,7 +243,7 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeFiel
         layouter: &mut impl Layouter<F>,
         a: &OverflowInteger<F>,
     ) -> Result<(), Error> {
-        check_carry_mod_to_zero::assign(&mut self.range, layouter, a, &self.p)
+        check_carry_mod_to_zero::assign(self.range, layouter, a, &self.p)
     }
 
     fn carry_mod(
@@ -234,7 +251,7 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeFiel
         layouter: &mut impl Layouter<F>,
         a: &OverflowInteger<F>,
     ) -> Result<OverflowInteger<F>, Error> {
-        carry_mod::assign(&mut self.range, layouter, a, &self.p)
+        carry_mod::assign(self.range, layouter, a, &self.p)
     }
 
     fn range_check(&mut self, layouter: &mut impl Layouter<F>, a: &OverflowInteger<F>) -> Result<(), Error> {
@@ -287,8 +304,8 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeFiel
     }
 }
 
-impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeField> Selectable<F>
-    for FpOverflowChip<F, NUM_ADVICE, NUM_FIXED, Fp>
+impl<'a, F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeField> Selectable<F>
+    for FpOverflowChip<'a, F, NUM_ADVICE, NUM_FIXED, Fp>
 {
     type Point = OverflowInteger<F>;
 
