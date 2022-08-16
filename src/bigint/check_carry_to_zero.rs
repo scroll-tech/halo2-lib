@@ -103,11 +103,11 @@ pub fn assign<F: FieldExt>(
 
     let shift_val = biguint_to_fe::<F>(&(BigUint::one() << range_bits));
     let num_windows = (k + window - 1) / window;
-    let shifted_carry_assignments = layouter.assign_region(
-        || "shift carries",
-        |mut region| {
-	    let mut shifted_carry_assignments = Vec::new();
-	    for i in 0..num_windows {
+    let mut shifted_carry_assignments = Vec::new();
+    for i in 0..num_windows {
+	let shifted_carry_cell = layouter.assign_region(
+            || "shift carries",
+            |mut region| {
 		let idx = std::cmp::min(window * i + window - 1, k - 1);
 		let carry_cell = &neg_carry_assignments[idx];
                 let shift_carry_val = Some(shift_val).zip(carry_cell.value()).map(|(s, c)| s + c);
@@ -120,11 +120,11 @@ pub fn assign<F: FieldExt>(
                 let (assigned_cells, column_index) =
                     range.gate().assign_region(cells, 0, &mut region)?;
                 range.gate().enable(&mut region, column_index, 0)?;
-                shifted_carry_assignments.push(assigned_cells.last().unwrap().clone());
+                Ok(assigned_cells.last().unwrap().clone())
             }
-	    Ok(shifted_carry_assignments)
-	}
-    )?;
+	)?;
+	shifted_carry_assignments.push(shifted_carry_cell);
+    }
     for shifted_carry in shifted_carry_assignments.iter() {
         range.range_check(layouter, shifted_carry, range_bits + 1)?;
     }

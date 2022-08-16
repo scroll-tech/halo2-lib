@@ -93,32 +93,31 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
     ) -> Result<(), Error> {
 	let mut range_chip = RangeChip::<F, NUM_ADVICE, NUM_FIXED>::construct(config.base_config.range_config.clone(), true);
 	range_chip.load_lookup_table(&mut layouter)?;
-	
-	let mut fq_chip = FqOverflowChip::construct(config.scalar_config.clone(), &mut range_chip, true);
-	let G = Secp256k1Affine::generator();
-	let sk = <Secp256k1Affine as CurveAffine>::ScalarExt::random(OsRng);
-	let pk = Secp256k1Affine::from(G * sk);
-	let pk_fixed = FixedEccPoint::from_g1(&pk, config.base_config.num_limbs, config.base_config.limb_bits);
-	
-	let msg_hash = <Secp256k1Affine as CurveAffine>::ScalarExt::random(OsRng);
-	let m_assigned = fq_chip.load_private(&mut layouter, FqOverflowChip::<F>::fe_to_witness(&Some(msg_hash)))?;
-	
-	let k = <Secp256k1Affine as CurveAffine>::ScalarExt::random(OsRng);
-	let k_inv = k.invert().unwrap();
+	{	
+	    let mut fq_chip = FqOverflowChip::construct(config.scalar_config.clone(), &mut range_chip, true);
+	    let G = Secp256k1Affine::generator();
+	    let sk = <Secp256k1Affine as CurveAffine>::ScalarExt::random(OsRng);
+	    let pk = Secp256k1Affine::from(G * sk);
+	    let pk_fixed = FixedEccPoint::from_g1(&pk, config.base_config.num_limbs, config.base_config.limb_bits);
+	    
+	    let msg_hash = <Secp256k1Affine as CurveAffine>::ScalarExt::random(OsRng);
+	    let m_assigned = fq_chip.load_private(&mut layouter, FqOverflowChip::<F>::fe_to_witness(&Some(msg_hash)))?;
+	    
+	    let k = <Secp256k1Affine as CurveAffine>::ScalarExt::random(OsRng);
+	    let k_inv = k.invert().unwrap();
 
-	let r_point = Secp256k1Affine::from(G * k).coordinates().unwrap();
-	let x = r_point.x();
-	let x_bigint = FpChip::<F>::fe_to_witness(&Some(*x));
-	let r = x_bigint.as_ref().map(|xv| bigint_to_fe::<Fq>(xv)).unwrap();
-	let s = k_inv * (msg_hash + (r * sk));
+	    let r_point = Secp256k1Affine::from(G * k).coordinates().unwrap();
+	    let x = r_point.x();
+	    let x_bigint = FpChip::<F>::fe_to_witness(&Some(*x));
+	    let r = x_bigint.as_ref().map(|xv| bigint_to_fe::<Fq>(xv)).unwrap();
+	    let s = k_inv * (msg_hash + (r * sk));
 
-	let r_assigned = fq_chip.load_private(&mut layouter, FqOverflowChip::<F>::fe_to_witness(&Some(r)))?;
-	let s_assigned = fq_chip.load_private(&mut layouter, FqOverflowChip::<F>::fe_to_witness(&Some(s)))?;
-	
-	let mut fp_chip = FpChip::<F>::construct(config.base_config.clone(), &mut range_chip, true);
-	let pk_assigned = pk_fixed.assign(&mut fp_chip, &mut layouter)?;
-	// test ECDSA
-	{
+	    let r_assigned = fq_chip.load_private(&mut layouter, FqOverflowChip::<F>::fe_to_witness(&Some(r)))?;
+	    let s_assigned = fq_chip.load_private(&mut layouter, FqOverflowChip::<F>::fe_to_witness(&Some(s)))?;
+	    
+	    let mut fp_chip = FpChip::<F>::construct(config.base_config.clone(), &mut range_chip, true);
+	    let pk_assigned = pk_fixed.assign(&mut fp_chip, &mut layouter)?;
+	    // test ECDSA
 	    let ecdsa = ecdsa_verify_no_pubkey_check::<F, Fp, Fq, Secp256k1Affine, NUM_ADVICE, NUM_FIXED>(
 		&mut fp_chip,
 		&mut layouter.namespace(|| "ecdsa"),
@@ -130,6 +129,17 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
 		4,
 		4
 	    )?;
+	    println!("ECDSA res {:?}", ecdsa);
+	    
+	    println!("Using {} advice columns and {} fixed columns", NUM_ADVICE, NUM_FIXED);
+            let advice_rows = fp_chip.range.gate_chip.advice_rows.iter();
+            println!("maximum rows used by an advice column: {}", advice_rows.clone().max().unwrap());
+            println!("minimum rows used by an advice column: {}", advice_rows.min().unwrap());
+            // IMPORTANT: this assigns all constants to the fixed columns
+            // This is not optional.
+            let const_rows =
+		fp_chip.range.gate_chip.assign_and_constrain_constants(&mut layouter)?;
+            println!("maximum rows used by a fixed column: {}", const_rows);
 	}
 	println!("ecdsa done");
 	/*
@@ -212,18 +222,6 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
             }
         }
 */
-        println!("Using {} advice columns and {} fixed columns", NUM_ADVICE, NUM_FIXED);
-        let advice_rows = fp_chip.range.gate_chip.advice_rows.iter();
-        println!("maximum rows used by an advice column: {}", advice_rows.clone().max().unwrap());
-        println!("minimum rows used by an advice column: {}", advice_rows.min().unwrap());
-        // IMPORTANT: this assigns all constants to the fixed columns
-        // This is not optional.
-        let const_rows =
-            fp_chip.range.gate_chip.assign_and_constrain_constants(&mut layouter)?;
-        println!("maximum rows used by a fixed column: {}", const_rows);
-//        let const_rows2 =
-//            fq_chip.range.gate_chip.assign_and_constrain_constants(&mut layouter)?;
-//        println!("maximum rows used by a fixed column: {}", const_rows2);
 
         Ok(())
     }

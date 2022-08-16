@@ -28,21 +28,20 @@ pub fn assign<F: FieldExt>(
 
     for i in 0..k_out {
         let out_cell = layouter.assign_region(
-            || format!("mul_no_carry_{}", i),
+            || format!("mul_no_carry_assign i: {} k_out: {} k_a: {} k_b: {}", i, k_out, k_a, k_b),
             |mut region| {
                 let startj = if i >= k_b { i - k_b + 1 } else { 0 };
-                let mut prod_computation: Vec<QuantumCell<F>> =
-                    Vec::with_capacity(1 + 3 * std::cmp::min(i + 1, k_a) - startj);
+                let mut prod_computation: Vec<QuantumCell<F>> = Vec::new();
                 prod_computation.push(Constant(F::zero()));
 		let mut enable_gates = Vec::new();
 
                 let mut offset = 0;
                 let mut prod_val = Some(F::zero());
                 for j in startj..=i {
-		    enable_gates.push(offset);
                     if j >= k_a {
                         break;
                     }
+		    enable_gates.push(offset);
 
                     let a_cell = &a.limbs[j];
                     let b_cell = &b.limbs[i - j];
@@ -57,10 +56,10 @@ pub fn assign<F: FieldExt>(
 
                     offset += 3;
                 }
-                let (prod_computation_assignments, idx) =
+                let (prod_computation_assignments, column_idx) =
                     gate.assign_region(prod_computation, 0, &mut region)?;
 		for row in enable_gates {
-		    gate.enable(&mut region, idx, row)?;
+		    gate.enable(&mut region, column_idx, row)?;
 		}
                 Ok(prod_computation_assignments.last().unwrap().clone())
             },
@@ -90,7 +89,7 @@ pub fn truncate<F: FieldExt>(
 
     for i in 0..k {
         let out_cell = layouter.assign_region(
-            || format!("mul_no_carry_{}", i),
+            || format!("mul_no_carry_{}/{}", i, k),
             |mut region| {
                 let mut prod_computation: Vec<QuantumCell<F>> =
                     Vec::with_capacity(1 + 3 * std::cmp::min(i + 1, k));
@@ -117,8 +116,8 @@ pub fn truncate<F: FieldExt>(
                 }
                 let (prod_computation_assignments, column_index) =
                     gate.assign_region(prod_computation, 0, &mut region)?;
-                for i in enable_gates {
-                    gate.enable(&mut region, column_index, i)?;
+                for row in enable_gates {
+                    gate.enable(&mut region, column_index, row)?;
                 }
                 Ok(prod_computation_assignments.last().unwrap().clone())
             },

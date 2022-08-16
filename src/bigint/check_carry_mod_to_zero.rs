@@ -79,7 +79,7 @@ pub fn assign<F: FieldExt>(
 
     for i in 0..k_prod {
         let (mod_cell, quot_cell, check_cell) = layouter.assign_region(
-            || format!("carry_mod_{}", i),
+            || format!("check_carry_mod_to_zero_assign_{}", i),
             |mut region| {
                 let mut offset = 0;
 
@@ -91,10 +91,10 @@ pub fn assign<F: FieldExt>(
 		let mut enable_gates = Vec::new();
 
                 for j in startj..=i {
-		    enable_gates.push(offset);
                     if j >= mod_vec.len() {
                         break;
                     }
+		    enable_gates.push(offset);
 
                     if j < mod_assigned.len() {
                         // does it matter whether we are enabling equality from advice column or fixed column for constants?
@@ -119,11 +119,25 @@ pub fn assign<F: FieldExt>(
                     offset += 3;
                 }
 
+		if i < k {
+		    // perform step 2: compute prod - a
+                    // transpose of:
+                    // | prod | -1 | a | prod - a
+                    // where prod is at relative row `offset`
+		    let check_val = prod_val.zip(a.limbs[i].value()).map(|(prod, &a)| prod - a);
+		    prod_computation.append(&mut vec![
+			Constant(-F::from(1)),
+                        Existing(&a.limbs[i]),
+                        Witness(check_val),
+		    ]);
+		    enable_gates.push(offset);
+		}
+
                 // assign all the cells above
-                let (prod_computation_assignments, idx) =
+                let (prod_computation_assignments, column_idx) =
                     range.gate().assign_region(prod_computation, 0, &mut region)?;
 		for row in enable_gates {
-                    range.gate().enable(&mut region, idx, offset)?;
+                    range.gate().enable(&mut region, column_idx, row)?;
 		}
 
 		let mut mod_cell = None;
@@ -138,29 +152,7 @@ pub fn assign<F: FieldExt>(
                     quot_cell = Some(prod_computation_assignments[2].clone());
                 }
 
-		let mut check_cell = None;
-                if i < k {
-                    // perform step 2: compute prod - a
-                    // transpose of:
-                    // | prod | -1 | a | prod - a
-                    // where prod is at relative row `offset`
-
-                    let check_val = prod_val.zip(a.limbs[i].value()).map(|(prod, &a)| prod - a);
-
-                    let (acells, idx) = range.gate().assign_region(
-                        vec![
-                            Constant(-F::from(1)),
-                            Existing(&a.limbs[i]),
-                            Witness(check_val),
-                        ],
-                        offset + 1,
-                        &mut region,
-                    )?;
-                    range.gate().enable(&mut region, idx, offset)?;		    
-                    check_cell = Some(acells[2].clone());
-                } else {
-                    check_cell = Some(prod_computation_assignments.last().unwrap().clone());
-                }
+		let check_cell = Some(prod_computation_assignments.last().unwrap().clone());
 		
                 Ok((
 		    mod_cell,
@@ -286,7 +278,7 @@ pub fn crt<F: FieldExt>(
 
     for i in 0..k {
         let (mod_cell, quot_cell, check_cell) = layouter.assign_region(
-            || format!("carry_mod_{}", i),
+            || format!("check_carry_mod_to_zero_crt_{}", i),
             |mut region| {
                 let mut offset = 0;
 
