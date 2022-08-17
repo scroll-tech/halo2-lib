@@ -1,12 +1,16 @@
 #![allow(non_snake_case)]
 #![feature(explicit_generic_args_with_impl_trait)]
 use std::marker::PhantomData;
+use std::time::{Duration, Instant};
 
 use ff::{Field, PrimeField};
 use halo2_proofs::circuit::floor_planner::*;
+use halo2_proofs::pairing::bn256::{Bn256, G1Affine};
 use halo2_proofs::pairing::group::Group;
+use halo2_proofs::poly::commitment::Params;
 use halo2_proofs::{
     arithmetic::{CurveAffine, FieldExt}, circuit::*, dev::MockProver, pairing::bn256::Fr, plonk::*,
+    transcript::{Blake2bWrite, Challenge255},
 };
 use halo2curves::{
     secp256k1::{Fp, Fq, Secp256k1, Secp256k1Affine}
@@ -241,6 +245,51 @@ fn test_secp() {
     let prover = MockProver::run(k, &circuit, vec![]).unwrap();
     //prover.assert_satisfied();
     assert_eq!(prover.verify(), Ok(()));
+}
+
+#[cfg(test)]
+#[test]
+fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
+    let k = 23;
+    let params = Params::<G1Affine>::unsafe_setup::<Bn256>(k);
+
+    let mut rng = rand::thread_rng();
+    let P = Some(Secp256k1Affine::random(&mut rng));
+    let scalar = Some(Fq::random(&mut rng));
+
+    let start = Instant::now();
+    let circuit = MyCircuit::<Fr> {
+	P: None,
+	scalar: None,
+	_marker: PhantomData
+    };
+
+    let vk = keygen_vk(&params, &circuit)?;
+    let vk_duration = start.elapsed();
+    println!("Time elapsed in generating vkey: {:?}", vk_duration);
+    let pk = keygen_pk(&params, vk, &circuit)?;
+    let pk_duration = start.elapsed();
+    println!("Time elapsed in generating pkey: {:?}", pk_duration - vk_duration);
+    let circuit = MyCircuit::<Fr> {
+	P,
+	scalar,
+	_marker: PhantomData,
+    };
+
+    let fill_duration = start.elapsed();
+    println!("Time elapsed in filling circuit: {:?}", fill_duration - pk_duration);
+
+    // create a proof
+    let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
+    create_proof(&params, &pk, &[circuit], &[], rng, &mut transcript)?;
+    let _proof = transcript.finalize();
+
+    println!("Done generating proof");
+    let proof_duration = start.elapsed();
+    let proof_time = proof_duration - fill_duration;
+    println!("Proving time: {:?}", proof_time);
+
+    Ok(())
 }
 
 #[cfg(feature = "dev-graph")]
