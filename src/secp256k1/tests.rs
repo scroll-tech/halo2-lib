@@ -263,19 +263,22 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
 	scalar: None,
 	_marker: PhantomData
     };
-
+    let circuit_duration = start.elapsed();	
+    println!("Time elapsed in circuit construction: {:?}", circuit_duration);
+    
     let vk = keygen_vk(&params, &circuit)?;
     let vk_duration = start.elapsed();
-    println!("Time elapsed in generating vkey: {:?}", vk_duration);
+    println!("Time elapsed in generating vkey: {:?}", vk_duration - circuit_duration);
+    
     let pk = keygen_pk(&params, vk, &circuit)?;
     let pk_duration = start.elapsed();
     println!("Time elapsed in generating pkey: {:?}", pk_duration - vk_duration);
+    
     let circuit = MyCircuit::<Fr> {
 	P,
 	scalar,
 	_marker: PhantomData,
     };
-
     let fill_duration = start.elapsed();
     println!("Time elapsed in filling circuit: {:?}", fill_duration - pk_duration);
 
@@ -283,11 +286,8 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
     let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
     create_proof(&params, &pk, &[circuit], &[], rng, &mut transcript)?;
     let _proof = transcript.finalize();
-
-    println!("Done generating proof");
     let proof_duration = start.elapsed();
-    let proof_time = proof_duration - fill_duration;
-    println!("Proving time: {:?}", proof_time);
+    println!("Proving time: {:?}", proof_duration - fill_duration);
 
     Ok(())
 }
@@ -295,13 +295,13 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(feature = "dev-graph")]
 #[cfg(test)]
 #[test]
-fn plot_ecc() {
-    let k = 12;
+fn plot_secp() {
+    let k = 19;
     use plotters::prelude::*;
 
     let root = BitMapBackend::new("layout.png", (512, 16384)).into_drawing_area();
     root.fill(&WHITE).unwrap();
-    let root = root.titled("Secp256k1 Layout", ("sans-serif", 60)).unwrap();
+    let root = root.titled("ECDSA Layout", ("sans-serif", 60)).unwrap();
 
     let circuit = MyCircuit::<Fr>::default();
 
