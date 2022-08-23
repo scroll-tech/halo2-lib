@@ -265,42 +265,21 @@ impl<'a, F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: Prime
         Ok(())
     }
 
-    fn is_zero(
+    fn is_soft_zero(
 	&mut self,
 	layouter: &mut impl Layouter<F>,
 	a: &OverflowInteger<F>,
     ) -> Result<AssignedCell<F, F>, Error> {
-	let carry = self.carry_mod(layouter, a)?;
-	let is_carry_zero = big_is_zero::assign(self.range(), layouter, &carry)?;
+	let is_carry_zero = big_is_zero::assign(self.range(), layouter, a)?;
 	
 	// underflow != 0 iff carry < p
 	let p = self.load_constant(layouter, BigInt::from(self.p.clone()))?;
-	let (diff, underflow) = sub::assign(self.range(), layouter, &carry, &p)?;
+	let (diff, underflow) = sub::assign(self.range(), layouter, a, &p)?;
 	let is_underflow_zero = self.range.is_zero(layouter, &underflow)?;
 	let range_check = self.range.gate().not(layouter, &Existing(&is_underflow_zero))?;
 
 	let res = self.range.gate().and(layouter, &Existing(&is_carry_zero), &Existing(&range_check))?;
 	Ok(res)	
-    }
-
-    fn is_equal(
-	&mut self,
-	layouter: &mut impl Layouter<F>,
-	a: &OverflowInteger<F>,
-	b: &OverflowInteger<F>,
-    ) -> Result<AssignedCell<F, F>, Error> {
-	let diff = self.sub_no_carry(layouter, a, b)?;
-	let carry_res = self.carry_mod(layouter, &diff)?;
-	let is_diff_zero = big_is_zero::assign(self.range(), layouter, &carry_res)?;
-	
-	// underflow != 0 iff res < p
-	let p = self.load_constant(layouter, BigInt::from(self.p.clone()))?;
-	let (diff, underflow) = sub::assign(self.range(), layouter, &carry_res, &p)?;
-	let is_underflow_zero = self.range.is_zero(layouter, &underflow)?;
-	let range_check = self.range.gate().not(layouter, &Existing(&is_underflow_zero))?;
-
-	let res = self.range.gate().and(layouter, &Existing(&is_diff_zero), &Existing(&range_check))?;
-	Ok(res)
     }
 }
 

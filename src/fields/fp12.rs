@@ -374,14 +374,14 @@ where
         Ok(())
     }
 
-    fn is_zero(
+    fn is_soft_zero(
 	&mut self,
 	layouter: &mut impl Layouter<F>,
 	a: &FqPoint<F>,
     ) -> Result<AssignedCell<F, F>, Error> {
 	let mut prev = None;
 	for a_coeff in &a.coeffs {
-	    let coeff = self.fp_chip.is_zero(layouter, a_coeff)?;
+	    let coeff = self.fp_chip.is_soft_zero(layouter, a_coeff)?;
 	    if let Some(p) = prev {
 		let new = self.fp_chip.range()
 		    .gate().and(layouter, &Existing(&coeff), &Existing(&p))?;
@@ -392,26 +392,6 @@ where
 	}
 	Ok(prev.unwrap())
     }
-
-    fn is_equal(
-	&mut self,
-	layouter: &mut impl Layouter<F>,
-	a: &FqPoint<F>,
-	b: &FqPoint<F>,
-    ) -> Result<AssignedCell<F, F>, Error> {
-	let mut prev = None;
-	for (a_coeff, b_coeff) in a.coeffs.iter().zip(b.coeffs.clone()) {
-	    let coeff = self.fp_chip.is_equal(layouter, a_coeff, &b_coeff)?;
-	    if let Some(p) = prev {
-		let new = self.fp_chip.range()
-		    .gate().and(layouter, &Existing(&coeff), &Existing(&p))?;
-		prev = Some(new);
-	    } else {
-		prev = Some(coeff);
-	    }
-	}
-	Ok(prev.unwrap())	
-    }    
 }
 
 #[cfg(test)]
