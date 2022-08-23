@@ -278,7 +278,7 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeFiel
 	layouter: &mut impl Layouter<F>,
 	a: &CRTInteger<F>,
     ) -> Result<AssignedCell<F, F>, Error> {
-	let is_carry_zero = big_is_zero::crt(self.range, layouter, a)?;
+	let is_zero = big_is_zero::crt(self.range, layouter, a)?;
 
 	// underflow != 0 iff carry < p
 	let p = self.load_constant(layouter, BigInt::from(self.p.clone()))?;
@@ -286,8 +286,26 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeFiel
 	let is_underflow_zero = self.range.is_zero(layouter, &underflow)?;
 	let range_check = self.range.gate().not(layouter, &Existing(&is_underflow_zero))?;
 
-	let res = self.range.gate().and(layouter, &Existing(&is_carry_zero), &Existing(&range_check))?;
-	Ok(res)	
+	let res = self.range.gate().and(layouter, &Existing(&is_zero), &Existing(&range_check))?;
+	Ok(res)
+    }
+
+    fn is_soft_nonzero(
+	&mut self,
+	layouter: &mut impl Layouter<F>,
+	a: &CRTInteger<F>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+	let is_zero = big_is_zero::crt(self.range, layouter, a)?;
+	let is_nonzero = self.range.gate().not(layouter, &Existing(&is_zero))?;
+
+	// underflow != 0 iff carry < p
+	let p = self.load_constant(layouter, BigInt::from(self.p.clone()))?;
+	let (diff, underflow) = sub::crt(self.range, layouter, a, &p)?;
+	let is_underflow_zero = self.range.is_zero(layouter, &underflow)?;
+	let range_check = self.range.gate().not(layouter, &Existing(&is_underflow_zero))?;
+
+	let res = self.range.gate().and(layouter, &Existing(&is_nonzero), &Existing(&range_check))?;
+	Ok(res)
     }
 }
 

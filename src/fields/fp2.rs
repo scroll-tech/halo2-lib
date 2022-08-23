@@ -301,4 +301,22 @@ where
 	}
 	Ok(prev.unwrap())
     }
+
+    fn is_soft_nonzero(
+	&mut self,
+	layouter: &mut impl Layouter<F>,
+	a: &FqPoint<F>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+	let mut prev = None;
+	for a_coeff in &a.coeffs {
+	    let coeff = self.fp_chip.is_soft_nonzero(layouter, a_coeff)?;
+	    if let Some(p) = prev {
+		let new = self.fp_chip.range().gate().or(layouter, &Existing(&coeff), &Existing(&p))?;
+		prev = Some(new);
+	    } else {
+		prev = Some(coeff);
+	    }
+	}
+	Ok(prev.unwrap())
+    }
 }

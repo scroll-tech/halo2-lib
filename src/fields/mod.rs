@@ -120,6 +120,14 @@ pub trait FieldChip<F: FieldExt> {
 	a: &Self::FieldPoint,
     ) -> Result<AssignedCell<F, F>, Error>;
     
+    // Constrains that the underlying big integer is in [1, p - 1].
+    // For field extensions, checks coordinate-wise.
+    fn is_soft_nonzero(
+	&mut self,
+	layouter: &mut impl Layouter<F>,
+	a: &Self::FieldPoint,
+    ) -> Result<AssignedCell<F, F>, Error>;
+
     fn is_zero(
 	&mut self,
 	layouter: &mut impl Layouter<F>,
