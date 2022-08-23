@@ -480,6 +480,9 @@ where
 
 // CF is the coordinate field of GA
 // SF is the scalar field of GA
+// p = coordinate field modulus
+// n = scalar field modulus
+// Only valid when p is very close to n in size (e.g. for Secp256k1)
 pub fn ecdsa_verify_no_pubkey_check<F: FieldExt, CF: PrimeField, SF: PrimeField, GA, const NUM_ADVICE: usize, const NUM_FIXED: usize>(
     base_chip: &mut FpChip<F, NUM_ADVICE, NUM_FIXED, CF>,
     layouter: &mut impl Layouter<F>,
@@ -516,7 +519,6 @@ where
     let s_is_zero = scalar_chip.is_zero(layouter, &s)?;
 
     // compute u1 = m s^{-1} mod n and u2 = r s^{-1} mod n
-    // TODO: maybe the big_less_than is optional?
     let u1 = scalar_chip.divide(layouter, &msghash, &s)?;
     let u2 = scalar_chip.divide(layouter, &r, &s)?;
 
@@ -533,10 +535,13 @@ where
     let u1_u2_x_eq = base_chip.is_equal(layouter, &u1_mul.x, &u2_mul.x)?;
     let u1_u2_not_neg = base_chip.range.gate().not(layouter, &Existing(&u1_u2_x_eq))?;
 
-    // compute (x1, y1) = u1 * G + u2 * pubkey and check r == x1 mod n
+    // compute (x1, y1) = u1 * G + u2 * pubkey and check (r mod n) == x1 as integers
+    // WARNING: For optimization reasons, does not reduce x1 mod n, which is
+    //          invalid unless p is very close to n in size.
     let sum = ecc_add_unequal(base_chip, layouter, &u1_mul, &u2_mul)?;
     let equal_check = base_chip.is_equal(layouter, &sum.x, &r_crt)?;
 
+    // TODO: maybe the big_less_than is optional?
     let u1_small = big_less_than::assign(base_chip.range, layouter, &u1, &n)?;
     let u2_small = big_less_than::assign(base_chip.range, layouter, &u2, &n)?;
     let r_valid = base_chip.range.gate().not(layouter, &Existing(&r_is_zero))?;
