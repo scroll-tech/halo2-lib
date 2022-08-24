@@ -267,43 +267,39 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpChip<'_, F, Fp> {
         Ok(())
     }
 
-    fn is_zero(
+    fn is_soft_zero(
         &mut self,
         layouter: &mut impl Layouter<F>,
         a: &CRTInteger<F>,
     ) -> Result<AssignedCell<F, F>, Error> {
-        let carry = self.carry_mod(layouter, a)?;
-        let is_carry_zero = big_is_zero::crt(self.range, layouter, &carry)?;
+        let is_zero = big_is_zero::crt(self.range, layouter, a)?;
 
         // underflow != 0 iff carry < p
         let p = self.load_constant(layouter, BigInt::from(self.p.clone()))?;
-        let (diff, underflow) = sub::crt(self.range, layouter, &carry, &p)?;
+        let (diff, underflow) = sub::crt(self.range, layouter, a, &p)?;
         let is_underflow_zero = self.range.is_zero(layouter, &underflow)?;
         let range_check = self.range.gate().not(layouter, &Existing(&is_underflow_zero))?;
 
-        let res =
-            self.range.gate().and(layouter, &Existing(&is_carry_zero), &Existing(&range_check))?;
+        let res = self.range.gate().and(layouter, &Existing(&is_zero), &Existing(&range_check))?;
         Ok(res)
     }
 
-    fn is_equal(
+    fn is_soft_nonzero(
         &mut self,
         layouter: &mut impl Layouter<F>,
         a: &CRTInteger<F>,
-        b: &CRTInteger<F>,
     ) -> Result<AssignedCell<F, F>, Error> {
-        let diff = self.sub_no_carry(layouter, a, b)?;
-        let carry_res = self.carry_mod(layouter, &diff)?;
-        let is_diff_zero = big_is_zero::crt(self.range, layouter, &carry_res)?;
+        let is_zero = big_is_zero::crt(self.range, layouter, a)?;
+        let is_nonzero = self.range.gate().not(layouter, &Existing(&is_zero))?;
 
-        // underflow != 0 iff res < p
+        // underflow != 0 iff carry < p
         let p = self.load_constant(layouter, BigInt::from(self.p.clone()))?;
-        let (diff, underflow) = sub::crt(self.range, layouter, &carry_res, &p)?;
+        let (diff, underflow) = sub::crt(self.range, layouter, a, &p)?;
         let is_underflow_zero = self.range.is_zero(layouter, &underflow)?;
         let range_check = self.range.gate().not(layouter, &Existing(&is_underflow_zero))?;
 
         let res =
-            self.range.gate().and(layouter, &Existing(&is_diff_zero), &Existing(&range_check))?;
+            self.range.gate().and(layouter, &Existing(&is_nonzero), &Existing(&range_check))?;
         Ok(res)
     }
 }

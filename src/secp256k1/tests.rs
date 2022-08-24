@@ -1,5 +1,4 @@
 #![allow(non_snake_case)]
-#![feature(explicit_generic_args_with_impl_trait)]
 use std::marker::PhantomData;
 use std::time::{Duration, Instant};
 
@@ -20,7 +19,7 @@ use rand_core::OsRng;
 
 use super::{FpChip, FqOverflowChip, NUM_ADVICE, NUM_FIXED, Secp256k1Chip, SECP_B};
 use crate::{
-    ecc::{fixed::FixedEccPoint, ecdsa_verify_no_pubkey_check},
+    ecc::{fixed::FixedEccPoint, EccChip, ecdsa_verify_no_pubkey_check},
     fields::{fp::FpConfig, FieldChip, PrimeFieldChip},
     gates::{
 	GateInstructions,
@@ -102,7 +101,6 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
 	    let G = Secp256k1Affine::generator();
 	    let sk = <Secp256k1Affine as CurveAffine>::ScalarExt::random(OsRng);
 	    let pk = Secp256k1Affine::from(G * sk);
-	    let pk_fixed = FixedEccPoint::from_g1(&pk, config.base_config.num_limbs, config.base_config.limb_bits);
 	    
 	    let msg_hash = <Secp256k1Affine as CurveAffine>::ScalarExt::random(OsRng);
 	    let m_assigned = fq_chip.load_private(&mut layouter, FqOverflowChip::<F>::fe_to_witness(&Some(msg_hash)))?;
@@ -120,7 +118,8 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
 	    let s_assigned = fq_chip.load_private(&mut layouter, FqOverflowChip::<F>::fe_to_witness(&Some(s)))?;
 	    
 	    let mut fp_chip = FpChip::<F>::construct(config.base_config.clone(), &mut range_chip, true);
-	    let pk_assigned = pk_fixed.assign(&mut fp_chip, &mut layouter)?;
+	    let mut ecc_chip = EccChip::<F, FpChip<F>>::construct(&mut fp_chip);
+	    let pk_assigned = ecc_chip.load_private(&mut layouter, (Some(pk.x), Some(pk.y)))?;
 	    // test ECDSA
 	    let ecdsa = ecdsa_verify_no_pubkey_check::<F, Fp, Fq, Secp256k1Affine, NUM_ADVICE, NUM_FIXED>(
 		&mut fp_chip,
@@ -129,7 +128,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
 		&r_assigned,
 		&s_assigned,
 		&m_assigned,
-		F::from(7),
+		F::from(SECP_B),
 		4,
 		4
 	    )?;

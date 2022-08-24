@@ -111,18 +111,42 @@ pub trait FieldChip<F: FieldExt> {
         a: &Self::FieldPoint,
     ) -> Result<(), Error>;
 
-    fn is_zero(
+    // Assumes the witness for a is 0
+    // Constrains that the underlying big integer is 0 and < p.
+    // For field extensions, checks coordinate-wise.
+    fn is_soft_zero(
 	&mut self,
 	layouter: &mut impl Layouter<F>,
 	a: &Self::FieldPoint,
     ) -> Result<AssignedCell<F, F>, Error>;
+    
+    // Constrains that the underlying big integer is in [1, p - 1].
+    // For field extensions, checks coordinate-wise.
+    fn is_soft_nonzero(
+	&mut self,
+	layouter: &mut impl Layouter<F>,
+	a: &Self::FieldPoint,
+    ) -> Result<AssignedCell<F, F>, Error>;
+
+    fn is_zero(
+	&mut self,
+	layouter: &mut impl Layouter<F>,
+	a: &Self::FieldPoint,
+    ) -> Result<AssignedCell<F, F>, Error> {
+	let carry = self.carry_mod(layouter, a)?;
+	self.is_soft_zero(layouter, &carry)
+    }
 
     fn is_equal(
 	&mut self,
 	layouter: &mut impl Layouter<F>,
 	a: &Self::FieldPoint,
 	b: &Self::FieldPoint,
-    ) -> Result<AssignedCell<F, F>, Error>;
+    ) -> Result<AssignedCell<F, F>, Error> {
+	let diff = self.sub_no_carry(layouter, a, b)?;
+	let carry_res = self.carry_mod(layouter, &diff)?;
+	self.is_soft_zero(layouter, &carry_res)
+    }
     
     fn mul(
         &mut self,
