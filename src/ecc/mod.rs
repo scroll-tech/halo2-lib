@@ -14,8 +14,8 @@ use num_traits::{Num, One, Zero};
 use rand_core::OsRng;
 
 use crate::bigint::{
-    add_no_carry, inner_product, mul_no_carry, scalar_mul_no_carry, select, sub_no_carry,
-    CRTInteger, FixedCRTInteger, OverflowInteger, big_less_than,
+    add_no_carry, big_less_than, inner_product, mul_no_carry, scalar_mul_no_carry, select,
+    sub_no_carry, CRTInteger, FixedCRTInteger, OverflowInteger,
 };
 use crate::fields::{
     fp::{FpChip, FpConfig},
@@ -25,8 +25,8 @@ use crate::fields::{
 use crate::fields::{FieldChip, PrimeFieldChip};
 use crate::gates::{
     GateInstructions,
+    QuantumCell::{self, Constant, Existing, Witness},
     RangeInstructions,
-    QuantumCell::{self, Constant, Existing, Witness}
 };
 use crate::utils::{
     bigint_to_fe, decompose_bigint_option, decompose_biguint, fe_to_bigint, fe_to_biguint, modulus,
@@ -480,7 +480,14 @@ where
 
 // CF is the coordinate field of GA
 // SF is the scalar field of GA
-pub fn ecdsa_verify_no_pubkey_check<F: FieldExt, CF: PrimeField, SF: PrimeField, GA, const NUM_ADVICE: usize, const NUM_FIXED: usize>(
+pub fn ecdsa_verify_no_pubkey_check<
+    F: FieldExt,
+    CF: PrimeField,
+    SF: PrimeField,
+    GA,
+    const NUM_ADVICE: usize,
+    const NUM_FIXED: usize,
+>(
     base_chip: &mut FpChip<F, NUM_ADVICE, NUM_FIXED, CF>,
     layouter: &mut impl Layouter<F>,
     pubkey: &EccPoint<F, <FpChip<F, NUM_ADVICE, NUM_FIXED, CF> as FieldChip<F>>::FieldPoint>,
@@ -495,22 +502,19 @@ where
     GA: CurveAffine<Base = CF, ScalarExt = SF>,
 {
     let G = FixedEccPoint::from_g1(
-	&GA::generator(),
-	pubkey.x.truncation.limbs.len(),
-	pubkey.x.truncation.limb_bits
+        &GA::generator(),
+        pubkey.x.truncation.limbs.len(),
+        pubkey.x.truncation.limb_bits,
     );
 
     let mut scalar_chip = FpOverflowChip::<F, NUM_ADVICE, NUM_FIXED, SF>::from_fp_chip(
-	base_chip.range,
-	base_chip.limb_bits,
-	base_chip.num_limbs,
-	modulus::<SF>()
+        base_chip.range,
+        base_chip.limb_bits,
+        base_chip.num_limbs,
+        modulus::<SF>(),
     );
-    let n = scalar_chip.load_constant(
-	layouter,
-	BigInt::from(scalar_chip.p.clone())
-    )?;
-    
+    let n = scalar_chip.load_constant(layouter, BigInt::from(scalar_chip.p.clone()))?;
+
     // check r,s are in [1, n - 1]
     let r_is_zero = scalar_chip.is_zero(layouter, &r)?;
     let s_is_zero = scalar_chip.is_zero(layouter, &s)?;
@@ -521,11 +525,20 @@ where
     let u2 = scalar_chip.divide(layouter, &r, &s)?;
 
     let r_crt = scalar_chip.to_crt(layouter, r)?;
-    
+
     // compute u1 * G and u2 * pubkey
-    let u1_mul = fixed_base_scalar_multiply(base_chip, layouter, &G, &u1.limbs, b, u1.limb_bits, fixed_window_bits)?;
-    let u2_mul = scalar_multiply(base_chip, layouter, pubkey, &u2.limbs, b, u2.limb_bits, var_window_bits)?;
-    
+    let u1_mul = fixed_base_scalar_multiply(
+        base_chip,
+        layouter,
+        &G,
+        &u1.limbs,
+        b,
+        u1.limb_bits,
+        fixed_window_bits,
+    )?;
+    let u2_mul =
+        scalar_multiply(base_chip, layouter, pubkey, &u2.limbs, b, u2.limb_bits, var_window_bits)?;
+
     // check u1 * G and u2 * pubkey are not negatives and not equal
     //     TODO: Technically they could be equal for a valid signature, but this happens with vanishing probability
     //           for an ECDSA signature constructed in a standard way
@@ -616,15 +629,7 @@ where
         max_bits: usize,
         window_bits: usize,
     ) -> Result<EccPoint<F, FC::FieldPoint>, Error> {
-        scalar_multiply(
-	    self.field_chip,
-	    layouter,
-	    P,
-	    scalar,
-	    b,
-	    max_bits,
-	    window_bits
-	)
+        scalar_multiply(self.field_chip, layouter, P, scalar, b, max_bits, window_bits)
     }
 
     pub fn multi_scalar_mult<GA>(

@@ -17,7 +17,7 @@ struct MyCircuit<F> {
 }
 
 impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
-    type Config = FlexGateConfig<F, 2, 1>;
+    type Config = FlexGateConfig<F>;
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
@@ -25,7 +25,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        FlexGateConfig::configure(meta)
+        FlexGateConfig::configure(meta, 2, 1)
     }
 
     fn synthesize(
@@ -106,7 +106,7 @@ struct RangeTestCircuit<F> {
 }
 
 impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
-    type Config = range::RangeConfig<F, 2, 1>;
+    type Config = range::RangeConfig<F>;
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
@@ -114,7 +114,7 @@ impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        range::RangeConfig::configure(meta, 3)
+        range::RangeConfig::configure(meta, 2, 1, 3)
     }
 
     fn synthesize(

@@ -1,3 +1,5 @@
+use core::num;
+
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*, poly::Rotation};
 use num_bigint::{BigInt, BigUint};
 
@@ -13,26 +15,29 @@ use crate::utils::{
 use super::RangeInstructions;
 
 #[derive(Clone, Debug)]
-pub struct RangeConfig<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize> {
-    pub q_lookups: [Selector; NUM_ADVICE],
+pub struct RangeConfig<F: FieldExt> {
+    pub q_lookups: Vec<Selector>,
     pub lookup: TableColumn,
     pub lookup_bits: usize,
-    pub gate_config: FlexGateConfig<F, NUM_ADVICE, NUM_FIXED>,
+    pub gate_config: FlexGateConfig<F>,
 }
 
-impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize>
-    RangeConfig<F, NUM_ADVICE, NUM_FIXED>
-{
-    pub fn configure(meta: &mut ConstraintSystem<F>, lookup_bits: usize) -> Self {
+impl<F: FieldExt> RangeConfig<F> {
+    pub fn configure(
+        meta: &mut ConstraintSystem<F>,
+        num_advice: usize,
+        num_fixed: usize,
+        lookup_bits: usize,
+    ) -> Self {
         assert!(lookup_bits <= 28);
 
-        let mut q_lookup_vec = Vec::with_capacity(NUM_ADVICE);
-        for _i in 0..NUM_ADVICE {
+        let mut q_lookup_vec = Vec::with_capacity(num_advice);
+        for _i in 0..num_advice {
             let q = meta.complex_selector();
             q_lookup_vec.push(q);
         }
         let lookup = meta.lookup_table_column();
-        let gate_config = FlexGateConfig::configure(meta);
+        let gate_config = FlexGateConfig::configure(meta, num_advice, num_fixed);
         let config = Self {
             q_lookups: q_lookup_vec.try_into().expect("qlookup should have correct len"),
             lookup,
@@ -45,7 +50,7 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize>
     }
 
     fn create_lookup(&self, meta: &mut ConstraintSystem<F>) -> () {
-        for i in 0..NUM_ADVICE {
+        for i in 0..self.gate_config.gates.len() {
             meta.lookup("lookup", |meta| {
                 let q = meta.query_selector(self.q_lookups[i]);
                 let a = meta.query_advice(self.gate_config.gates[i].value, Rotation::cur());
@@ -57,20 +62,15 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize>
 
 // See FlexGateChip for why we need distinction between Config and Chip
 #[derive(Clone, Debug)]
-pub struct RangeChip<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize> {
-    pub q_lookups: [Selector; NUM_ADVICE],
+pub struct RangeChip<F: FieldExt> {
+    pub q_lookups: Vec<Selector>,
     pub lookup: TableColumn,
     pub lookup_bits: usize,
-    pub gate_chip: FlexGateChip<F, NUM_ADVICE, NUM_FIXED>,
+    pub gate_chip: FlexGateChip<F>,
 }
 
-impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize>
-    RangeChip<F, NUM_ADVICE, NUM_FIXED>
-{
-    pub fn construct(
-        config: RangeConfig<F, NUM_ADVICE, NUM_FIXED>,
-        using_simple_floor_planner: bool,
-    ) -> Self {
+impl<F: FieldExt> RangeChip<F> {
+    pub fn construct(config: RangeConfig<F>, using_simple_floor_planner: bool) -> Self {
         let gate_chip = FlexGateChip::construct(config.gate_config, using_simple_floor_planner);
         Self {
             q_lookups: config.q_lookups,
@@ -99,10 +99,8 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize>
     }
 }
 
-impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize> RangeInstructions<F>
-    for RangeChip<F, NUM_ADVICE, NUM_FIXED>
-{
-    type GateChip = FlexGateChip<F, NUM_ADVICE, NUM_FIXED>;
+impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
+    type GateChip = FlexGateChip<F>;
 
     fn gate(&mut self) -> &mut Self::GateChip {
         &mut self.gate_chip

@@ -52,32 +52,27 @@ impl<F: FieldExt> GateConfig<F> {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct FlexGateConfig<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize> {
-    pub gates: [GateConfig<F>; NUM_ADVICE],
+pub struct FlexGateConfig<F: FieldExt> {
+    pub gates: Vec<GateConfig<F>>,
     // `constants` is a vector of fixed columns for allocating constant values
-    pub constants: [Column<Fixed>; NUM_FIXED],
+    pub constants: Vec<Column<Fixed>>,
 }
 
-impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize>
-    FlexGateConfig<F, NUM_ADVICE, NUM_FIXED>
-{
-    pub fn configure(meta: &mut ConstraintSystem<F>) -> Self {
-        let mut gates_vec = Vec::with_capacity(NUM_ADVICE);
-        for _i in 0..NUM_ADVICE {
+impl<F: FieldExt> FlexGateConfig<F> {
+    pub fn configure(meta: &mut ConstraintSystem<F>, num_advice: usize, num_fixed: usize) -> Self {
+        let mut gates = Vec::with_capacity(num_advice);
+        for _i in 0..num_advice {
             let gate = GateConfig::configure(meta);
-            gates_vec.push(gate);
+            gates.push(gate);
         }
-        let mut constants_vec = Vec::with_capacity(NUM_FIXED);
-        for _i in 0..NUM_FIXED {
+        let mut constants = Vec::with_capacity(num_fixed);
+        for _i in 0..num_fixed {
             let c = meta.fixed_column();
             meta.enable_equality(c);
             // meta.enable_constant(c);
-            constants_vec.push(c);
+            constants.push(c);
         }
-        Self {
-            gates: gates_vec.try_into().expect("gates should have correct len"),
-            constants: constants_vec.try_into().expect("fixed col should have correct len"),
-        }
+        Self { gates, constants }
     }
 }
 
@@ -85,10 +80,10 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize>
 // The `Circuit` trait takes in `Config` as an input that is NOT mutable, so we must make the distinction between immutable Config and mutable Chip
 // We will then pass the `Chip` around everywhere for function calls
 #[derive(Clone, Debug)]
-pub struct FlexGateChip<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize> {
-    pub config: FlexGateConfig<F, NUM_ADVICE, NUM_FIXED>,
+pub struct FlexGateChip<F: FieldExt> {
+    pub config: FlexGateConfig<F>,
     // `advice_rows[i]` keeps track of the number of rows used in the advice column `config.gates[i].value`
-    pub advice_rows: [u64; NUM_ADVICE],
+    pub advice_rows: Vec<u64>,
     // `constants_to_assign` is a vector keeping track of all constants that we use throughout
     // we load them all in one go using fn `load_constants`
     // if we have (c, Some(cell)) in the vector then we also constrain the loaded cell for `c` to equal `cell`
@@ -103,9 +98,7 @@ pub struct FlexGateChip<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: u
     pub seen: HashSet<(usize, u64)>,
 }
 
-impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize>
-    FlexGateChip<F, NUM_ADVICE, NUM_FIXED>
-{
+impl<F: FieldExt> FlexGateChip<F> {
     /// returns leftmost `i` where `advice_rows[i]` is minimum amongst all `advice_rows`
     fn min_gate_index(&self) -> usize {
         self.advice_rows
@@ -145,7 +138,7 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize>
                         )?;
                         assigned.insert(c_big, c_cell.clone());
                         col += 1;
-                        if col == NUM_FIXED {
+                        if col == self.config.constants.len() {
                             col = 0;
                             offset += 1;
                         }
@@ -160,13 +153,11 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize>
         )
     }
 
-    pub fn construct(
-        config: FlexGateConfig<F, NUM_ADVICE, NUM_FIXED>,
-        using_simple_floor_planner: bool,
-    ) -> Self {
+    pub fn construct(config: FlexGateConfig<F>, using_simple_floor_planner: bool) -> Self {
+        let num_advice = config.gates.len();
         Self {
             config,
-            advice_rows: [0u64; NUM_ADVICE],
+            advice_rows: vec![0u64; num_advice],
             constants_to_assign: Vec::new(),
             using_simple_floor_planner,
             first_pass: true,
@@ -175,9 +166,7 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize>
     }
 }
 
-impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize> GateInstructions<F>
-    for FlexGateChip<F, NUM_ADVICE, NUM_FIXED>
-{
+impl<F: FieldExt> GateInstructions<F> for FlexGateChip<F> {
     // The "contract" is that in any region you should only call `self.assign_region`
     // once if using `SimpleFloorPlanner`. Otherwise the column allocation may break
     fn assign_region(

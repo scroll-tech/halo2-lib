@@ -11,84 +11,70 @@ use num_traits::Num;
 
 use super::{FieldChip, PrimeFieldChip, Selectable};
 use crate::bigint::{
-    add_no_carry, big_is_equal, big_is_zero, carry_mod, check_carry_mod_to_zero, inner_product, mul_no_carry,
-    scalar_mul_no_carry, select, sub, sub_no_carry, CRTInteger, FixedCRTInteger,
+    add_no_carry, big_is_equal, big_is_zero, carry_mod, check_carry_mod_to_zero, inner_product,
+    mul_no_carry, scalar_mul_no_carry, select, sub, sub_no_carry, CRTInteger, FixedCRTInteger,
     OverflowInteger,
 };
 use crate::fields::fp::{FpChip, FpConfig};
+use crate::gates::range::{RangeChip, RangeConfig};
 use crate::gates::{
     GateInstructions,
     QuantumCell::{Constant, Existing, Witness},
-    RangeInstructions
+    RangeInstructions,
 };
-use crate::gates::range::{RangeChip, RangeConfig};
 use crate::utils::{
     bigint_to_fe, decompose_bigint, decompose_bigint_option, decompose_biguint, fe_to_biguint,
     modulus,
 };
 
 #[derive(Debug)]
-pub struct FpOverflowChip<'a, F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeField> {
-    pub range: &'a mut RangeChip<F, NUM_ADVICE, NUM_FIXED>,
+pub struct FpOverflowChip<'a, F: FieldExt, Fp: PrimeField> {
+    pub range: &'a mut RangeChip<F>,
     pub limb_bits: usize,
     pub num_limbs: usize,
     pub p: BigUint,
     _marker: PhantomData<Fp>,
 }
 
-impl<'a, F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeField>
-    FpOverflowChip<'a, F, NUM_ADVICE, NUM_FIXED, Fp>
-{
+impl<'a, F: FieldExt, Fp: PrimeField> FpOverflowChip<'a, F, Fp> {
     pub fn load_lookup_table(&self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
         self.range.load_lookup_table(layouter)
     }
 
     pub fn to_crt(
-	&mut self,
-	layouter: &mut impl Layouter<F>,
-	a: &OverflowInteger<F>,
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        a: &OverflowInteger<F>,
     ) -> Result<CRTInteger<F>, Error> {
-	let a_native = OverflowInteger::evaluate(
-	    self.range.gate(),
-	    layouter,
-	    &a.limbs,
-	    a.limb_bits
-	)?;
-	let a_bigint = a.to_bigint();
-	
-	Ok(CRTInteger::construct(
-	    a.clone(),
-	    a_native,
-	    a_bigint,
-	    (BigUint::from(1u64) << self.p.bits()) - 1usize,
-	))
+        let a_native =
+            OverflowInteger::evaluate(self.range.gate(), layouter, &a.limbs, a.limb_bits)?;
+        let a_bigint = a.to_bigint();
+
+        Ok(CRTInteger::construct(
+            a.clone(),
+            a_native,
+            a_bigint,
+            (BigUint::from(1u64) << self.p.bits()) - 1usize,
+        ))
     }
 
     pub fn from_fp_chip(
-	range: &'a mut RangeChip<F, NUM_ADVICE, NUM_FIXED>,
-	limb_bits: usize,
-	num_limbs: usize,
-	p: BigUint,
+        range: &'a mut RangeChip<F>,
+        limb_bits: usize,
+        num_limbs: usize,
+        p: BigUint,
     ) -> Self {
-	Self {
-	    range,
-	    limb_bits,
-	    num_limbs,
-	    p,
-	    _marker: PhantomData,
-	}
+        Self { range, limb_bits, num_limbs, p, _marker: PhantomData }
     }
 }
 
-impl<'a, F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeField> PrimeFieldChip<'a, F>
-    for FpOverflowChip<'a, F, NUM_ADVICE, NUM_FIXED, Fp>
-{
-    type Config = FpConfig<F, NUM_ADVICE, NUM_FIXED>;
-    type RangeChipType = RangeChip<F, NUM_ADVICE, NUM_FIXED>;
+impl<'a, F: FieldExt, Fp: PrimeField> PrimeFieldChip<'a, F> for FpOverflowChip<'a, F, Fp> {
+    type Config = FpConfig<F>;
+    type RangeChipType = RangeChip<F>;
 
     fn construct(
-        config: FpConfig<F, NUM_ADVICE, NUM_FIXED>,
-	range_chip: &'a mut RangeChip<F, NUM_ADVICE, NUM_FIXED>,
+        config: FpConfig<F>,
+        range_chip: &'a mut RangeChip<F>,
         using_simple_floor_planner: bool,
     ) -> Self {
         Self {
@@ -101,15 +87,12 @@ impl<'a, F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: Prime
     }
 }
 
-
-impl<'a, F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeField> FieldChip<F>
-    for FpOverflowChip<'a, F, NUM_ADVICE, NUM_FIXED, Fp>
-{
+impl<'a, F: FieldExt, Fp: PrimeField> FieldChip<F> for FpOverflowChip<'a, F, Fp> {
     type ConstantType = BigInt;
     type WitnessType = Option<BigInt>;
     type FieldPoint = OverflowInteger<F>;
     type FieldType = Fp;
-    type RangeChip = RangeChip<F, NUM_ADVICE, NUM_FIXED>;
+    type RangeChip = RangeChip<F>;
 
     fn range(&mut self) -> &mut Self::RangeChip {
         &mut self.range
@@ -131,7 +114,7 @@ impl<'a, F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: Prime
         let a_vec = decompose_bigint_option(&a, self.num_limbs, self.limb_bits);
         let limbs = layouter.assign_region(
             || "load private",
-	    |mut region| {
+            |mut region| {
                 let (limbs, _) = self.range.gate().assign_region(
                     a_vec.iter().map(|x| Witness(x.clone())).collect(),
                     0,
@@ -141,11 +124,7 @@ impl<'a, F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: Prime
             },
         )?;
 
-        Ok(OverflowInteger::construct(
-            limbs,
-            BigUint::from(1u64) << self.limb_bits,
-            self.limb_bits,
-        ))
+        Ok(OverflowInteger::construct(limbs, BigUint::from(1u64) << self.limb_bits, self.limb_bits))
     }
 
     fn load_constant(
@@ -208,9 +187,7 @@ impl<'a, F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: Prime
             || "fp negate no underflow",
             |mut region| {
                 let (zero, _) =
-                    self.range
-                        .gate()
-                        .assign_region(vec![Constant(F::from(0))], 0, &mut region)?;
+                    self.range.gate().assign_region(vec![Constant(F::from(0))], 0, &mut region)?;
                 region.constrain_equal(zero[0].cell(), underflow.cell())?;
                 Ok(())
             },
@@ -254,7 +231,11 @@ impl<'a, F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: Prime
         carry_mod::assign(self.range, layouter, a, &self.p)
     }
 
-    fn range_check(&mut self, layouter: &mut impl Layouter<F>, a: &OverflowInteger<F>) -> Result<(), Error> {
+    fn range_check(
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        a: &OverflowInteger<F>,
+    ) -> Result<(), Error> {
         let n = a.limb_bits;
         let k = a.limbs.len();
 
@@ -266,47 +247,47 @@ impl<'a, F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: Prime
     }
 
     fn is_zero(
-	&mut self,
-	layouter: &mut impl Layouter<F>,
-	a: &OverflowInteger<F>,
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        a: &OverflowInteger<F>,
     ) -> Result<AssignedCell<F, F>, Error> {
-	let carry = self.carry_mod(layouter, a)?;
-	let is_carry_zero = big_is_zero::assign(self.range(), layouter, &carry)?;
-	
-	// underflow != 0 iff carry < p
-	let p = self.load_constant(layouter, BigInt::from(self.p.clone()))?;
-	let (diff, underflow) = sub::assign(self.range(), layouter, &carry, &p)?;
-	let is_underflow_zero = self.range.is_zero(layouter, &underflow)?;
-	let range_check = self.range.gate().not(layouter, &Existing(&is_underflow_zero))?;
+        let carry = self.carry_mod(layouter, a)?;
+        let is_carry_zero = big_is_zero::assign(self.range(), layouter, &carry)?;
 
-	let res = self.range.gate().and(layouter, &Existing(&is_carry_zero), &Existing(&range_check))?;
-	Ok(res)	
+        // underflow != 0 iff carry < p
+        let p = self.load_constant(layouter, BigInt::from(self.p.clone()))?;
+        let (diff, underflow) = sub::assign(self.range(), layouter, &carry, &p)?;
+        let is_underflow_zero = self.range.is_zero(layouter, &underflow)?;
+        let range_check = self.range.gate().not(layouter, &Existing(&is_underflow_zero))?;
+
+        let res =
+            self.range.gate().and(layouter, &Existing(&is_carry_zero), &Existing(&range_check))?;
+        Ok(res)
     }
 
     fn is_equal(
-	&mut self,
-	layouter: &mut impl Layouter<F>,
-	a: &OverflowInteger<F>,
-	b: &OverflowInteger<F>,
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        a: &OverflowInteger<F>,
+        b: &OverflowInteger<F>,
     ) -> Result<AssignedCell<F, F>, Error> {
-	let diff = self.sub_no_carry(layouter, a, b)?;
-	let carry_res = self.carry_mod(layouter, &diff)?;
-	let is_diff_zero = big_is_zero::assign(self.range(), layouter, &carry_res)?;
-	
-	// underflow != 0 iff res < p
-	let p = self.load_constant(layouter, BigInt::from(self.p.clone()))?;
-	let (diff, underflow) = sub::assign(self.range(), layouter, &carry_res, &p)?;
-	let is_underflow_zero = self.range.is_zero(layouter, &underflow)?;
-	let range_check = self.range.gate().not(layouter, &Existing(&is_underflow_zero))?;
+        let diff = self.sub_no_carry(layouter, a, b)?;
+        let carry_res = self.carry_mod(layouter, &diff)?;
+        let is_diff_zero = big_is_zero::assign(self.range(), layouter, &carry_res)?;
 
-	let res = self.range.gate().and(layouter, &Existing(&is_diff_zero), &Existing(&range_check))?;
-	Ok(res)
+        // underflow != 0 iff res < p
+        let p = self.load_constant(layouter, BigInt::from(self.p.clone()))?;
+        let (diff, underflow) = sub::assign(self.range(), layouter, &carry_res, &p)?;
+        let is_underflow_zero = self.range.is_zero(layouter, &underflow)?;
+        let range_check = self.range.gate().not(layouter, &Existing(&is_underflow_zero))?;
+
+        let res =
+            self.range.gate().and(layouter, &Existing(&is_diff_zero), &Existing(&range_check))?;
+        Ok(res)
     }
 }
 
-impl<'a, F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize, Fp: PrimeField> Selectable<F>
-    for FpOverflowChip<'a, F, NUM_ADVICE, NUM_FIXED, Fp>
-{
+impl<'a, F: FieldExt, Fp: PrimeField> Selectable<F> for FpOverflowChip<'a, F, Fp> {
     type Point = OverflowInteger<F>;
 
     fn select(
