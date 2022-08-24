@@ -9,13 +9,13 @@ use crate::{
 pub mod final_exp;
 pub mod pairing;
 
-const NUM_ADVICE: usize = 1;
+const NUM_ADVICE: usize = 72;
 const NUM_FIXED: usize = 1;
 
 type FpConfig<F> = fp::FpConfig<F, NUM_ADVICE, NUM_FIXED>;
-type FpChip<F> = fp::FpChip<F, NUM_ADVICE, NUM_FIXED, Fq>;
-type Fp2Chip<'a, F> = fp2::Fp2Chip<'a, F, FpChip<F>, Fq2>;
-type Fp12Chip<'a, F> = fp12::Fp12Chip<'a, F, FpChip<F>, Fq12>;
+type FpChip<'a, F> = fp::FpChip<'a, F, NUM_ADVICE, NUM_FIXED, Fq>;
+type Fp2Chip<'a, 'b, F> = fp2::Fp2Chip<'a, 'b, F, FpChip<'b, F>, Fq2>;
+type Fp12Chip<'a, 'b, F> = fp12::Fp12Chip<'a, 'b, F, FpChip<'b, F>, Fq12>;
 
 impl FieldExtConstructor<Fq, 2> for Fq2 {
     fn new(c: [Fq; 2]) -> Self {

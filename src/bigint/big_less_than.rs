@@ -1,4 +1,4 @@
-use super::OverflowInteger;
+use super::{CRTInteger, OverflowInteger};
 use crate::gates::{GateInstructions, QuantumCell::Existing, RangeInstructions};
 use crate::utils::*;
 use halo2_proofs::{

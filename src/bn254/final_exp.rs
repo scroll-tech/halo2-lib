@@ -22,7 +22,7 @@ use crate::{
     fields::{fp::FpConfig, FieldChip, FqPoint},
 };
 
-impl<'a, F: FieldExt> Fp12Chip<'a, F> {
+impl<'a, 'b, F: FieldExt> Fp12Chip<'a, 'b, F> {
     // computes a ** (p ** power)
     // only works for p = 3 (mod 4) and p = 1 (mod 6)
     pub fn frobenius_map(
@@ -189,7 +189,7 @@ impl<'a, F: FieldExt> Fp12Chip<'a, F> {
 
     // out = in^{(q^12 - 1)/r}
     pub fn final_exp(
-        &mut self,
+        & mut self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
     ) -> Result<FqPoint<F>, Error> {

@@ -3,13 +3,18 @@ use std::marker::PhantomData;
 use ff::PrimeField;
 use halo2_proofs::{
     arithmetic::{BaseExt, Field, FieldExt},
-    circuit::Layouter,
+    circuit::{AssignedCell, Layouter},
     plonk::Error,
 };
 use num_bigint::{BigInt, BigUint};
 use num_traits::Num;
 
 use crate::fields::fp::{FpChip, FpConfig};
+use crate::gates::{
+    GateInstructions,
+    QuantumCell::{Constant, Existing, Witness},
+    RangeInstructions
+};
 use crate::utils::{bigint_to_fe, decompose_bigint_option, fe_to_biguint};
 use crate::{
     bigint::{
@@ -25,16 +30,16 @@ use super::{FieldChip, FieldExtConstructor, FqPoint, PrimeFieldChip};
 /// `Fp2 = Fp[u] / (u^2 + 1)`
 /// This implementation assumes p = 3 (mod 4) in order for the polynomial u^2 + 1 to be irreducible over Fp; i.e., in order for -1 to not be a square (quadratic residue) in Fp
 /// This means we store an Fp2 point as `a_0 + a_1 * u` where `a_0, a_1 in Fp`
-pub struct Fp2Chip<'a, F: FieldExt, FpChip: PrimeFieldChip<F>, Fp2: Field> {
+pub struct Fp2Chip<'a, 'b, F: FieldExt, FpChip: PrimeFieldChip<'b, F>, Fp2: Field> {
     pub fp_chip: &'a mut FpChip,
-    _f: PhantomData<F>,
+    _f: PhantomData<&'b F>,
     _fp2: PhantomData<Fp2>,
 }
 
-impl<'a, F, FpChip, Fp2> Fp2Chip<'a, F, FpChip, Fp2>
+impl<'a, 'b, F, FpChip, Fp2> Fp2Chip<'a, 'b, F, FpChip, Fp2>
 where
     F: FieldExt,
-    FpChip: PrimeFieldChip<F, FieldPoint = CRTInteger<F>>,
+    FpChip: PrimeFieldChip<'b, F, FieldPoint = CRTInteger<F>>,
     FpChip::FieldType: PrimeField,
     Fp2: Field + FieldExtConstructor<FpChip::FieldType, 2>,
 {
@@ -83,10 +88,11 @@ where
     }
 }
 
-impl<F, FpChip, Fp2> FieldChip<F> for Fp2Chip<'_, F, FpChip, Fp2>
+impl<'a, 'b, F, FpChip, Fp2> FieldChip<F> for Fp2Chip<'a, 'b, F, FpChip, Fp2>
 where
     F: FieldExt,
     FpChip: PrimeFieldChip<
+	'b,
         F,
         FieldPoint = CRTInteger<F>,
         WitnessType = Option<BigInt>,
@@ -276,5 +282,41 @@ where
             out_coeffs.push(coeff);
         }
         Ok(())
+    }
+
+    fn is_soft_zero(
+	&mut self,
+	layouter: &mut impl Layouter<F>,
+	a: &FqPoint<F>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+	let mut prev = None;
+	for a_coeff in &a.coeffs {
+	    let coeff = self.fp_chip.is_soft_zero(layouter, a_coeff)?;
+	    if let Some(p) = prev {
+		let new = self.fp_chip.range().gate().and(layouter, &Existing(&coeff), &Existing(&p))?;
+		prev = Some(new);
+	    } else {
+		prev = Some(coeff);
+	    }
+	}
+	Ok(prev.unwrap())
+    }
+
+    fn is_soft_nonzero(
+	&mut self,
+	layouter: &mut impl Layouter<F>,
+	a: &FqPoint<F>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+	let mut prev = None;
+	for a_coeff in &a.coeffs {
+	    let coeff = self.fp_chip.is_soft_nonzero(layouter, a_coeff)?;
+	    if let Some(p) = prev {
+		let new = self.fp_chip.range().gate().or(layouter, &Existing(&coeff), &Existing(&p))?;
+		prev = Some(new);
+	    } else {
+		prev = Some(coeff);
+	    }
+	}
+	Ok(prev.unwrap())
     }
 }

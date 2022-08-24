@@ -1,7 +1,9 @@
+#![allow(unused_assignments, unused_imports, unused_variables)]
 use std::marker::PhantomData;
 
 use crate::fields::fp::{FpChip, FpConfig};
 use crate::fields::fp2::Fp2Chip;
+use crate::gates::range::RangeChip;
 
 use super::*;
 use halo2_proofs::arithmetic::BaseExt;
@@ -44,7 +46,8 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
-        let mut fp_chip = FpChip::<F, NUM_ADVICE, NUM_FIXED, Fq>::construct(config, true);
+	let mut range_chip = RangeChip::<F, NUM_ADVICE, NUM_FIXED>::construct(config.range_config.clone(), true);
+        let mut fp_chip = FpChip::<F, NUM_ADVICE, NUM_FIXED, Fq>::construct(config, &mut range_chip, true);
         fp_chip.load_lookup_table(&mut layouter)?;
         let mut chip = EccChip::construct(&mut fp_chip);
 

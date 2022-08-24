@@ -1,16 +1,18 @@
 #![cfg(test)]
 #![allow(non_snake_case)]
 use std::marker::PhantomData;
+use std::time::{Duration, Instant};
 
 use super::pairing::PairingChip;
 use super::*;
+use crate::gates::range::RangeChip;
 use crate::ecc::EccChip;
 use crate::fields::PrimeFieldChip;
 use ff::PrimeField;
 use halo2_proofs::arithmetic::BaseExt;
 use halo2_proofs::circuit::floor_planner::V1;
 use halo2_proofs::pairing::bn256::{
-    multi_miller_loop, pairing, G1Affine, G2Affine, G2Prepared, Gt, G1, G2,
+    Bn256, multi_miller_loop, pairing, G1Affine, G2Affine, G2Prepared, Gt, G1, G2,
 };
 use halo2_proofs::pairing::group::Group;
 use halo2_proofs::{
@@ -18,7 +20,9 @@ use halo2_proofs::{
     circuit::{Layouter, SimpleFloorPlanner},
     dev::MockProver,
     pairing::bn256::Fr,
+    poly::commitment::Params,
     plonk::*,
+    transcript::{Blake2bWrite, Challenge255},
 };
 use halo2curves::bn254::Fq12;
 use num_bigint::BigInt;
@@ -42,7 +46,7 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         let value = meta.advice_column();
         let constant = meta.fixed_column();
-        PairingChip::configure(meta, value, constant, 22, 88, 3)
+        PairingChip::configure(meta, value, constant, 15, 90, 3)
     }
 
     fn synthesize(
@@ -50,7 +54,8 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
-        let mut chip = PairingChip::construct(config, true);
+	let mut range_chip = RangeChip::construct(config.range_config.clone(), true);
+        let mut chip = PairingChip::construct(config, &mut range_chip, true);
         chip.fp_chip.load_lookup_table(&mut layouter)?;
 
         let P_assigned = chip.load_private_g1(&mut layouter, self.P.clone())?;
@@ -119,6 +124,52 @@ fn test_pairing() {
     let prover = MockProver::run(k, &circuit, vec![]).unwrap();
     //prover.assert_satisfied();
     assert_eq!(prover.verify(), Ok(()));
+}
+
+#[cfg(test)]
+#[test]
+fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
+    let k = 16;
+    let params = Params::<G1Affine>::unsafe_setup::<Bn256>(k);
+
+    let mut rng = rand::thread_rng();
+    
+    let P = Some(G1Affine::random(&mut rng));
+    let Q = Some(G2Affine::random(&mut rng));
+
+    let start = Instant::now();
+    let circuit = PairingCircuit::<Fr> {
+        P: None,
+	Q: None,
+	_marker: PhantomData
+    };
+    let circuit_duration = start.elapsed();	
+    println!("Time elapsed in circuit construction: {:?}", circuit_duration);
+    
+    let vk = keygen_vk(&params, &circuit)?;
+    let vk_duration = start.elapsed();
+    println!("Time elapsed in generating vkey: {:?}", vk_duration - circuit_duration);
+    
+    let pk = keygen_pk(&params, vk, &circuit)?;
+    let pk_duration = start.elapsed();
+    println!("Time elapsed in generating pkey: {:?}", pk_duration - vk_duration);
+    
+    let circuit = PairingCircuit::<Fr> {
+        P,
+	Q,
+	_marker: PhantomData
+    };
+    let fill_duration = start.elapsed();
+    println!("Time elapsed in filling circuit: {:?}", fill_duration - pk_duration);
+
+    // create a proof
+    let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
+    create_proof(&params, &pk, &[circuit], &[], rng, &mut transcript)?;
+    let _proof = transcript.finalize();
+    let proof_duration = start.elapsed();
+    println!("Proving time: {:?}", proof_duration - fill_duration);
+
+    Ok(())
 }
 
 #[cfg(feature = "dev-graph")]

@@ -1,4 +1,4 @@
-use super::OverflowInteger;
+use super::{CRTInteger, OverflowInteger};
 use crate::gates::{GateInstructions, QuantumCell::Existing, RangeInstructions};
 use crate::utils::*;
 use halo2_proofs::{
@@ -37,4 +37,16 @@ pub fn assign<F: FieldExt>(
         partials.push(new);
     }
     Ok(partials[k - 1].clone())
+}
+
+pub fn crt<F: FieldExt>(
+    range: &mut impl RangeInstructions<F>,
+    layouter: &mut impl Layouter<F>,
+    a: &CRTInteger<F>,
+    b: &CRTInteger<F>,
+) -> Result<AssignedCell<F, F>, Error> {
+    let out_trunc = assign(range, layouter, &a.truncation, &b.truncation)?;
+    let out_native = range.is_equal(layouter, &a.native, &b.native)?;
+    let out = range.gate().and(layouter, &Existing(&out_trunc), &Existing(&out_native))?;
+    Ok(out)
 }

@@ -178,7 +178,8 @@ impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize>
 impl<F: FieldExt, const NUM_ADVICE: usize, const NUM_FIXED: usize> GateInstructions<F>
     for FlexGateChip<F, NUM_ADVICE, NUM_FIXED>
 {
-    /// The "contract" is that in any region you should only call `self.assign_region` once if using `SimpleFloorPlanner`. Otherwise the column allocation may break
+    // The "contract" is that in any region you should only call `self.assign_region`
+    // once if using `SimpleFloorPlanner`. Otherwise the column allocation may break
     fn assign_region(
         &mut self,
         inputs: Vec<QuantumCell<F>>,

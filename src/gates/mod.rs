@@ -89,6 +89,14 @@ pub trait GateInstructions<F: FieldExt> {
         b: &QuantumCell<F>,
     ) -> Result<AssignedCell<F, F>, Error>;
 
+    fn not(
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        a: &QuantumCell<F>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        self.sub(layouter, &QuantumCell::Constant(F::from(1)), a)
+    }
+    
     fn select(
         &mut self,
         layouter: &mut impl Layouter<F>,

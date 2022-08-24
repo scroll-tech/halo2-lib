@@ -1,4 +1,5 @@
 #![allow(non_snake_case)]
+use std::marker::PhantomData;
 use ff::PrimeField;
 use halo2_proofs::{
     arithmetic::{BaseExt, FieldExt},
@@ -13,7 +14,7 @@ use halo2curves::bn254::{Fq, Fq2, FROBENIUS_COEFF_FQ12_C1};
 use num_bigint::{BigInt, BigUint};
 use num_traits::{Num, One, Zero};
 
-use super::{Fp12Chip, Fp2Chip, FpChip, FpConfig};
+use super::{Fp12Chip, Fp2Chip, FpChip, FpConfig, NUM_ADVICE, NUM_FIXED};
 use crate::{
     bigint::CRTInteger,
     utils::{
@@ -24,7 +25,7 @@ use crate::{
 use crate::{
     ecc::{EccChip, EccPoint},
     fields::{FieldChip, FqPoint, PrimeFieldChip},
-    gates::{GateInstructions, RangeInstructions},
+    gates::{GateInstructions, RangeInstructions, range::RangeChip},
 };
 
 const XI_0: u64 = 9;
@@ -260,8 +261,8 @@ pub fn fp12_multiply_with_line_equal<F: FieldExt>(
 //  - `0 <= loop_count < r` and `loop_count < p` (to avoid [loop_count]Q' = Frob_p(Q'))
 //  - x^3 + b = 0 has no solution in Fp2, i.e., the y-coordinate of Q cannot be 0.
 
-pub fn miller_loop_BN<'a, F: FieldExt>(
-    ecc_chip: &mut EccChip<F, Fp2Chip<'a, F>>,
+pub fn miller_loop_BN<'a, 'b, F: FieldExt>(
+    ecc_chip: &mut EccChip<F, Fp2Chip<'a, 'b, F>>,
     layouter: &mut impl Layouter<F>,
     Q: &EccPoint<F, FqPoint<F>>,
     P: &EccPoint<F, CRTInteger<F>>,
@@ -350,8 +351,8 @@ pub fn miller_loop_BN<'a, F: FieldExt>(
 // - coeff[1][2], coeff[1][3] as assigned cells: this is an optimization to avoid loading new constants
 // Output:
 // - (coeff[1][2] * x^p, coeff[1][3] * y^p) point in E(Fp2)
-pub fn twisted_frobenius<'a, F: FieldExt>(
-    ecc_chip: &mut EccChip<F, Fp2Chip<'a, F>>,
+pub fn twisted_frobenius<'a, 'b, F: FieldExt>(
+    ecc_chip: &mut EccChip<F, Fp2Chip<'a, 'b, F>>,
     layouter: &mut impl Layouter<F>,
     Q: &EccPoint<F, FqPoint<F>>,
     c2: &FqPoint<F>,
@@ -373,8 +374,8 @@ pub fn twisted_frobenius<'a, F: FieldExt>(
 // - Q = (x, y) point in E(Fp2)
 // Output:
 // - (coeff[1][2] * x^p, coeff[1][3] * -y^p) point in E(Fp2)
-pub fn neg_twisted_frobenius<'a, F: FieldExt>(
-    ecc_chip: &mut EccChip<F, Fp2Chip<'a, F>>,
+pub fn neg_twisted_frobenius<'a, 'b, F: FieldExt>(
+    ecc_chip: &mut EccChip<F, Fp2Chip<'a, 'b, F>>,
     layouter: &mut impl Layouter<F>,
     Q: &EccPoint<F, FqPoint<F>>,
     c2: &FqPoint<F>,
@@ -391,14 +392,20 @@ pub fn neg_twisted_frobenius<'a, F: FieldExt>(
 }
 
 // To avoid issues with mutably borrowing twice (not allowed in Rust), we only store fp_chip and construct g2_chip and fp12_chip in scope when needed for temporary mutable borrows
-pub struct PairingChip<F: FieldExt> {
-    pub fp_chip: FpChip<F>,
+pub struct PairingChip<'a, 'b, F: FieldExt> {
+    pub fp_chip: FpChip<'b, F>,
+    _marker: PhantomData<&'a F>
 }
 
-impl<F: FieldExt> PairingChip<F> {
-    pub fn construct(config: FpConfig<F>, using_simple_floor_planner: bool) -> Self {
-        let fp_chip = FpChip::construct(config, using_simple_floor_planner);
-        Self { fp_chip }
+impl<'a, 'b, F: FieldExt> PairingChip<'a, 'b, F> {
+    pub fn construct(config: FpConfig<F>,
+		     range_chip: &'b mut RangeChip<F, NUM_ADVICE, NUM_FIXED>,
+		     using_simple_floor_planner: bool) -> Self {
+        let fp_chip = FpChip::construct(config, range_chip, using_simple_floor_planner);
+        Self {
+	    fp_chip,
+	    _marker: PhantomData,
+	}
     }
 
     pub fn configure(

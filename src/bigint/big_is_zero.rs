@@ -1,4 +1,4 @@
-use super::OverflowInteger;
+use super::{CRTInteger, OverflowInteger};
 use crate::gates::{GateInstructions, QuantumCell::Existing, RangeInstructions};
 use crate::utils::*;
 use halo2_proofs::{
@@ -7,8 +7,7 @@ use halo2_proofs::{
     plonk::*,
 };
 
-// given OverflowInteger<F>'s `a` and `b` of the same shape,
-// returns whether `a == b`
+// given OverflowInteger<F> `a`, returns whether `a == 0`
 pub fn assign<F: FieldExt>(
     range: &mut impl RangeInstructions<F>,
     layouter: &mut impl Layouter<F>,
@@ -29,4 +28,15 @@ pub fn assign<F: FieldExt>(
     }
 
     Ok(partial.unwrap())
+}
+
+pub fn crt<F: FieldExt>(
+    range: &mut impl RangeInstructions<F>,
+    layouter: &mut impl Layouter<F>,
+    a: &CRTInteger<F>,
+) -> Result<AssignedCell<F, F>, Error> {
+    let out_trunc = assign(range, layouter, &a.truncation)?;
+    let out_native = range.is_zero(layouter, &a.native)?;
+    let out = range.gate().and(layouter, &Existing(&out_trunc), &Existing(&out_native))?;
+    Ok(out)
 }

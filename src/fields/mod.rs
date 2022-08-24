@@ -10,6 +10,7 @@ use halo2_proofs::{
 use num_bigint::BigUint;
 
 pub mod fp;
+pub mod fp_overflow;
 pub mod fp12;
 pub mod fp2;
 
@@ -110,6 +111,43 @@ pub trait FieldChip<F: FieldExt> {
         a: &Self::FieldPoint,
     ) -> Result<(), Error>;
 
+    // Assumes the witness for a is 0
+    // Constrains that the underlying big integer is 0 and < p.
+    // For field extensions, checks coordinate-wise.
+    fn is_soft_zero(
+	&mut self,
+	layouter: &mut impl Layouter<F>,
+	a: &Self::FieldPoint,
+    ) -> Result<AssignedCell<F, F>, Error>;
+    
+    // Constrains that the underlying big integer is in [1, p - 1].
+    // For field extensions, checks coordinate-wise.
+    fn is_soft_nonzero(
+	&mut self,
+	layouter: &mut impl Layouter<F>,
+	a: &Self::FieldPoint,
+    ) -> Result<AssignedCell<F, F>, Error>;
+
+    fn is_zero(
+	&mut self,
+	layouter: &mut impl Layouter<F>,
+	a: &Self::FieldPoint,
+    ) -> Result<AssignedCell<F, F>, Error> {
+	let carry = self.carry_mod(layouter, a)?;
+	self.is_soft_zero(layouter, &carry)
+    }
+
+    fn is_equal(
+	&mut self,
+	layouter: &mut impl Layouter<F>,
+	a: &Self::FieldPoint,
+	b: &Self::FieldPoint,
+    ) -> Result<AssignedCell<F, F>, Error> {
+	let diff = self.sub_no_carry(layouter, a, b)?;
+	let carry_res = self.carry_mod(layouter, &diff)?;
+	self.is_soft_zero(layouter, &carry_res)
+    }
+    
     fn mul(
         &mut self,
         layouter: &mut impl Layouter<F>,
@@ -125,7 +163,7 @@ pub trait FieldChip<F: FieldExt> {
         layouter: &mut impl Layouter<F>,
         a: &Self::FieldPoint,
         b: &Self::FieldPoint,
-    ) -> Result<Self::FieldPoint, Error> {
+    ) -> Result<Self::FieldPoint, Error> {	
         let a_val = Self::get_assigned_value(a);
         let b_val = Self::get_assigned_value(b);
         let b_inv: Option<Self::FieldType> =
@@ -134,7 +172,7 @@ pub trait FieldChip<F: FieldExt> {
 
         let quot = self.load_private(layouter, Self::fe_to_witness(&quot_val))?;
         self.range_check(layouter, &quot)?;
-
+	
         // constrain quot * b - a = 0 mod p
         let quot_b = self.mul_no_carry(layouter, &quot, b)?;
         let quot_constraint = self.sub_no_carry(layouter, &quot_b, a)?;
@@ -189,10 +227,13 @@ pub trait Selectable<F: FieldExt> {
 }
 
 // Common functionality for prime field chips
-pub trait PrimeFieldChip<F: FieldExt>: FieldChip<F> {
+pub trait PrimeFieldChip<'a, F: FieldExt>: FieldChip<F> {
     type Config;
+    type RangeChipType;
 
-    fn construct(config: Self::Config, using_simple_floor_planner: bool) -> Self;
+    fn construct(config: Self::Config,
+		 range_chip: &'a mut Self::RangeChipType,
+		 using_simple_floor_planner: bool) -> Self;
 }
 
 // helper trait so we can actually construct and read the Fp2 struct
