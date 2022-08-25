@@ -322,7 +322,7 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
         let r = biguint_to_fe::<Fq>(&x_bigint);
         let s = k_inv * (msg_hash + (r * sk));
 
-        let circuit = ECDSACircuit::<Fr> {
+        let proof_circuit = ECDSACircuit::<Fr> {
             r: Some(r),
             s: Some(s),
             msghash: Some(msg_hash),
@@ -335,7 +335,7 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
 
         // create a proof
         let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
-        create_proof(&params, &pk, &[circuit], &[], rng, &mut transcript)?;
+        create_proof(&params, &pk, &[proof_circuit], &[&[]], rng, &mut transcript)?;
         let _proof = transcript.finalize();
         let proof_duration = start.elapsed();
         println!("Proving time: {:?}", proof_duration - fill_duration);

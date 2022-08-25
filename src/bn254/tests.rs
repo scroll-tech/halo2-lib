@@ -196,7 +196,7 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
 
         // create a proof
         let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
-        create_proof(&params, &pk, &[circuit], &[], rng, &mut transcript)?;
+        create_proof(&params, &pk, &[circuit], &[&[]], rng, &mut transcript)?;
         let _proof = transcript.finalize();
         let proof_duration = start.elapsed();
         println!("Proving time: {:?}", proof_duration - fill_duration);
