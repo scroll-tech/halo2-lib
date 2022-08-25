@@ -460,21 +460,18 @@ pub(crate) mod tests {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
-            let mut range_chip =
-                RangeChip::<F, NUM_ADVICE, NUM_FIXED>::construct(config.range_config.clone(), true);
-            let mut fp_chip =
-                FpChip::<F, NUM_ADVICE, NUM_FIXED, Fq>::construct(config, &mut range_chip, true);
+            let mut range_chip = RangeChip::<F>::construct(config.range_config.clone(), true);
+            let mut fp_chip = FpChip::<F, Fq>::construct(config, &mut range_chip, true);
             fp_chip.load_lookup_table(&mut layouter)?;
-            let mut chip =
-                Fp12Chip::<F, FpChip<F, NUM_ADVICE, NUM_FIXED, Fq>, Fq12>::construct(&mut fp_chip);
+            let mut chip = Fp12Chip::<F, FpChip<F, Fq>, Fq12>::construct(&mut fp_chip);
 
             let a_assigned = chip.load_private(
                 &mut layouter,
-                Fp12Chip::<F, FpChip<F, NUM_ADVICE, NUM_FIXED, Fq>, Fq12>::fe_to_witness(&self.a),
+                Fp12Chip::<F, FpChip<F, Fq>, Fq12>::fe_to_witness(&self.a),
             )?;
             let b_assigned = chip.load_private(
                 &mut layouter,
-                Fp12Chip::<F, FpChip<F, NUM_ADVICE, NUM_FIXED, Fq>, Fq12>::fe_to_witness(&self.b),
+                Fp12Chip::<F, FpChip<F, Fq>, Fq12>::fe_to_witness(&self.b),
             )?;
 
             // test fp_multiply

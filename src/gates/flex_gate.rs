@@ -51,7 +51,7 @@ impl<F: FieldExt> GateConfig<F> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct FlexGateConfig<F: FieldExt> {
     pub gates: Vec<GateConfig<F>>,
     // `constants` is a vector of fixed columns for allocating constant values

@@ -28,7 +28,7 @@ const NUM_ADVICE: usize = 2;
 const NUM_FIXED: usize = 2;
 
 impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
-    type Config = FpConfig<F, NUM_ADVICE, NUM_FIXED>;
+    type Config = FpConfig<F>;
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
@@ -38,7 +38,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         let value = meta.advice_column();
         let constant = meta.fixed_column();
-        FpConfig::configure(meta, 22, 88, 3, modulus::<Fq>())
+        FpConfig::configure(meta, NUM_ADVICE, NUM_FIXED, 22, 88, 3, modulus::<Fq>())
     }
 
     fn synthesize(
@@ -46,8 +46,8 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
-	let mut range_chip = RangeChip::<F, NUM_ADVICE, NUM_FIXED>::construct(config.range_config.clone(), true);
-        let mut fp_chip = FpChip::<F, NUM_ADVICE, NUM_FIXED, Fq>::construct(config, &mut range_chip, true);
+        let mut range_chip = RangeChip::<F>::construct(config.range_config.clone(), true);
+        let mut fp_chip = FpChip::<F, Fq>::construct(config, &mut range_chip, true);
         fp_chip.load_lookup_table(&mut layouter)?;
         let mut chip = EccChip::construct(&mut fp_chip);
 

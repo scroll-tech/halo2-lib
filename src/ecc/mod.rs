@@ -483,17 +483,10 @@ where
 // p = coordinate field modulus
 // n = scalar field modulus
 // Only valid when p is very close to n in size (e.g. for Secp256k1)
-pub fn ecdsa_verify_no_pubkey_check<
-    F: FieldExt,
-    CF: PrimeField,
-    SF: PrimeField,
-    GA,
-    const NUM_ADVICE: usize,
-    const NUM_FIXED: usize,
->(
-    base_chip: &mut FpChip<F, NUM_ADVICE, NUM_FIXED, CF>,
+pub fn ecdsa_verify_no_pubkey_check<F: FieldExt, CF: PrimeField, SF: PrimeField, GA>(
+    base_chip: &mut FpChip<F, CF>,
     layouter: &mut impl Layouter<F>,
-    pubkey: &EccPoint<F, <FpChip<F, NUM_ADVICE, NUM_FIXED, CF> as FieldChip<F>>::FieldPoint>,
+    pubkey: &EccPoint<F, <FpChip<F, CF> as FieldChip<F>>::FieldPoint>,
     r: &OverflowInteger<F>,
     s: &OverflowInteger<F>,
     msghash: &OverflowInteger<F>,
@@ -510,7 +503,7 @@ where
         pubkey.x.truncation.limb_bits,
     );
 
-    let mut scalar_chip = FpOverflowChip::<F, NUM_ADVICE, NUM_FIXED, SF>::from_fp_chip(
+    let mut scalar_chip = FpOverflowChip::<F, SF>::from_fp_chip(
         base_chip.range,
         base_chip.limb_bits,
         base_chip.num_limbs,

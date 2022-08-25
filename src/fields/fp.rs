@@ -373,10 +373,8 @@ pub(crate) mod tests {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
-            let mut range_chip =
-                RangeChip::<F, NUM_ADVICE, NUM_FIXED>::construct(config.range_config.clone(), true);
-            let mut chip =
-                FpChip::<F, NUM_ADVICE, NUM_FIXED, Fq>::construct(config, &mut range_chip, true);
+            let mut range_chip = RangeChip::<F>::construct(config.range_config.clone(), true);
+            let mut chip = FpChip::<F, Fq>::construct(config, &mut range_chip, true);
             chip.load_lookup_table(&mut layouter)?;
 
             let a_assigned =
