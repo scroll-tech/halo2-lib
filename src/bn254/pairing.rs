@@ -1,5 +1,4 @@
 #![allow(non_snake_case)]
-use std::marker::PhantomData;
 use ff::PrimeField;
 use halo2_proofs::{
     arithmetic::{BaseExt, FieldExt},
@@ -13,8 +12,9 @@ use halo2_proofs::{
 use halo2curves::bn254::{Fq, Fq2, FROBENIUS_COEFF_FQ12_C1};
 use num_bigint::{BigInt, BigUint};
 use num_traits::{Num, One, Zero};
+use std::marker::PhantomData;
 
-use super::{Fp12Chip, Fp2Chip, FpChip, FpConfig, NUM_ADVICE, NUM_FIXED};
+use super::{Fp12Chip, Fp2Chip, FpChip, FpConfig};
 use crate::{
     bigint::CRTInteger,
     utils::{
@@ -25,7 +25,7 @@ use crate::{
 use crate::{
     ecc::{EccChip, EccPoint},
     fields::{FieldChip, FqPoint, PrimeFieldChip},
-    gates::{GateInstructions, RangeInstructions, range::RangeChip},
+    gates::{range::RangeChip, GateInstructions, RangeInstructions},
 };
 
 const XI_0: u64 = 9;
@@ -392,32 +392,32 @@ pub fn neg_twisted_frobenius<'a, 'b, F: FieldExt>(
 }
 
 // To avoid issues with mutably borrowing twice (not allowed in Rust), we only store fp_chip and construct g2_chip and fp12_chip in scope when needed for temporary mutable borrows
-pub struct PairingChip<'a, 'b, F: FieldExt> {
-    pub fp_chip: FpChip<'b, F>,
-    _marker: PhantomData<&'a F>
+pub struct PairingChip<'a, F: FieldExt> {
+    pub fp_chip: FpChip<'a, F>,
 }
 
-impl<'a, 'b, F: FieldExt> PairingChip<'a, 'b, F> {
-    pub fn construct(config: FpConfig<F>,
-		     range_chip: &'b mut RangeChip<F, NUM_ADVICE, NUM_FIXED>,
-		     using_simple_floor_planner: bool) -> Self {
+impl<'a, F: FieldExt> PairingChip<'a, F> {
+    pub fn construct(
+        config: FpConfig<F>,
+        range_chip: &'a mut RangeChip<F>,
+        using_simple_floor_planner: bool,
+    ) -> Self {
         let fp_chip = FpChip::construct(config, range_chip, using_simple_floor_planner);
-        Self {
-	    fp_chip,
-	    _marker: PhantomData,
-	}
+        Self { fp_chip }
     }
 
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
-        value: Column<Advice>,
-        constant: Column<Fixed>,
+        num_advice: usize,
+        num_fixed: usize,
         lookup_bits: usize,
         limb_bits: usize,
         num_limbs: usize,
     ) -> FpConfig<F> {
         FpConfig::configure(
             meta,
+            num_advice,
+            num_fixed,
             lookup_bits,
             limb_bits,
             num_limbs,

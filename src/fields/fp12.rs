@@ -11,13 +11,13 @@ use num_traits::Num;
 
 use crate::fields::fp2::Fp2Chip;
 use crate::fields::FqPoint;
+use crate::gates::range;
+use crate::gates::range::RangeChip;
 use crate::gates::{
     GateInstructions,
     QuantumCell::{Constant, Existing, Witness},
-    RangeInstructions
+    RangeInstructions,
 };
-use crate::gates::range;
-use crate::gates::range::RangeChip;
 use crate::utils::decompose_bigint_option;
 use crate::utils::{bigint_to_fe, fe_to_biguint};
 use crate::{
@@ -111,7 +111,7 @@ impl<'a, 'b, F, FpChip, Fp12> FieldChip<F> for Fp12Chip<'a, 'b, F, FpChip, Fp12>
 where
     F: FieldExt,
     FpChip: PrimeFieldChip<
-	'b,
+        'b,
         F,
         FieldPoint = CRTInteger<F>,
         WitnessType = Option<BigInt>,
@@ -375,41 +375,41 @@ where
     }
 
     fn is_soft_zero(
-	&mut self,
-	layouter: &mut impl Layouter<F>,
-	a: &FqPoint<F>,
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        a: &FqPoint<F>,
     ) -> Result<AssignedCell<F, F>, Error> {
-	let mut prev = None;
-	for a_coeff in &a.coeffs {
-	    let coeff = self.fp_chip.is_soft_zero(layouter, a_coeff)?;
-	    if let Some(p) = prev {
-		let new = self.fp_chip.range()
-		    .gate().and(layouter, &Existing(&coeff), &Existing(&p))?;
-		prev = Some(new);
-	    } else {
-		prev = Some(coeff);
-	    }
-	}
-	Ok(prev.unwrap())
+        let mut prev = None;
+        for a_coeff in &a.coeffs {
+            let coeff = self.fp_chip.is_soft_zero(layouter, a_coeff)?;
+            if let Some(p) = prev {
+                let new =
+                    self.fp_chip.range().gate().and(layouter, &Existing(&coeff), &Existing(&p))?;
+                prev = Some(new);
+            } else {
+                prev = Some(coeff);
+            }
+        }
+        Ok(prev.unwrap())
     }
 
     fn is_soft_nonzero(
-	&mut self,
-	layouter: &mut impl Layouter<F>,
-	a: &FqPoint<F>,
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        a: &FqPoint<F>,
     ) -> Result<AssignedCell<F, F>, Error> {
-	let mut prev = None;
-	for a_coeff in &a.coeffs {
-	    let coeff = self.fp_chip.is_soft_nonzero(layouter, a_coeff)?;
-	    if let Some(p) = prev {
-		let new = self.fp_chip.range()
-		    .gate().or(layouter, &Existing(&coeff), &Existing(&p))?;
-		prev = Some(new);
-	    } else {
-		prev = Some(coeff);
-	    }
-	}
-	Ok(prev.unwrap())
+        let mut prev = None;
+        for a_coeff in &a.coeffs {
+            let coeff = self.fp_chip.is_soft_nonzero(layouter, a_coeff)?;
+            if let Some(p) = prev {
+                let new =
+                    self.fp_chip.range().gate().or(layouter, &Existing(&coeff), &Existing(&p))?;
+                prev = Some(new);
+            } else {
+                prev = Some(coeff);
+            }
+        }
+        Ok(prev.unwrap())
     }
 }
 
@@ -444,7 +444,7 @@ pub(crate) mod tests {
     const NUM_FIXED: usize = 2;
 
     impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
-        type Config = FpConfig<F, NUM_ADVICE, NUM_FIXED>;
+        type Config = FpConfig<F>;
         type FloorPlanner = SimpleFloorPlanner;
 
         fn without_witnesses(&self) -> Self {
@@ -452,7 +452,7 @@ pub(crate) mod tests {
         }
 
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-            FpConfig::configure(meta, 17, 68, 4, modulus::<Fq>())
+            FpConfig::configure(meta, NUM_ADVICE, NUM_FIXED, 17, 68, 4, modulus::<Fq>())
         }
 
         fn synthesize(
@@ -460,19 +460,18 @@ pub(crate) mod tests {
             config: Self::Config,
             mut layouter: impl Layouter<F>,
         ) -> Result<(), Error> {
-	    let mut range_chip = RangeChip::<F, NUM_ADVICE, NUM_FIXED>::construct(config.range_config.clone(), true);
-            let mut fp_chip = FpChip::<F, NUM_ADVICE, NUM_FIXED, Fq>::construct(config, &mut range_chip, true);
+            let mut range_chip = RangeChip::<F>::construct(config.range_config.clone(), true);
+            let mut fp_chip = FpChip::<F, Fq>::construct(config, &mut range_chip, true);
             fp_chip.load_lookup_table(&mut layouter)?;
-            let mut chip =
-                Fp12Chip::<F, FpChip<F, NUM_ADVICE, NUM_FIXED, Fq>, Fq12>::construct(&mut fp_chip);
+            let mut chip = Fp12Chip::<F, FpChip<F, Fq>, Fq12>::construct(&mut fp_chip);
 
             let a_assigned = chip.load_private(
                 &mut layouter,
-                Fp12Chip::<F, FpChip<F, NUM_ADVICE, NUM_FIXED, Fq>, Fq12>::fe_to_witness(&self.a),
+                Fp12Chip::<F, FpChip<F, Fq>, Fq12>::fe_to_witness(&self.a),
             )?;
             let b_assigned = chip.load_private(
                 &mut layouter,
-                Fp12Chip::<F, FpChip<F, NUM_ADVICE, NUM_FIXED, Fq>, Fq12>::fe_to_witness(&self.b),
+                Fp12Chip::<F, FpChip<F, Fq>, Fq12>::fe_to_witness(&self.b),
             )?;
 
             // test fp_multiply

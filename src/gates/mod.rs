@@ -96,7 +96,7 @@ pub trait GateInstructions<F: FieldExt> {
     ) -> Result<AssignedCell<F, F>, Error> {
         self.sub(layouter, &QuantumCell::Constant(F::from(1)), a)
     }
-    
+
     fn select(
         &mut self,
         layouter: &mut impl Layouter<F>,
