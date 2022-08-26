@@ -409,6 +409,7 @@ impl<'a, F: FieldExt> PairingChip<'a, F> {
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
         num_advice: usize,
+        num_lookup_advice: usize,
         num_fixed: usize,
         lookup_bits: usize,
         limb_bits: usize,
@@ -417,6 +418,7 @@ impl<'a, F: FieldExt> PairingChip<'a, F> {
         FpConfig::configure(
             meta,
             num_advice,
+            num_lookup_advice,
             num_fixed,
             lookup_bits,
             limb_bits,

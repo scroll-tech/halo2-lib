@@ -31,7 +31,7 @@ use crate::{
 
 #[macro_export]
 macro_rules! create_ecdsa_circuit {
-    ( $num_advice:expr, $num_fixed:expr, $lookup_bits:expr, $limb_bits:expr, $num_limbs:expr) => {
+    ( $num_advice:expr, $num_lookup_advice:expr, $num_fixed:expr, $lookup_bits:expr, $limb_bits:expr, $num_limbs:expr) => {
         pub struct ECDSACircuit<F> {
             pub r: Option<Fq>,
             pub s: Option<Fq>,
@@ -62,7 +62,7 @@ macro_rules! create_ecdsa_circuit {
             }
 
             fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-                RangeConfig::configure(meta, $num_advice, $num_fixed, $lookup_bits)
+                RangeConfig::configure(meta, $num_advice, $num_lookup_advice, $num_fixed, $lookup_bits)
             }
 
             fn synthesize(
@@ -126,27 +126,41 @@ macro_rules! create_ecdsa_circuit {
                         4,
                         4,
                     )?;
-                    println!("ECDSA res {:?}", ecdsa);
 
-                    println!("Using:\nadvice columns: {}\nfixed columns: {}\nlookup bits: {}\nlimb bits: {}\nnum limbs: {}", $num_advice, $num_fixed, $lookup_bits, $limb_bits, $num_limbs);
-                    let advice_rows = range_chip.gate_chip.advice_rows.iter();
-                    println!(
-                        "maximum rows used by an advice column: {}",
-                        advice_rows.clone().max().unwrap()
-                    );
-                    println!(
-                        "minimum rows used by an advice column: {}",
-                        advice_rows.clone().min().unwrap()
-                    );
-                    println!(
-                        "total cells use: {}",
-                        advice_rows.sum::<u64>()
-                    );
                     // IMPORTANT: this assigns all constants to the fixed columns
                     // This is not optional.
                     let const_rows =
                         range_chip.gate_chip.assign_and_constrain_constants(&mut layouter)?;
-                    println!("maximum rows used by a fixed column: {}", const_rows);
+                    // IMPORTANT: this copies cells to the lookup advice column to perform range check lookups
+                    // This is not optional when there is more than 1 advice column.
+                    range_chip.copy_and_lookup_cells(&mut layouter)?;
+
+                    if self.r != None {
+                        println!("ECDSA res {:?}", ecdsa);
+
+                        println!("Using:\nadvice columns: {}\nspecial lookup advice columns: {}\nfixed columns: {}\nlookup bits: {}\nlimb bits: {}\nnum limbs: {}", $num_advice, $num_lookup_advice, $num_fixed, $lookup_bits, $limb_bits, $num_limbs);
+                        let advice_rows = range_chip.gate_chip.advice_rows.iter();
+                        println!(
+                            "maximum rows used by an advice column: {}",
+                            advice_rows.clone().max().unwrap()
+                        );
+                        println!(
+                            "minimum rows used by an advice column: {}",
+                            advice_rows.clone().min().unwrap()
+                        );
+                        println!(
+                            "total cells used: {}",
+                            advice_rows.sum::<u64>()
+                        );
+                        println!(
+                            "cells used in special lookup columns: {}",
+                            range_chip.cells_to_lookup.len()
+                        );
+                        println!(
+                            "maximum rows used by a fixed column: {}",
+                            const_rows
+                        );
+                    }
                 }
                 println!("ecdsa done");
                 /*
@@ -246,8 +260,8 @@ macro_rules! create_ecdsa_circuit {
 #[cfg(test)]
 #[test]
 fn test_secp() {
-    const K: u32 = 11;
-    create_ecdsa_circuit!(323, 5, 10, 90, 3);
+    const K: u32 = 13;
+    create_ecdsa_circuit!(73, 12, 1, 12, 88, 3);
     let mut rng = rand::thread_rng();
 
     // generate random pub key and sign random message
@@ -282,11 +296,12 @@ fn test_secp() {
 #[cfg(test)]
 #[test]
 fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
-    const DEGREE: [u32; 7] = [19, 16, 13, 12, 11, 10, 9];
-    const NUM_ADVICE: [usize; 7] = [1, 9, 73, 148, 323, 701, 1500];
-    const NUM_FIXED: [usize; 7] = [1, 1, 1, 2, 5, 9, 16];
-    const LOOKUP_BITS: [usize; 7] = [18, 15, 12, 11, 10, 9, 8];
-    const LIMB_BITS: [usize; 7] = [88, 90, 88, 88, 90, 90, 88];
+    const DEGREE: [u32; 8] = [19, 17, 16, 15, 14, 13, 12, 11];
+    const NUM_ADVICE: [usize; 8] = [1, 4, 9, 17, 36, 73, 148, 323];
+    const NUM_LOOKUP: [usize; 8] = [0, 1, 2, 3, 6, 12, 21, 38];
+    const NUM_FIXED: [usize; 8] = [1, 1, 1, 1, 1, 1, 2, 5];
+    const LOOKUP_BITS: [usize; 8] = [18, 16, 15, 14, 13, 12, 11, 10];
+    const LIMB_BITS: [usize; 8] = [88, 88, 90, 88, 91, 88, 88, 90];
 
     seq!(I in 0..7 {
         {
@@ -294,7 +309,7 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
         let mut rng = rand::thread_rng();
         let start = Instant::now();
 
-        create_ecdsa_circuit!(NUM_ADVICE[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3);
+        create_ecdsa_circuit!(NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3);
         let params = Params::<G1Affine>::unsafe_setup::<Bn256>(DEGREE[I]);
 
         let circuit = ECDSACircuit::<Fr>::default();

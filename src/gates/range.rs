@@ -1,4 +1,5 @@
 use core::num;
+use std::collections::HashSet;
 
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*, poly::Rotation};
 use num_bigint::{BigInt, BigUint};
@@ -16,7 +17,12 @@ use super::RangeInstructions;
 
 #[derive(Clone, Debug)]
 pub struct RangeConfig<F: FieldExt> {
-    pub q_lookups: Vec<Selector>,
+    // one specified advice column used for lookups
+    // If `gate_config` has only 1 advice column, use that one
+    // Else create a designated column just for lookups
+    // In the latter case, we don't even need a selector so `q_lookup` is empty
+    pub lookup_advice: Vec<Column<Advice>>,
+    pub q_lookup: Vec<Selector>,
     pub lookup: TableColumn,
     pub lookup_bits: usize,
     pub gate_config: FlexGateConfig<F>,
@@ -26,23 +32,26 @@ impl<F: FieldExt> RangeConfig<F> {
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
         num_advice: usize,
+        num_lookup_advice: usize,
         num_fixed: usize,
         lookup_bits: usize,
     ) -> Self {
         assert!(lookup_bits <= 28);
 
-        let mut q_lookup_vec = Vec::with_capacity(num_advice);
-        for _i in 0..num_advice {
-            let q = meta.complex_selector();
-            q_lookup_vec.push(q);
-        }
         let lookup = meta.lookup_table_column();
         let gate_config = FlexGateConfig::configure(meta, num_advice, num_fixed);
-        let config = Self {
-            q_lookups: q_lookup_vec.try_into().expect("qlookup should have correct len"),
-            lookup,
-            lookup_bits,
-            gate_config,
+
+        let mut lookup_advice = Vec::with_capacity(num_lookup_advice);
+        for _i in 0..num_lookup_advice {
+            let a = meta.advice_column();
+            meta.enable_equality(a);
+            lookup_advice.push(a);
+        }
+        let config = if num_advice > 1 {
+            Self { lookup_advice, q_lookup: Vec::new(), lookup, lookup_bits, gate_config }
+        } else {
+            let q = meta.complex_selector();
+            Self { lookup_advice: vec![], q_lookup: vec![q], lookup, lookup_bits, gate_config }
         };
         config.create_lookup(meta);
 
@@ -50,11 +59,17 @@ impl<F: FieldExt> RangeConfig<F> {
     }
 
     fn create_lookup(&self, meta: &mut ConstraintSystem<F>) -> () {
-        for i in 0..self.gate_config.gates.len() {
+        for i in 0..self.q_lookup.len() {
             meta.lookup("lookup", |meta| {
-                let q = meta.query_selector(self.q_lookups[i]);
+                let q = meta.query_selector(self.q_lookup[i]);
                 let a = meta.query_advice(self.gate_config.gates[i].value, Rotation::cur());
                 vec![(q * a, self.lookup)]
+            });
+        }
+        for la in self.lookup_advice.iter() {
+            meta.lookup("lookup wo selector", |meta| {
+                let a = meta.query_advice(la.clone(), Rotation::cur());
+                vec![(a, self.lookup)]
             });
         }
     }
@@ -63,20 +78,29 @@ impl<F: FieldExt> RangeConfig<F> {
 // See FlexGateChip for why we need distinction between Config and Chip
 #[derive(Clone, Debug)]
 pub struct RangeChip<F: FieldExt> {
-    pub q_lookups: Vec<Selector>,
+    pub lookup_advice: Vec<Column<Advice>>,
+    pub q_lookup: Vec<Selector>,
     pub lookup: TableColumn,
     pub lookup_bits: usize,
     pub gate_chip: FlexGateChip<F>,
+    // `cells_to_lookup` is a vector keeping track of all cells that we want to enable lookup for. When there is more than 1 advice column we will copy_advice all of these cells to the single lookup enabled column and do lookups there
+    pub cells_to_lookup: Vec<AssignedCell<F, F>>,
+    pub first_pass: bool,
+    pub seen: HashSet<usize>,
 }
 
 impl<F: FieldExt> RangeChip<F> {
     pub fn construct(config: RangeConfig<F>, using_simple_floor_planner: bool) -> Self {
         let gate_chip = FlexGateChip::construct(config.gate_config, using_simple_floor_planner);
         Self {
-            q_lookups: config.q_lookups,
+            lookup_advice: config.lookup_advice,
+            q_lookup: config.q_lookup,
             lookup: config.lookup,
             lookup_bits: config.lookup_bits,
             gate_chip,
+            cells_to_lookup: Vec::new(),
+            first_pass: true,
+            seen: HashSet::new(),
         }
     }
 
@@ -97,6 +121,34 @@ impl<F: FieldExt> RangeChip<F> {
         )?;
         Ok(())
     }
+
+    pub fn copy_and_lookup_cells(&mut self, layouter: &mut impl Layouter<F>) -> Result<(), Error> {
+        layouter.assign_region(
+            || "load lookup advice column",
+            |mut region| {
+                if self.gate_chip.using_simple_floor_planner && self.first_pass {
+                    self.first_pass = false;
+                    return Ok(());
+                }
+                let mut col = 0;
+                let mut offset = 0;
+                for acell in &self.cells_to_lookup {
+                    acell.copy_advice(
+                        || "copy lookup cell",
+                        &mut region,
+                        self.lookup_advice[col],
+                        offset,
+                    )?;
+                    col += 1;
+                    if col == self.lookup_advice.len() {
+                        col = 0;
+                        offset += 1;
+                    }
+                }
+                Ok(())
+            },
+        )
+    }
 }
 
 impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
@@ -111,12 +163,21 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
     }
 
     fn enable_lookup(
-        &self,
+        &mut self,
         region: &mut Region<'_, F>,
-        column_index: usize,
+        acell: AssignedCell<F, F>,
         offset: usize,
     ) -> Result<(), Error> {
-        self.q_lookups[column_index].enable(region, offset)
+        if self.q_lookup.len() > 0 {
+            self.q_lookup[0].enable(region, offset)?;
+        } else {
+            if !self.gate_chip.using_simple_floor_planner || self.seen.remove(&offset) {
+                self.cells_to_lookup.push(acell);
+            } else if self.gate_chip.using_simple_floor_planner {
+                self.seen.insert(offset);
+            }
+        }
+        Ok(())
     }
 
     // returns the limbs
@@ -186,7 +247,7 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
                 let (assigned_cells, column_index) =
                     self.gate_chip.assign_region(cells, 0, &mut region)?;
                 for row in enable_lookups {
-                    self.enable_lookup(&mut region, column_index, row)?;
+                    self.enable_lookup(&mut region, assigned_cells[row].clone(), row)?;
                 }
                 for row in enable_gates {
                     self.gate_chip.enable(&mut region, column_index, row)?;
@@ -360,7 +421,7 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
                     self.gate_chip.enable(&mut region, column_index, row)?;
                 }
                 for row in enable_lookups {
-                    self.enable_lookup(&mut region, column_index, row)?;
+                    self.enable_lookup(&mut region, assigned_cells[row].clone(), row)?;
                 }
                 region.constrain_equal(assigned_cells[0].cell(), assigned_cells[7].cell())?;
                 // check limb equalities for idx = k

@@ -128,9 +128,9 @@ pub trait RangeInstructions<F: FieldExt> {
     fn lookup_bits(&self) -> usize;
 
     fn enable_lookup(
-        &self,
+        &mut self,
         region: &mut Region<'_, F>,
-        column_index: usize,
+        acell: AssignedCell<F, F>,
         offset: usize,
     ) -> Result<(), Error>;
 

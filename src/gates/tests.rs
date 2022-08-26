@@ -114,7 +114,7 @@ impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        range::RangeConfig::configure(meta, 2, 1, 3)
+        range::RangeConfig::configure(meta, 2, 1, 1, 3)
     }
 
     fn synthesize(
@@ -163,6 +163,8 @@ impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
 
         let const_rows = chip.gate_chip.assign_and_constrain_constants(&mut layouter)?;
         println!("maximum rows used by a fixed column: {}", const_rows);
+        chip.copy_and_lookup_cells(&mut layouter)?;
+        println!("lookup cells used: {}", chip.cells_to_lookup.len());
         Ok(())
     }
 }

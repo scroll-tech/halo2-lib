@@ -39,6 +39,7 @@ impl<F: FieldExt> FpConfig<F> {
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
         num_advice: usize,
+        num_lookup_advice: usize,
         num_fixed: usize,
         lookup_bits: usize,
         limb_bits: usize,
@@ -46,7 +47,13 @@ impl<F: FieldExt> FpConfig<F> {
         p: BigUint,
     ) -> Self {
         FpConfig {
-            range_config: RangeConfig::<F>::configure(meta, num_advice, num_fixed, lookup_bits),
+            range_config: RangeConfig::<F>::configure(
+                meta,
+                num_advice,
+                num_lookup_advice,
+                num_fixed,
+                lookup_bits,
+            ),
             limb_bits,
             num_limbs,
             p,
@@ -365,7 +372,7 @@ pub(crate) mod tests {
         }
 
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-            FpConfig::configure(meta, NUM_ADVICE, NUM_FIXED, 17, 68, 4, modulus::<Fq>())
+            FpConfig::configure(meta, NUM_ADVICE, 1, NUM_FIXED, 17, 68, 4, modulus::<Fq>())
         }
 
         fn synthesize(

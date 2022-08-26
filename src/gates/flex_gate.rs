@@ -94,7 +94,7 @@ pub struct FlexGateChip<F: FieldExt> {
     // The following is a hack to get around this for row counting purposes
     pub using_simple_floor_planner: bool,
     pub first_pass: bool,
-    // first_pass is HashSet for (column_index, advice_rows[column_index])
+    // `seen` is HashSet for (column_index, advice_rows[column_index])
     pub seen: HashSet<(usize, u64)>,
 }
 

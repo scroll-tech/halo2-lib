@@ -29,7 +29,7 @@ use num_bigint::BigInt;
 
 #[macro_export]
 macro_rules! create_pairing_circuit {
-    ( $num_advice:expr, $num_fixed:expr, $lookup_bits:expr, $limb_bits:expr, $num_limbs:expr) => {
+    ( $num_advice:expr, $num_lookup_advice:expr, $num_fixed:expr, $lookup_bits:expr, $limb_bits:expr, $num_limbs:expr) => {
         struct PairingCircuit<F: FieldExt> {
             P: Option<G1Affine>,
             Q: Option<G2Affine>,
@@ -58,6 +58,7 @@ macro_rules! create_pairing_circuit {
                 PairingChip::configure(
                     meta,
                     $num_advice,
+                    $num_lookup_advice,
                     $num_fixed,
                     $lookup_bits,
                     $limb_bits,
@@ -117,26 +118,39 @@ macro_rules! create_pairing_circuit {
                     }*/
                 }
 
-                println!("Using:\nadvice columns: {}\nfixed columns: {}\nlookup bits: {}\nlimb bits: {}\nnum limbs: {}", $num_advice, $num_fixed, $lookup_bits, $limb_bits, $num_limbs);
-                let advice_rows = chip.fp_chip.range.gate_chip.advice_rows.iter();
-                println!(
-                    "maximum rows used by an advice column: {}",
-                    advice_rows.clone().max().unwrap()
-                );
-                println!(
-                    "minimum rows used by an advice column: {}",
-                    advice_rows.clone().min().unwrap()
-                );
-                println!(
-                    "total cells use: {}",
-                    advice_rows.sum::<u64>()
-                );
-
                 // IMPORTANT: this assigns all constants to the fixed columns
                 // This is not optional.
                 let const_rows =
                     chip.fp_chip.range.gate_chip.assign_and_constrain_constants(&mut layouter)?;
-                println!("maximum rows used by a fixed column: {}", const_rows);
+
+                // IMPORTANT: this copies cells to the lookup advice column to perform range check lookups
+                // This is not optional when there is more than 1 advice column.
+                chip.fp_chip.range.copy_and_lookup_cells(&mut layouter)?;
+
+                if self.P != None {
+                    println!("Using:\nadvice columns: {}\nspecial lookup advice columns: {}\nfixed columns: {}\nlookup bits: {}\nlimb bits: {}\nnum limbs: {}", $num_advice, $num_lookup_advice, $num_fixed, $lookup_bits, $limb_bits, $num_limbs);
+                    let advice_rows = chip.fp_chip.range.gate_chip.advice_rows.iter();
+                    println!(
+                        "maximum rows used by an advice column: {}",
+                        advice_rows.clone().max().unwrap()
+                    );
+                    println!(
+                        "minimum rows used by an advice column: {}",
+                        advice_rows.clone().min().unwrap()
+                    );
+                    println!(
+                        "total cells use: {}",
+                        advice_rows.sum::<u64>()
+                    );
+                    println!(
+                        "cells used in special lookup column: {}",
+                        range_chip.cells_to_lookup.len()
+                    );
+                    println!(
+                        "maximum rows used by a fixed column: {}",
+                        const_rows
+                    );
+                }
                 Ok(())
             }
         }
@@ -147,7 +161,7 @@ macro_rules! create_pairing_circuit {
 #[test]
 fn test_pairing() {
     let k = 23;
-    create_pairing_circuit!(1, 1, 22, 88, 3);
+    create_pairing_circuit!(1, 0, 1, 22, 88, 3);
     let mut rng = rand::thread_rng();
 
     let P = Some(G1Affine::random(&mut rng));
@@ -165,6 +179,7 @@ fn test_pairing() {
 fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
     const DEGREE: [u32; 5] = [23, 19, 16, 13, 12];
     const NUM_ADVICE: [usize; 5] = [1, 9, 71, 615, 1248];
+    const NUM_LOOKUP: [usize; 5] = [1, 1, 1, 1, 1];
     const NUM_FIXED: [usize; 5] = [1, 1, 1, 1, 1];
     const LOOKUP_BITS: [usize; 5] = [22, 18, 15, 12, 11];
     const LIMB_BITS: [usize; 5] = [88, 90, 90, 88, 88];
@@ -175,7 +190,7 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
         let mut rng = rand::thread_rng();
         let start = Instant::now();
 
-        create_pairing_circuit!(NUM_ADVICE[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3);
+        create_pairing_circuit!(NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3);
         let params = Params::<G1Affine>::unsafe_setup::<Bn256>(DEGREE[I]);
 
         let circuit = PairingCircuit::<Fr>::default();
