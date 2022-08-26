@@ -365,7 +365,7 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn plot_secp() {
     let k = 19;
-    create_ecdsa_circuit!(1, 1, 19, 88, 3);
+    create_ecdsa_circuit!(1, 1, 1, 19, 88, 3);
     use plotters::prelude::*;
 
     let root = BitMapBackend::new("layout.png", (512, 16384)).into_drawing_area();

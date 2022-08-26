@@ -225,7 +225,7 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
 fn plot_pairing() {
     let k = 23;
     use plotters::prelude::*;
-    create_pairing_circuit!(1, 1, 22, 88, 3);
+    create_pairing_circuit!(1, 1, 1, 22, 88, 3);
 
     let root = BitMapBackend::new("layout.png", (512, 40384)).into_drawing_area();
     root.fill(&WHITE).unwrap();
