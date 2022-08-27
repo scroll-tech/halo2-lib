@@ -52,19 +52,67 @@ impl<F: FieldExt> GateConfig<F> {
 }
 
 #[derive(Clone, Debug)]
+pub struct HorizontalGateConfig<F: FieldExt> {
+    pub a: Column<Advice>,
+    pub b: Column<Advice>,
+    pub c: Column<Advice>,
+    pub d: Column<Advice>,
+    _marker: PhantomData<F>,
+}
+
+impl<F: FieldExt> HorizontalGateConfig<F> {
+    pub fn configure(meta: &mut ConstraintSystem<F>) -> Self {
+	let a: Column<Advice> = meta.advice_column();
+	let b: Column<Advice> = meta.advice_column();
+	let c: Column<Advice> = meta.advice_column();
+	let d: Column<Advice> = meta.advice_column();
+	meta.enable_equality(a);
+	meta.enable_equality(b);
+	meta.enable_equality(c);
+	meta.enable_equality(d);
+
+	let config: HorizontalGateConfig<F> = Self {
+	    a,
+	    b,
+	    c,
+	    d,
+	    _marker: PhantomData
+	};
+	config.create_gate(meta);
+	config
+    }
+
+    fn create_gate(&self, meta: &mut ConstraintSystem<F>) {
+	meta.create_gate("4 columns a + b * c = out", |meta| {
+	    let a = meta.query_advice(self.a, Rotation::cur());
+            let b = meta.query_advice(self.b, Rotation::cur());
+            let c = meta.query_advice(self.c, Rotation::cur());
+            let d = meta.query_advice(self.d, Rotation::cur());
+	    vec![a + b * c - d]
+	})
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct FlexGateConfig<F: FieldExt> {
     pub gates: Vec<GateConfig<F>>,
+    pub horizontal_gates: Vec<HorizontalGateConfig<F>>,
     // `constants` is a vector of fixed columns for allocating constant values
     pub constants: Vec<Column<Fixed>>,
 }
 
 impl<F: FieldExt> FlexGateConfig<F> {
-    pub fn configure(meta: &mut ConstraintSystem<F>, num_advice: usize, num_fixed: usize) -> Self {
+    pub fn configure(meta: &mut ConstraintSystem<F>, num_advice: usize, num_horizontal: usize, num_fixed: usize) -> Self {
         let mut gates = Vec::with_capacity(num_advice);
         for _i in 0..num_advice {
             let gate = GateConfig::configure(meta);
             gates.push(gate);
         }
+	let mut horizontal_gates = Vec::with_capacity(num_horizontal);
+	for _i in 0..num_horizontal {
+	    let horizontal_gate = HorizontalGateConfig::configure(meta);
+	    horizontal_gates.push(horizontal_gate);
+	}
         let mut constants = Vec::with_capacity(num_fixed);
         for _i in 0..num_fixed {
             let c = meta.fixed_column();
@@ -72,7 +120,7 @@ impl<F: FieldExt> FlexGateConfig<F> {
             // meta.enable_constant(c);
             constants.push(c);
         }
-        Self { gates, constants }
+        Self { gates, horizontal_gates, constants }
     }
 }
 
@@ -84,6 +132,8 @@ pub struct FlexGateChip<F: FieldExt> {
     pub config: FlexGateConfig<F>,
     // `advice_rows[i]` keeps track of the number of rows used in the advice column `config.gates[i].value`
     pub advice_rows: Vec<u64>,
+    // `horizontal_advice_rows[i]` is the number of rows used in the advice columns for `config.horizontal_gates[i].value`
+    pub horizontal_advice_rows: Vec<u64>,
     // `constants_to_assign` is a vector keeping track of all constants that we use throughout
     // we load them all in one go using fn `load_constants`
     // if we have (c, Some(cell)) in the vector then we also constrain the loaded cell for `c` to equal `cell`
@@ -102,6 +152,16 @@ impl<F: FieldExt> FlexGateChip<F> {
     /// returns leftmost `i` where `advice_rows[i]` is minimum amongst all `advice_rows`
     fn min_gate_index(&self) -> usize {
         self.advice_rows
+            .iter()
+            .enumerate()
+            .min_by(|(_, x), (_, y)| x.cmp(y))
+            .map(|(i, _)| i)
+            .unwrap()
+    }
+
+    /// returns leftmost `i` where `horizontal_advice_rows[i]` is minimum amongst all `advice_rows`
+    fn min_horizontal_gate_index(&self) -> usize {
+        self.horizontal_advice_rows
             .iter()
             .enumerate()
             .min_by(|(_, x), (_, y)| x.cmp(y))
@@ -155,9 +215,11 @@ impl<F: FieldExt> FlexGateChip<F> {
 
     pub fn construct(config: FlexGateConfig<F>, using_simple_floor_planner: bool) -> Self {
         let num_advice = config.gates.len();
+	let num_horizontal_advice = config.horizontal_gates.len();
         Self {
             config,
             advice_rows: vec![0u64; num_advice],
+	    horizontal_advice_rows: vec![0u64; num_horizontal_advice],
             constants_to_assign: Vec::new(),
             using_simple_floor_planner,
             first_pass: true,

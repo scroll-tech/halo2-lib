@@ -179,7 +179,7 @@ fn test_pairing() {
 fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
     const DEGREE: [u32; 5] = [23, 19, 16, 13, 12];
     const NUM_ADVICE: [usize; 5] = [1, 9, 71, 615, 1248];
-    const NUM_LOOKUP: [usize; 5] = [1, 1, 1, 1, 1];
+    const NUM_LOOKUP: [usize; 5] = [0, 1, 7, 74, 120];
     const NUM_FIXED: [usize; 5] = [1, 1, 1, 1, 1];
     const LOOKUP_BITS: [usize; 5] = [22, 18, 15, 12, 11];
     const LIMB_BITS: [usize; 5] = [88, 90, 90, 88, 88];
