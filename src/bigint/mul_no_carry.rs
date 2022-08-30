@@ -57,10 +57,7 @@ pub fn assign<F: FieldExt>(
                     offset += 3;
                 }
                 let (prod_computation_assignments, column_idx) =
-                    gate.assign_region(prod_computation, 0, &mut region)?;
-		for row in enable_gates {
-		    gate.enable(&mut region, column_idx, row)?;
-		}
+                    gate.assign_region_smart(prod_computation, enable_gates, 0, &mut region)?;
                 Ok(prod_computation_assignments.last().unwrap().clone())
             },
         )?;
@@ -115,10 +112,7 @@ pub fn truncate<F: FieldExt>(
                     offset += 3;
                 }
                 let (prod_computation_assignments, column_index) =
-                    gate.assign_region(prod_computation, 0, &mut region)?;
-                for row in enable_gates {
-                    gate.enable(&mut region, column_index, row)?;
-                }
+                    gate.assign_region_smart(prod_computation, enable_gates, 0, &mut region)?;
                 Ok(prod_computation_assignments.last().unwrap().clone())
             },
         )?;

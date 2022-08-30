@@ -45,10 +45,7 @@ pub fn assign<F: FieldExt>(
                 offset = offset + 3;
             }
             let (assigned_cells, column_index) =
-                range.gate().assign_region(cells, 0, &mut region)?;
-            for row in enable_gates {
-                range.gate().enable(&mut region, column_index, row)?;
-            }
+                range.gate().assign_region_smart(cells, enable_gates, 0, &mut region)?;
             region.constrain_equal(a.cell(), assigned_cells.last().unwrap().clone().cell())?;
             Ok(assigned_cells)
         },

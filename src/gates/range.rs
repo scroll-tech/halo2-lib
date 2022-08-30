@@ -39,7 +39,7 @@ impl<F: FieldExt> RangeConfig<F> {
         assert!(lookup_bits <= 28);
 
         let lookup = meta.lookup_table_column();
-        let gate_config = FlexGateConfig::configure(meta, num_advice, num_fixed);
+        let gate_config = FlexGateConfig::configure(meta, num_advice, 0, num_fixed);
 
         let mut lookup_advice = Vec::with_capacity(num_lookup_advice);
         for _i in 0..num_lookup_advice {
@@ -245,12 +245,9 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
                     }
                 }
                 let (assigned_cells, column_index) =
-                    self.gate_chip.assign_region(cells, 0, &mut region)?;
+                    self.gate_chip.assign_region_smart(cells, enable_gates, 0, &mut region)?;
                 for row in enable_lookups {
                     self.enable_lookup(&mut region, assigned_cells[row].clone(), row)?;
-                }
-                for row in enable_gates {
-                    self.gate_chip.enable(&mut region, column_index, row)?;
                 }
                 region.constrain_equal(a.cell(), assigned_cells[3 * (k - 1)].cell())?;
                 if rem_bits != 0 {
@@ -316,9 +313,7 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
                     Existing(&a),
                 ];
                 let (assigned_cells, column_index) =
-                    self.gate_chip.assign_region(cells, 0, &mut region)?;
-                self.gate_chip.enable(&mut region, column_index, 0)?;
-                self.gate_chip.enable(&mut region, column_index, 3)?;
+                    self.gate_chip.assign_region_smart(cells, vec![0, 3], 0, &mut region)?;
                 Ok(assigned_cells[0].clone())
             },
         )?;
@@ -416,11 +411,8 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
                     }
                 }
                 let (assigned_cells, column_index) =
-                    self.gate_chip.assign_region(cells, 0, &mut region)?;
-                for row in enable_gates {
-                    self.gate_chip.enable(&mut region, column_index, row)?;
-                }
-                for row in enable_lookups {
+                    self.gate_chip.assign_region_smart(cells, enable_gates, 0, &mut region)?;
+               for row in enable_lookups {
                     self.enable_lookup(&mut region, assigned_cells[row].clone(), row)?;
                 }
                 region.constrain_equal(assigned_cells[0].cell(), assigned_cells[7].cell())?;
@@ -468,9 +460,7 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
                     Constant(F::from(0)),
                 ];
                 let (assigned_cells, column_index) =
-                    self.gate_chip.assign_region(cells, 0, &mut region)?;
-                self.gate_chip.enable(&mut region, column_index, 0)?;
-                self.gate_chip.enable(&mut region, column_index, 4)?;
+                    self.gate_chip.assign_region_smart(cells, vec![0, 4], 0, &mut region)?;
                 region.constrain_equal(assigned_cells[0].cell(), assigned_cells[6].cell())?;
                 Ok(assigned_cells[0].clone())
             },
@@ -493,8 +483,7 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
                     Existing(&a),
                 ];
                 let (assigned_cells, column_index) =
-                    self.gate_chip.assign_region(cells, 0, &mut region)?;
-                self.gate_chip.enable(&mut region, column_index, 0)?;
+                    self.gate_chip.assign_region_smart(cells, vec![0], 0, &mut region)?;
                 Ok(assigned_cells[0].clone())
             },
         )?;
@@ -529,10 +518,7 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
                     offset = offset + 3;
                 }
                 let (assigned_cells, column_index) =
-                    self.gate_chip.assign_region(cells, 0, &mut region)?;
-                for row in enable_gates {
-                    self.gate_chip.enable(&mut region, column_index, row)?;
-                }
+                    self.gate_chip.assign_region_smart(cells, enable_gates, 0, &mut region)?;
                 region.constrain_equal(a.cell(), assigned_cells.last().unwrap().clone().cell())?;
                 let mut assigned_bits = Vec::with_capacity(range_bits);
                 assigned_bits.push(assigned_cells[0].clone());
@@ -553,8 +539,7 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
                         Existing(&bit_cells[idx]),
                         Existing(&bit_cells[idx]),
                     ];
-                    let (_, column_index) = self.gate_chip.assign_region(cells, 0, &mut region)?;
-                    self.gate_chip.enable(&mut region, column_index, 0)?;
+                    let (_, column_index) = self.gate_chip.assign_region_smart(cells, vec![0], 0, &mut region)?;
                     Ok(())
                 },
             )?;

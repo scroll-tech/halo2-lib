@@ -25,7 +25,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        FlexGateConfig::configure(meta, 2, 1)
+        FlexGateConfig::configure(meta, 2, 0, 1)
     }
 
     fn synthesize(

@@ -152,10 +152,7 @@ pub fn assign<F: FieldExt>(
 		
                 // assign all the cells above
                 let (prod_computation_assignments, idx) =
-                    range.gate().assign_region(prod_computation, 0, &mut region)?;
-		for row in enable_gates {
-                    range.gate().enable(&mut region, idx, row)?;
-		}
+                    range.gate().assign_region_smart(prod_computation, enable_gates, 0, &mut region)?;
 
 		let mut mod_cell = None;
 		let mut quot_cell = None;
@@ -214,17 +211,17 @@ pub fn assign<F: FieldExt>(
             |mut region| {
                 let out_val = quot_cell.value().map(|&a| a + limb_base);
                 // | quot_cell | 2^n | 1 | quot_cell + 2^n |
-                let (shift_computation, idx) = range.gate().assign_region(
+                let (shift_computation, idx) = range.gate().assign_region_smart(
                     vec![
                         Existing(quot_cell),
                         Constant(limb_base),
                         Constant(F::one()),
                         Witness(out_val),
                     ],
+		    vec![0],
                     0,
                     &mut region,
                 )?;
-		range.gate().enable(&mut region, idx, 0)?;
                 Ok(shift_computation[3].clone())
             },
         )?;
@@ -409,10 +406,7 @@ pub fn crt<F: FieldExt>(
 
                 // assign all the cells above
                 let (prod_computation_assignments, column_index) =
-                    range.gate().assign_region(prod_computation, 0, &mut region)?;
-                for row in enable_gates {
-                    range.gate().enable(&mut region, column_index, row)?;
-                }
+                    range.gate().assign_region_smart(prod_computation, enable_gates, 0, &mut region)?;
 
                 Ok((
                     // new mod_assigned cells is at
@@ -460,17 +454,17 @@ pub fn crt<F: FieldExt>(
             |mut region| {
                 let out_val = quot_cell.value().map(|&a| a + limb_base);
                 // | quot_cell | 2^n | 1 | quot_cell + 2^n |
-                let (shift_computation, column_index) = range.gate().assign_region(
+                let (shift_computation, column_index) = range.gate().assign_region_smart(
                     vec![
                         Existing(quot_cell),
                         Constant(limb_base),
                         Constant(F::one()),
                         Witness(out_val),
                     ],
+		    vec![0],
                     0,
                     &mut region,
                 )?;
-                range.gate().enable(&mut region, column_index, 0)?;
                 Ok(shift_computation[3].clone())
             },
         )?;
@@ -493,17 +487,17 @@ pub fn crt<F: FieldExt>(
         || "native carry mod",
         |mut region| {
             // | out | modulus | quotient | a |
-            let (native_computation, column_index) = range.gate().assign_region(
+            let (native_computation, column_index) = range.gate().assign_region_smart(
                 vec![
                     Witness(out_native),
                     Constant(mod_native),
                     Witness(quot_native),
                     Existing(&a.native),
                 ],
+		vec![0],
                 0,
                 &mut region,
             )?;
-            range.gate().enable(&mut region, column_index, 0)?;
             Ok((native_computation[0].clone(), native_computation[2].clone()))
         },
     )?;
