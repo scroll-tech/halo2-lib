@@ -100,7 +100,8 @@ impl<F: FieldExt> FixedOverflowInteger<F> {
             || "assign limbs",
             |mut region| {
                 let limb_cells = self.limbs.iter().map(|x| Constant(*x)).collect();
-                let limb_cells_assigned = gate.assign_region(limb_cells, 0, &mut region)?;
+                let limb_cells_assigned
+		    = gate.assign_region_smart(limb_cells, vec![], vec![], vec![], 0, &mut region)?;
                 Ok(limb_cells_assigned)
             },
         )?;
@@ -190,7 +191,7 @@ impl<F: FieldExt> FixedCRTInteger<F> {
             |mut region| {
                 let native_cells = vec![Constant(self.native)];
                 let (native_cells_assigned, _) =
-                    gate.assign_region(native_cells, 0, &mut region)?;
+                    gate.assign_region_smart(native_cells, vec![], vec![], vec![], 0, &mut region)?;
                 Ok(native_cells_assigned[0].clone())
             },
         )?;

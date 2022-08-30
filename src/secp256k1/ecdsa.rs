@@ -196,8 +196,11 @@ macro_rules! create_ecdsa_circuit {
                 let (scalar_cells, _) = layouter.assign_region(
                     || "load scalar",
                     |mut region| {
-                        chip.field_chip.range.gate().assign_region(
+                        chip.field_chip.range.gate().assign_region_smart(
                             vec![Witness(scalar0), Witness(scalar1)],
+                            vec![],
+                            vec![],
+                            vec![],
                             0,
                             &mut region,
                         )

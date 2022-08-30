@@ -123,8 +123,11 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpChip<'_, F, Fp> {
         let limbs = layouter.assign_region(
             || "load private",
             |mut region| {
-                let (limbs, _) = self.range.gate().assign_region(
+                let (limbs, _) = self.range.gate().assign_region_smart(
                     a_vec.iter().map(|x| Witness(x.clone())).collect(),
+		    vec![],
+		    vec![],
+		    vec![],
                     0,
                     &mut region,
                 )?;
@@ -159,7 +162,8 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpChip<'_, F, Fp> {
                 let mut a_vec: Vec<QuantumCell<F>> =
                     a_vec.iter().map(|v| Constant(v.clone())).collect();
                 a_vec.push(Constant(bigint_to_fe(&a)));
-                let (mut a_cells, _) = self.range.gate().assign_region(a_vec, 0, &mut region)?;
+                let (mut a_cells, _)
+		    = self.range.gate().assign_region_smart(a_vec, vec![], vec![], vec![], 0, &mut region)?;
                 let a_native = a_cells.pop().unwrap();
                 Ok((a_cells, a_native))
             },
