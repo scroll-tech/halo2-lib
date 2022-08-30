@@ -54,6 +54,8 @@ pub fn assign<F: FieldExt>(
                         Witness(out_val),
                     ],
 		    vec![0, 3],
+		    vec![],
+		    vec![],
                     0,
                     &mut region,
                 )?;

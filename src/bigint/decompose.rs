@@ -44,9 +44,9 @@ pub fn assign<F: FieldExt>(
                 enable_gates.push(offset - 1);
                 offset = offset + 3;
             }
+	    let last_idx = cells.len() - 1;
             let (assigned_cells, column_index) =
-                range.gate().assign_region_smart(cells, enable_gates, 0, &mut region)?;
-            region.constrain_equal(a.cell(), assigned_cells.last().unwrap().clone().cell())?;
+                range.gate().assign_region_smart(cells, enable_gates, vec![], vec![(a, last_idx)], 0, &mut region)?;
             Ok(assigned_cells)
         },
     )?;

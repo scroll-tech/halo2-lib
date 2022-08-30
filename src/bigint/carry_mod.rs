@@ -152,7 +152,7 @@ pub fn assign<F: FieldExt>(
 		
                 // assign all the cells above
                 let (prod_computation_assignments, idx) =
-                    range.gate().assign_region_smart(prod_computation, enable_gates, 0, &mut region)?;
+                    range.gate().assign_region_smart(prod_computation, enable_gates, vec![], vec![], 0, &mut region)?;
 
 		let mut mod_cell = None;
 		let mut quot_cell = None;
@@ -219,6 +219,8 @@ pub fn assign<F: FieldExt>(
                         Witness(out_val),
                     ],
 		    vec![0],
+		    vec![],
+		    vec![],
                     0,
                     &mut region,
                 )?;
@@ -406,7 +408,7 @@ pub fn crt<F: FieldExt>(
 
                 // assign all the cells above
                 let (prod_computation_assignments, column_index) =
-                    range.gate().assign_region_smart(prod_computation, enable_gates, 0, &mut region)?;
+                    range.gate().assign_region_smart(prod_computation, enable_gates, vec![], vec![], 0, &mut region)?;
 
                 Ok((
                     // new mod_assigned cells is at
@@ -462,6 +464,8 @@ pub fn crt<F: FieldExt>(
                         Witness(out_val),
                     ],
 		    vec![0],
+		    vec![],
+		    vec![],
                     0,
                     &mut region,
                 )?;
@@ -495,6 +499,8 @@ pub fn crt<F: FieldExt>(
                     Existing(&a.native),
                 ],
 		vec![0],
+		vec![],
+		vec![],
                 0,
                 &mut region,
             )?;

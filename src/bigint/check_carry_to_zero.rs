@@ -79,9 +79,7 @@ pub fn assign<F: FieldExt>(
                 }
             }
             let (assigned_cells, column_index) =
-                range.gate().assign_region_smart(cells, enable_gates, 0, &mut region)?;
-            region
-                .constrain_equal(a.limbs[k - 1].cell(), assigned_cells[4 * (k - 2) + 1].cell())?;
+                range.gate().assign_region_smart(cells, enable_gates, vec![], vec![(&a.limbs[k - 1], 4 * (k - 2) + 1)], 0, &mut region)?;
 
             for idx in 0..k {
                 neg_carry_assignments.push(assigned_cells[4 * idx + 1].clone());
@@ -115,7 +113,7 @@ pub fn assign<F: FieldExt>(
                     Witness(shift_carry_val),
                 ];
                 let (assigned_cells, column_index) =
-                    range.gate().assign_region_smart(cells, vec![0], 0, &mut region)?;
+                    range.gate().assign_region_smart(cells, vec![0], vec![], vec![], 0, &mut region)?;
                 Ok(assigned_cells.last().unwrap().clone())
             }
 	)?;
@@ -178,7 +176,7 @@ pub fn truncate<F: FieldExt>(
                 }
             }
             let (assigned_cells, column_index) =
-                range.gate().assign_region_smart(cells, enable_gates, 0, &mut region)?;
+                range.gate().assign_region_smart(cells, enable_gates, vec![], vec![], 0, &mut region)?;
 
             for idx in 0..k {
                 neg_carry_assignments.push(assigned_cells[4 * idx + 1].clone());
@@ -213,7 +211,7 @@ pub fn truncate<F: FieldExt>(
                     Witness(shift_carry_val),
                 ];
                 let (assigned_cells, column_index) =
-                    range.gate().assign_region_smart(cells, vec![0], 0, &mut region)?;
+                    range.gate().assign_region_smart(cells, vec![0], vec![], vec![], 0, &mut region)?;
                 Ok(assigned_cells.last().unwrap().clone())
             },
         )?;

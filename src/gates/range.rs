@@ -244,30 +244,23 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
                         }
                     }
                 }
-                let (assigned_cells, column_index) =
-                    self.gate_chip.assign_region_smart(cells, enable_gates, 0, &mut region)?;
-                for row in enable_lookups {
-                    self.enable_lookup(&mut region, assigned_cells[row].clone(), row)?;
-                }
-                region.constrain_equal(a.cell(), assigned_cells[3 * (k - 1)].cell())?;
+
+		let mut eq_list = vec![];
                 if rem_bits != 0 {
-                    region.constrain_equal(
-                        assigned_cells[3 * k - 1].cell(),
-                        assigned_cells[3 * k - 4].cell(),
-                    )?;
+		    eq_list.push((3 * k - 1, 3 * k - 4));
                     if rem_bits == 1 {
                         //         | 3k - 4 | 3k - 3 | 3k - 2 | 3k - 1 | 3k    | 3k + 1 |
                         // we want | x      | a.cell | 0      | x      | x     | x      |
                         // with x = limbs[idx]
-                        region.constrain_equal(
-                            assigned_cells[3 * k].cell(),
-                            assigned_cells[3 * k - 4].cell(),
-                        )?;
-                        region.constrain_equal(
-                            assigned_cells[3 * k + 1].cell(),
-                            assigned_cells[3 * k - 4].cell(),
-                        )?;
+			eq_list.push((3 * k, 3 * k - 4));
+			eq_list.push((3 * k + 1, 3 * k - 4));
                     }
+                }
+
+		let (assigned_cells, column_index) =
+                    self.gate_chip.assign_region_smart(cells, enable_gates, eq_list, vec![(a, 3 * (k - 1))], 0, &mut region)?;
+                for row in enable_lookups {
+                    self.enable_lookup(&mut region, assigned_cells[row].clone(), row)?;
                 }
 
                 let mut assigned_limbs = Vec::with_capacity(k);
@@ -313,7 +306,7 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
                     Existing(&a),
                 ];
                 let (assigned_cells, column_index) =
-                    self.gate_chip.assign_region_smart(cells, vec![0, 3], 0, &mut region)?;
+                    self.gate_chip.assign_region_smart(cells, vec![0, 3], vec![], vec![], 0, &mut region)?;
                 Ok(assigned_cells[0].clone())
             },
         )?;
@@ -410,26 +403,19 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
                         cells.push(Constant(F::from(0)));
                     }
                 }
-                let (assigned_cells, column_index) =
-                    self.gate_chip.assign_region_smart(cells, enable_gates, 0, &mut region)?;
+		let mut eq_list = vec![];
+		eq_list.push((0, 7));
+                // check limb equalities for idx = k
+		eq_list.push((9 + 3 * k - 2, 9 + 3 * k + 1));
+		eq_list.push((9 + 3 * k - 2, 9 + 3 * k + 5));
+		// check is_zero equalities
+		eq_list.push((9 + 3 * k, 9 + 3 * k + 6));
+		
+                let (assigned_cells, column_index) =		    
+                    self.gate_chip.assign_region_smart(cells, enable_gates, eq_list, vec![], 0, &mut region)?;
                for row in enable_lookups {
                     self.enable_lookup(&mut region, assigned_cells[row].clone(), row)?;
                 }
-                region.constrain_equal(assigned_cells[0].cell(), assigned_cells[7].cell())?;
-                // check limb equalities for idx = k
-                region.constrain_equal(
-                    assigned_cells[9 + 3 * k - 2].cell(),
-                    assigned_cells[9 + 3 * k + 1].cell(),
-                )?;
-                region.constrain_equal(
-                    assigned_cells[9 + 3 * k - 2].cell(),
-                    assigned_cells[9 + 3 * k + 5].cell(),
-                )?;
-                // check is_zero equalities
-                region.constrain_equal(
-                    assigned_cells[9 + 3 * k].cell(),
-                    assigned_cells[9 + 3 * k + 6].cell(),
-                )?;
                 Ok(assigned_cells[9 + 3 * k].clone())
             },
         )
@@ -460,8 +446,7 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
                     Constant(F::from(0)),
                 ];
                 let (assigned_cells, column_index) =
-                    self.gate_chip.assign_region_smart(cells, vec![0, 4], 0, &mut region)?;
-                region.constrain_equal(assigned_cells[0].cell(), assigned_cells[6].cell())?;
+                    self.gate_chip.assign_region_smart(cells, vec![0, 4], vec![(0, 6)], vec![], 0, &mut region)?;
                 Ok(assigned_cells[0].clone())
             },
         )
@@ -483,7 +468,7 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
                     Existing(&a),
                 ];
                 let (assigned_cells, column_index) =
-                    self.gate_chip.assign_region_smart(cells, vec![0], 0, &mut region)?;
+                    self.gate_chip.assign_region_smart(cells, vec![0], vec![], vec![], 0, &mut region)?;
                 Ok(assigned_cells[0].clone())
             },
         )?;
@@ -517,9 +502,10 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
                     enable_gates.push(offset - 1);
                     offset = offset + 3;
                 }
+		let last_idx = cells.len() - 1;
                 let (assigned_cells, column_index) =
-                    self.gate_chip.assign_region_smart(cells, enable_gates, 0, &mut region)?;
-                region.constrain_equal(a.cell(), assigned_cells.last().unwrap().clone().cell())?;
+                    self.gate_chip.assign_region_smart(cells, enable_gates, vec![], vec![(a, last_idx)], 0, &mut region)?;
+
                 let mut assigned_bits = Vec::with_capacity(range_bits);
                 assigned_bits.push(assigned_cells[0].clone());
                 for idx in 1..range_bits {
@@ -539,7 +525,8 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
                         Existing(&bit_cells[idx]),
                         Existing(&bit_cells[idx]),
                     ];
-                    let (_, column_index) = self.gate_chip.assign_region_smart(cells, vec![0], 0, &mut region)?;
+                    let (_, column_index)
+			= self.gate_chip.assign_region_smart(cells, vec![0], vec![], vec![], 0, &mut region)?;
                     Ok(())
                 },
             )?;
