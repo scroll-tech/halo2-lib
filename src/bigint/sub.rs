@@ -43,7 +43,7 @@ pub fn assign<F: FieldExt>(
                 let a_with_borrow_val =
                     a.limbs[i].value().zip(lt.value()).map(|(&a, &lt)| a + lt * limb_base);
                 let out_val = a_with_borrow_val.zip(bottom.value()).map(|(ac, &b)| ac - b);
-                let (assignments, column_index) = range.gate().assign_region_smart(
+                let assignments = range.gate().assign_region_smart(
                     vec![
                         Existing(&a.limbs[i]),
                         Existing(&lt),
@@ -53,9 +53,9 @@ pub fn assign<F: FieldExt>(
                         Existing(&bottom),
                         Witness(out_val),
                     ],
-		    vec![0, 3],
-		    vec![],
-		    vec![],
+                    vec![0, 3],
+                    vec![],
+                    vec![],
                     0,
                     &mut region,
                 )?;

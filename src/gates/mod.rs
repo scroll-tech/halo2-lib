@@ -27,29 +27,15 @@ impl<F: FieldExt> QuantumCell<'_, F> {
 }
 
 pub trait GateInstructions<F: FieldExt> {
-    fn assign_region(
-        &mut self,
-        inputs: Vec<QuantumCell<F>>,
-        offset: usize,
-        region: &mut Region<'_, F>,
-    ) -> Result<(Vec<AssignedCell<F, F>>, usize), Error>;
-
     fn assign_region_smart(
         &mut self,
         inputs: Vec<QuantumCell<F>>,
-	gate_offsets: Vec<usize>,
-	equality_offsets: Vec<(usize, usize)>,
-	external_equality: Vec<(&AssignedCell<F, F>, usize)>,
+        gate_offsets: Vec<usize>,
+        equality_offsets: Vec<(usize, usize)>,
+        external_equality: Vec<(&AssignedCell<F, F>, usize)>,
         offset: usize,
         region: &mut Region<'_, F>,
-    ) -> Result<(Vec<AssignedCell<F, F>>, usize), Error>;
-    
-    fn enable(
-        &self,
-        region: &mut Region<'_, F>,
-        gate_index: usize,
-        offset: usize,
-    ) -> Result<(), Error>;
+    ) -> Result<Vec<AssignedCell<F, F>>, Error>;
 
     fn add(
         &mut self,

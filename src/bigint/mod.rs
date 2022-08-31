@@ -96,12 +96,12 @@ impl<F: FieldExt> FixedOverflowInteger<F> {
         gate: &mut impl GateInstructions<F>,
         layouter: &mut impl Layouter<F>,
     ) -> Result<OverflowInteger<F>, Error> {
-        let (assigned_limbs, _) = layouter.assign_region(
+        let assigned_limbs = layouter.assign_region(
             || "assign limbs",
             |mut region| {
                 let limb_cells = self.limbs.iter().map(|x| Constant(*x)).collect();
-                let limb_cells_assigned
-		    = gate.assign_region_smart(limb_cells, vec![], vec![], vec![], 0, &mut region)?;
+                let limb_cells_assigned =
+                    gate.assign_region_smart(limb_cells, vec![], vec![], vec![], 0, &mut region)?;
                 Ok(limb_cells_assigned)
             },
         )?;
@@ -190,7 +190,7 @@ impl<F: FieldExt> FixedCRTInteger<F> {
             || "assign native",
             |mut region| {
                 let native_cells = vec![Constant(self.native)];
-                let (native_cells_assigned, _) =
+                let native_cells_assigned =
                     gate.assign_region_smart(native_cells, vec![], vec![], vec![], 0, &mut region)?;
                 Ok(native_cells_assigned[0].clone())
             },

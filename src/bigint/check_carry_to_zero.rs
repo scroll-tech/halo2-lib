@@ -63,7 +63,7 @@ pub fn assign<F: FieldExt>(
     let neg_carry_assignments = layouter.assign_region(
         || "carry consistency",
         |mut region| {
-	    let mut neg_carry_assignments = Vec::new();
+            let mut neg_carry_assignments = Vec::new();
             let mut cells = Vec::with_capacity(4 * k);
             let mut enable_gates = Vec::new();
             for idx in 0..k {
@@ -78,8 +78,14 @@ pub fn assign<F: FieldExt>(
                     cells.push(cells[4 * idx - 3].clone());
                 }
             }
-            let (assigned_cells, column_index) =
-                range.gate().assign_region_smart(cells, enable_gates, vec![], vec![(&a.limbs[k - 1], 4 * (k - 2) + 1)], 0, &mut region)?;
+            let assigned_cells = range.gate().assign_region_smart(
+                cells,
+                enable_gates,
+                vec![],
+                vec![(&a.limbs[k - 1], 4 * (k - 2) + 1)],
+                0,
+                &mut region,
+            )?;
 
             for idx in 0..k {
                 neg_carry_assignments.push(assigned_cells[4 * idx + 1].clone());
@@ -100,11 +106,11 @@ pub fn assign<F: FieldExt>(
     let num_windows = (k + window - 1) / window;
     let mut shifted_carry_assignments = Vec::new();
     for i in 0..num_windows {
-	let shifted_carry_cell = layouter.assign_region(
+        let shifted_carry_cell = layouter.assign_region(
             || "shift carries",
             |mut region| {
-		let idx = std::cmp::min(window * i + window - 1, k - 1);
-		let carry_cell = &neg_carry_assignments[idx];
+                let idx = std::cmp::min(window * i + window - 1, k - 1);
+                let carry_cell = &neg_carry_assignments[idx];
                 let shift_carry_val = Some(shift_val).zip(carry_cell.value()).map(|(s, c)| s + c);
                 let cells = vec![
                     Existing(&carry_cell),
@@ -112,12 +118,18 @@ pub fn assign<F: FieldExt>(
                     Constant(shift_val),
                     Witness(shift_carry_val),
                 ];
-                let (assigned_cells, column_index) =
-                    range.gate().assign_region_smart(cells, vec![0], vec![], vec![], 0, &mut region)?;
+                let assigned_cells = range.gate().assign_region_smart(
+                    cells,
+                    vec![0],
+                    vec![],
+                    vec![],
+                    0,
+                    &mut region,
+                )?;
                 Ok(assigned_cells.last().unwrap().clone())
-            }
-	)?;
-	shifted_carry_assignments.push(shifted_carry_cell);
+            },
+        )?;
+        shifted_carry_assignments.push(shifted_carry_cell);
     }
     for shifted_carry in shifted_carry_assignments.iter() {
         range.range_check(layouter, shifted_carry, range_bits + 1)?;
@@ -175,8 +187,14 @@ pub fn truncate<F: FieldExt>(
                     cells.push(cells[4 * idx - 3].clone());
                 }
             }
-            let (assigned_cells, column_index) =
-                range.gate().assign_region_smart(cells, enable_gates, vec![], vec![], 0, &mut region)?;
+            let assigned_cells = range.gate().assign_region_smart(
+                cells,
+                enable_gates,
+                vec![],
+                vec![],
+                0,
+                &mut region,
+            )?;
 
             for idx in 0..k {
                 neg_carry_assignments.push(assigned_cells[4 * idx + 1].clone());
@@ -210,8 +228,14 @@ pub fn truncate<F: FieldExt>(
                     Constant(shift_val),
                     Witness(shift_carry_val),
                 ];
-                let (assigned_cells, column_index) =
-                    range.gate().assign_region_smart(cells, vec![0], vec![], vec![], 0, &mut region)?;
+                let assigned_cells = range.gate().assign_region_smart(
+                    cells,
+                    vec![0],
+                    vec![],
+                    vec![],
+                    0,
+                    &mut region,
+                )?;
                 Ok(assigned_cells.last().unwrap().clone())
             },
         )?;

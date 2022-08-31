@@ -33,7 +33,7 @@ pub fn assign<F: FieldExt>(
                 let startj = if i >= k_b { i - k_b + 1 } else { 0 };
                 let mut prod_computation: Vec<QuantumCell<F>> = Vec::new();
                 prod_computation.push(Constant(F::zero()));
-		let mut enable_gates = Vec::new();
+                let mut enable_gates = Vec::new();
 
                 let mut offset = 0;
                 let mut prod_val = Some(F::zero());
@@ -41,7 +41,7 @@ pub fn assign<F: FieldExt>(
                     if j >= k_a {
                         break;
                     }
-		    enable_gates.push(offset);
+                    enable_gates.push(offset);
 
                     let a_cell = &a.limbs[j];
                     let b_cell = &b.limbs[i - j];
@@ -56,8 +56,14 @@ pub fn assign<F: FieldExt>(
 
                     offset += 3;
                 }
-                let (prod_computation_assignments, column_idx) =
-                    gate.assign_region_smart(prod_computation, enable_gates, vec![], vec![], 0, &mut region)?;
+                let prod_computation_assignments = gate.assign_region_smart(
+                    prod_computation,
+                    enable_gates,
+                    vec![],
+                    vec![],
+                    0,
+                    &mut region,
+                )?;
                 Ok(prod_computation_assignments.last().unwrap().clone())
             },
         )?;
@@ -111,8 +117,14 @@ pub fn truncate<F: FieldExt>(
 
                     offset += 3;
                 }
-                let (prod_computation_assignments, column_index) =
-                    gate.assign_region_smart(prod_computation, enable_gates, vec![], vec![], 0, &mut region)?;
+                let prod_computation_assignments = gate.assign_region_smart(
+                    prod_computation,
+                    enable_gates,
+                    vec![],
+                    vec![],
+                    0,
+                    &mut region,
+                )?;
                 Ok(prod_computation_assignments.last().unwrap().clone())
             },
         )?;

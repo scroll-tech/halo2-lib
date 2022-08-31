@@ -115,11 +115,11 @@ impl<'a, F: FieldExt, Fp: PrimeField> FieldChip<F> for FpOverflowChip<'a, F, Fp>
         let limbs = layouter.assign_region(
             || "load private",
             |mut region| {
-                let (limbs, _) = self.range.gate().assign_region_smart(
+                let limbs = self.range.gate().assign_region_smart(
                     a_vec.iter().map(|x| Witness(x.clone())).collect(),
-		    vec![],
-		    vec![],
-		    vec![],
+                    vec![],
+                    vec![],
+                    vec![],
                     0,
                     &mut region,
                 )?;
@@ -139,11 +139,11 @@ impl<'a, F: FieldExt, Fp: PrimeField> FieldChip<F> for FpOverflowChip<'a, F, Fp>
         let a_limbs = layouter.assign_region(
             || "load constant",
             |mut region| {
-                let (a_limbs, _) = self.range.gate().assign_region_smart(
+                let a_limbs = self.range.gate().assign_region_smart(
                     a_vec.iter().map(|v| Constant(v.clone())).collect(),
-		    vec![],
-		    vec![],
-		    vec![],
+                    vec![],
+                    vec![],
+                    vec![],
                     0,
                     &mut region,
                 )?;
@@ -192,8 +192,14 @@ impl<'a, F: FieldExt, Fp: PrimeField> FieldChip<F> for FpOverflowChip<'a, F, Fp>
         layouter.assign_region(
             || "fp negate no underflow",
             |mut region| {
-                let (zero, _) =
-                    self.range.gate().assign_region_smart(vec![Constant(F::from(0))], vec![], vec![], vec![(&underflow, 0)], 0, &mut region)?;
+                let zero = self.range.gate().assign_region_smart(
+                    vec![Constant(F::from(0))],
+                    vec![],
+                    vec![],
+                    vec![(&underflow, 0)],
+                    0,
+                    &mut region,
+                )?;
                 Ok(())
             },
         )?;

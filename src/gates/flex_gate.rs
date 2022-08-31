@@ -19,6 +19,12 @@ use super::{
     QuantumCell::{self, Constant, Existing, Witness},
 };
 
+#[derive(Clone, Debug)]
+pub enum GateStrategy {
+    Vertical,
+    Horizontal,
+}
+
 // Gate to perform `a + b * c - out = 0`
 // We chose `a + b * c` instead of `a * b + c` to allow "chaining" of gates, i.e., the output of one gate because `a` in the next gate
 #[derive(Clone, Copy, Debug)]
@@ -33,11 +39,7 @@ impl<F: FieldExt> GateConfig<F> {
     pub fn configure(meta: &mut ConstraintSystem<F>) -> Self {
         let value = meta.advice_column();
         meta.enable_equality(value);
-        let config = Self {
-	    q_enable: meta.selector(),
-	    value,
-	    _marker: PhantomData
-	};
+        let config = Self { q_enable: meta.selector(), value, _marker: PhantomData };
         config.create_gate(meta);
 
         config
@@ -45,7 +47,7 @@ impl<F: FieldExt> GateConfig<F> {
     fn create_gate(&self, meta: &mut ConstraintSystem<F>) {
         meta.create_gate("1 column a * b + c = out", |meta| {
             let q = meta.query_selector(self.q_enable);
-	    
+
             let a = meta.query_advice(self.value, Rotation::cur());
             let b = meta.query_advice(self.value, Rotation::next());
             let c = meta.query_advice(self.value, Rotation(2));
@@ -58,43 +60,38 @@ impl<F: FieldExt> GateConfig<F> {
 
 #[derive(Clone, Debug)]
 pub struct HorizontalGateConfig<F: FieldExt> {
-    pub a: Column<Advice>,
-    pub b: Column<Advice>,
-    pub c: Column<Advice>,
-    pub d: Column<Advice>,
+    pub q_enable: Selector,
+    pub values: [Column<Advice>; 4],
     _marker: PhantomData<F>,
 }
 
 impl<F: FieldExt> HorizontalGateConfig<F> {
     pub fn configure(meta: &mut ConstraintSystem<F>) -> Self {
-	let a: Column<Advice> = meta.advice_column();
-	let b: Column<Advice> = meta.advice_column();
-	let c: Column<Advice> = meta.advice_column();
-	let d: Column<Advice> = meta.advice_column();
-	meta.enable_equality(a);
-	meta.enable_equality(b);
-	meta.enable_equality(c);
-	meta.enable_equality(d);
+        let mut values = Vec::with_capacity(4);
+        for _i in 0..4 {
+            let a = meta.advice_column();
+            meta.enable_equality(a);
+            values.push(a);
+        }
 
-	let config: HorizontalGateConfig<F> = Self {
-	    a,
-	    b,
-	    c,
-	    d,
-	    _marker: PhantomData
-	};
-	config.create_gate(meta);
-	config
+        let config: HorizontalGateConfig<F> = Self {
+            q_enable: meta.selector(),
+            values: values[..].try_into().unwrap(),
+            _marker: PhantomData,
+        };
+        config.create_gate(meta);
+        config
     }
 
     fn create_gate(&self, meta: &mut ConstraintSystem<F>) {
-	meta.create_gate("4 columns a + b * c = out", |meta| {
-	    let a = meta.query_advice(self.a, Rotation::cur());
-            let b = meta.query_advice(self.b, Rotation::cur());
-            let c = meta.query_advice(self.c, Rotation::cur());
-            let d = meta.query_advice(self.d, Rotation::cur());
-	    vec![a + b * c - d]
-	})
+        meta.create_gate("4 columns a + b * c = out", |meta| {
+            let q = meta.query_selector(self.q_enable);
+            let a = meta.query_advice(self.values[0], Rotation::cur());
+            let b = meta.query_advice(self.values[1], Rotation::cur());
+            let c = meta.query_advice(self.values[2], Rotation::cur());
+            let d = meta.query_advice(self.values[3], Rotation::cur());
+            vec![q * (a + b * c - d)]
+        })
     }
 }
 
@@ -104,20 +101,17 @@ pub struct FlexGateConfig<F: FieldExt> {
     pub horizontal_gates: Vec<HorizontalGateConfig<F>>,
     // `constants` is a vector of fixed columns for allocating constant values
     pub constants: Vec<Column<Fixed>>,
+    pub num_advice: usize,
+    strategy: GateStrategy,
 }
 
 impl<F: FieldExt> FlexGateConfig<F> {
-    pub fn configure(meta: &mut ConstraintSystem<F>, num_advice: usize, num_horizontal: usize, num_fixed: usize) -> Self {
-        let mut gates = Vec::with_capacity(num_advice);
-        for _i in 0..num_advice {
-            let gate = GateConfig::configure(meta);
-            gates.push(gate);
-        }
-	let mut horizontal_gates = Vec::with_capacity(num_horizontal);
-	for _i in 0..num_horizontal {
-	    let horizontal_gate = HorizontalGateConfig::configure(meta);
-	    horizontal_gates.push(horizontal_gate);
-	}
+    pub fn configure(
+        meta: &mut ConstraintSystem<F>,
+        num_advice: usize,
+        num_fixed: usize,
+        strategy: GateStrategy,
+    ) -> Self {
         let mut constants = Vec::with_capacity(num_fixed);
         for _i in 0..num_fixed {
             let c = meta.fixed_column();
@@ -125,7 +119,27 @@ impl<F: FieldExt> FlexGateConfig<F> {
             // meta.enable_constant(c);
             constants.push(c);
         }
-        Self { gates, horizontal_gates, constants }
+        match strategy {
+            GateStrategy::Vertical => {
+                let mut gates = Vec::with_capacity(num_advice);
+                for _i in 0..num_advice {
+                    let gate = GateConfig::configure(meta);
+                    gates.push(gate);
+                }
+                Self { gates, horizontal_gates: vec![], constants, num_advice, strategy }
+            }
+            GateStrategy::Horizontal => {
+                let num_horizontal = (num_advice - 1 + 3) / 4;
+                let num_advice = num_horizontal * 4;
+                let gate = GateConfig::configure(meta); // one column with selector to load private, for now
+                let mut horizontal_gates = Vec::with_capacity(num_horizontal);
+                for _i in 0..num_horizontal {
+                    let horizontal_gate = HorizontalGateConfig::configure(meta);
+                    horizontal_gates.push(horizontal_gate);
+                }
+                Self { gates: vec![gate], horizontal_gates, constants, num_advice, strategy }
+            }
+        }
     }
 }
 
@@ -149,8 +163,6 @@ pub struct FlexGateChip<F: FieldExt> {
     // The following is a hack to get around this for row counting purposes
     pub using_simple_floor_planner: bool,
     pub first_pass: bool,
-    // `seen` is HashSet for (column_index, advice_rows[column_index])
-    pub seen: HashSet<(usize, u64)>,
 }
 
 impl<F: FieldExt> FlexGateChip<F> {
@@ -220,154 +232,188 @@ impl<F: FieldExt> FlexGateChip<F> {
 
     pub fn construct(config: FlexGateConfig<F>, using_simple_floor_planner: bool) -> Self {
         let num_advice = config.gates.len();
-	let num_horizontal_advice = config.horizontal_gates.len();
+        let num_horizontal_advice = config.horizontal_gates.len();
         Self {
             config,
             advice_rows: vec![0u64; num_advice],
-	    horizontal_advice_rows: vec![0u64; num_horizontal_advice],
+            horizontal_advice_rows: vec![0u64; num_horizontal_advice],
             constants_to_assign: Vec::new(),
             using_simple_floor_planner,
             first_pass: true,
-            seen: HashSet::new(),
         }
     }
 
-}
+    pub fn assign_cell(
+        &mut self,
+        input: QuantumCell<F>,
+        column: Column<Advice>,
+        offset: usize,
+        region: &mut Region<'_, F>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        match input {
+            QuantumCell::Existing(acell) => {
+                acell.copy_advice(|| "gate: copy advice", region, column, offset)
+            }
+            QuantumCell::Witness(val) => region.assign_advice(
+                || "gate: assign advice",
+                column,
+                offset,
+                || val.ok_or(Error::Synthesis),
+            ),
+            QuantumCell::Constant(c) => {
+                let acell =
+                    region.assign_advice(|| "gate: assign const", column, offset, || Ok(c))?;
+                if !self.using_simple_floor_planner || !self.first_pass {
+                    self.constants_to_assign.push((c, Some(acell.cell())));
+                }
+                Ok(acell)
+            }
+        }
+    }
 
-impl<F: FieldExt> GateInstructions<F> for FlexGateChip<F> {
-    // The "contract" is that in any region you should only call `self.assign_region`
-    // once if using `SimpleFloorPlanner`. Otherwise the column allocation may break
+    /// The "contract" is that in any region you should only call `self.assign_region`
+    /// once if using `SimpleFloorPlanner`. Otherwise the column allocation may break
     fn assign_region(
         &mut self,
         inputs: Vec<QuantumCell<F>>,
+        gate_offsets: Vec<usize>,
         offset: usize,
         region: &mut Region<'_, F>,
-    ) -> Result<(Vec<AssignedCell<F, F>>, usize), Error> {
+    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
         let gate_index = self.min_gate_index();
 
         let mut assigned_cells = Vec::with_capacity(inputs.len());
         for (i, input) in inputs.iter().enumerate() {
-            let assigned_cell = match *input {
-                QuantumCell::Existing(acell) => acell.copy_advice(
-                    || "gate: copy advice",
-                    region,
-                    self.config.gates[gate_index].value,
-                    offset + i,
-                ),
-                QuantumCell::Witness(val) => region.assign_advice(
-                    || "gate: assign advice",
-                    self.config.gates[gate_index].value,
-                    offset + i,
-                    || val.ok_or(Error::Synthesis),
-                ),
-                QuantumCell::Constant(c) => {
-                    let acell = region.assign_advice(
-                        || "gate: assign const",
-                        self.config.gates[gate_index].value,
-                        offset + i,
-                        || Ok(c),
-                    )?;
-                    // add to list of constants to assign at the end ONLY if this is the last pass of the layouter
-                    if !self.using_simple_floor_planner
-                        || self.seen.contains(&(gate_index, self.advice_rows[gate_index]))
-                    {
-                        self.constants_to_assign.push((c, Some(acell.cell())));
-                    }
-                    Ok(acell)
-                }
-            }?;
+            let assigned_cell = self.assign_cell(
+                input.clone(),
+                self.config.gates[gate_index].value,
+                offset + i,
+                region,
+            )?;
             assigned_cells.push(assigned_cell);
         }
-        if !self.using_simple_floor_planner
-            || self.seen.remove(&(gate_index, self.advice_rows[gate_index]))
-        {
+        if !self.using_simple_floor_planner || !self.first_pass {
             self.advice_rows[gate_index] += inputs.len() as u64;
+            self.first_pass = true;
         } else if self.using_simple_floor_planner {
-            self.seen.insert((gate_index, self.advice_rows[gate_index]));
+            self.first_pass = false;
+        }
+        for gate_relative_offset in gate_offsets {
+            self.config.gates[gate_index].q_enable.enable(region, offset + gate_relative_offset)?;
         }
 
-        Ok((assigned_cells, gate_index))
+        Ok(assigned_cells)
     }
 
-    // The "contract" is that in any region you should only call `self.assign_region`
-    // or `self.assign_region_smart` once if using `SimpleFloorPlanner`. Otherwise the
-    // column allocation may break
-    // 
-    // `gate_offsets` are computed relative to the existing `offset`
+    /// The "contract" is that in any region you should only call `self.assign_region_horizontal`
+    /// once if using `SimpleFloorPlanner`. Otherwise the column allocation may break
+    ///
+    /// Assume `gate_offsets` is sorted in increasing order
+    fn assign_region_horizontal(
+        &mut self,
+        inputs: Vec<QuantumCell<F>>,
+        gate_offsets: Vec<usize>,
+        region: &mut Region<'_, F>,
+    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+        let gate_index = self.min_horizontal_gate_index();
+        let mut assigned_cells = Vec::with_capacity(inputs.len());
+
+        let mut i = 0;
+        let mut gate_offsets_id = 0;
+        let mut offset = 0;
+        let mut num_private = 0;
+        let mut overlap: Option<AssignedCell<F, F>> = None;
+        while i < inputs.len() {
+            if gate_offsets_id < gate_offsets.len() && gate_offsets[gate_offsets_id] == i {
+                for j in 0..4 {
+                    let assigned_cell = self.assign_cell(
+                        inputs[i + j].clone(),
+                        self.config.horizontal_gates[gate_index].values[j],
+                        offset,
+                        region,
+                    )?;
+                    if j == 0 {
+                        if let Some(acell) = overlap.clone() {
+                            region.constrain_equal(assigned_cell.cell(), acell.cell())?;
+                        } else {
+                            assigned_cells.push(assigned_cell);
+                        }
+                    } else {
+                        assigned_cells.push(assigned_cell);
+                    }
+                }
+                self.config.horizontal_gates[gate_index].q_enable.enable(region, offset)?;
+
+                offset += 1;
+                gate_offsets_id += 1;
+                if gate_offsets_id < gate_offsets.len() && gate_offsets[gate_offsets_id] == i + 3 {
+                    overlap = Some(assigned_cells.last().unwrap().clone());
+                    i += 3;
+                } else {
+                    overlap = None;
+                    i += 4;
+                }
+            } else {
+                let assigned_cell = self.assign_cell(
+                    inputs[i].clone(),
+                    self.config.gates[0].value,
+                    num_private,
+                    region,
+                )?;
+                assigned_cells.push(assigned_cell);
+                num_private += 1;
+                i += 1;
+            }
+        }
+        if !self.using_simple_floor_planner || !self.first_pass {
+            self.horizontal_advice_rows[gate_index] += offset as u64;
+            self.advice_rows[0] += num_private as u64;
+            self.first_pass = true;
+        } else if self.using_simple_floor_planner {
+            self.first_pass = false;
+        }
+
+        Ok(assigned_cells)
+    }
+}
+
+impl<F: FieldExt> GateInstructions<F> for FlexGateChip<F> {
+    /// The "contract" is that in any region you should only call `self.assign_region_smart` once if using `SimpleFloorPlanner`. Otherwise the
+    /// column allocation may break
+    ///
+    /// All indices in `gate_offsets`, `equality_offsets`, `external_equality` are with respect to `inputs` and relative to the existing offset
+    /// - `gate_offsets` specifies indices to enable selector for the gate; assume `gate_offsets` is sorted in increasing order
+    /// - `equality_offsets` specifies pairs of indices to constrain equality
+    /// - `external_equality` specifies an existing cell to constrain equality with the cell at a certain index
     fn assign_region_smart(
         &mut self,
         inputs: Vec<QuantumCell<F>>,
-	gate_offsets: Vec<usize>,
-	equality_offsets: Vec<(usize, usize)>,
-	external_equality: Vec<(&AssignedCell<F, F>, usize)>,
+        gate_offsets: Vec<usize>,
+        equality_offsets: Vec<(usize, usize)>,
+        external_equality: Vec<(&AssignedCell<F, F>, usize)>,
         offset: usize,
         region: &mut Region<'_, F>,
-    ) -> Result<(Vec<AssignedCell<F, F>>, usize), Error> {
-        let gate_index = self.min_gate_index();
+    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+        let assigned_cells = match self.config.strategy {
+            GateStrategy::Vertical => self.assign_region(inputs, gate_offsets, offset, region),
+            GateStrategy::Horizontal => {
+                assert_eq!(offset, 0);
+                self.assign_region_horizontal(inputs, gate_offsets, region)
+            }
+        }?;
 
-        let mut assigned_cells = Vec::with_capacity(inputs.len());
-        for (i, input) in inputs.iter().enumerate() {
-            let assigned_cell = match *input {
-                QuantumCell::Existing(acell) => acell.copy_advice(
-                    || "gate: copy advice",
-                    region,
-                    self.config.gates[gate_index].value,
-                    offset + i,
-                ),
-                QuantumCell::Witness(val) => region.assign_advice(
-                    || "gate: assign advice",
-                    self.config.gates[gate_index].value,
-                    offset + i,
-                    || val.ok_or(Error::Synthesis),
-                ),
-                QuantumCell::Constant(c) => {
-                    let acell = region.assign_advice(
-                        || "gate: assign const",
-                        self.config.gates[gate_index].value,
-                        offset + i,
-                        || Ok(c),
-                    )?;
-                    // add to list of constants to assign at the end ONLY if this is the last pass of the layouter
-                    if !self.using_simple_floor_planner
-                        || self.seen.contains(&(gate_index, self.advice_rows[gate_index]))
-                    {
-                        self.constants_to_assign.push((c, Some(acell.cell())));
-                    }
-                    Ok(acell)
-                }
-            }?;
-            assigned_cells.push(assigned_cell);
+        for (offset1, offset2) in equality_offsets {
+            region.constrain_equal(
+                assigned_cells[offset1].clone().cell(),
+                assigned_cells[offset2].clone().cell(),
+            )?;
         }
-        if !self.using_simple_floor_planner
-            || self.seen.remove(&(gate_index, self.advice_rows[gate_index]))
-        {
-            self.advice_rows[gate_index] += inputs.len() as u64;
-        } else if self.using_simple_floor_planner {
-            self.seen.insert((gate_index, self.advice_rows[gate_index]));
+        for (assigned_cell, eq_offset) in external_equality {
+            region
+                .constrain_equal(assigned_cell.cell(), assigned_cells[eq_offset].clone().cell())?;
         }
 
-	for gate_relative_offset in gate_offsets {
-	    self.enable(region, gate_index, offset + gate_relative_offset);
-	}
-	for (offset1, offset2) in equality_offsets {
-	    region.constrain_equal(assigned_cells[offset + offset1].clone().cell(),
-				   assigned_cells[offset + offset2].clone().cell())?;
-	}
-	for (assigned_cell, eq_offset) in external_equality {
-	    region.constrain_equal(assigned_cell.cell(),
-				   assigned_cells[offset + eq_offset].clone().cell())?;
-	}
-	
-        Ok((assigned_cells, gate_index))
-    }
-    
-    fn enable(
-        &self,
-        region: &mut Region<'_, F>,
-        gate_index: usize,
-        offset: usize,
-    ) -> Result<(), Error> {
-        self.config.gates[gate_index].q_enable.enable(region, offset)
+        Ok(assigned_cells)
     }
 
     // Layouter creates new region that copies a, b and constrains `a + b * 1 = out`
@@ -387,8 +433,8 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateChip<F> {
                     QuantumCell::Constant(F::from(1)),
                     QuantumCell::Witness(a.value().zip(b.value()).map(|(av, bv)| (*av) + (*bv))),
                 ];
-                let (assigned_cells, col_index)
-		    = self.assign_region_smart(cells, vec![0], vec![], vec![], 0, &mut region)?;
+                let assigned_cells =
+                    self.assign_region_smart(cells, vec![0], vec![], vec![], 0, &mut region)?;
                 Ok(assigned_cells.last().unwrap().clone())
             },
         )
@@ -412,8 +458,8 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateChip<F> {
                     QuantumCell::Constant(-F::from(1)),
                     QuantumCell::Witness(a.value().zip(b.value()).map(|(av, bv)| (*av) - (*bv))),
                 ];
-                let (assigned_cells, col_index)
-		    = self.assign_region_smart(cells, vec![0], vec![], vec![], 0, &mut region)?;
+                let assigned_cells =
+                    self.assign_region_smart(cells, vec![0], vec![], vec![], 0, &mut region)?;
                 Ok(assigned_cells.last().unwrap().clone())
             },
         )
@@ -434,8 +480,8 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateChip<F> {
                     QuantumCell::Constant(-F::from(1)),
                     QuantumCell::Witness(a.value().map(|av| -(*av))),
                 ];
-                let (assigned_cells, col_index)
-		    = self.assign_region_smart(cells, vec![0], vec![], vec![], 0, &mut region)?;
+                let assigned_cells =
+                    self.assign_region_smart(cells, vec![0], vec![], vec![], 0, &mut region)?;
                 Ok(assigned_cells.last().unwrap().clone())
             },
         )
@@ -458,8 +504,8 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateChip<F> {
                     b.clone(),
                     QuantumCell::Witness(a.value().zip(b.value()).map(|(av, bv)| (*av) * (*bv))),
                 ];
-                let (assigned_cells, col_index)
-		    = self.assign_region_smart(cells, vec![0], vec![], vec![], 0, &mut region)?;
+                let assigned_cells =
+                    self.assign_region_smart(cells, vec![0], vec![], vec![], 0, &mut region)?;
                 Ok(assigned_cells.last().unwrap().clone())
             },
         )
@@ -491,12 +537,12 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateChip<F> {
                     cells.push(b.clone());
                     cells.push(QuantumCell::Witness(sum));
                 }
-		let mut gate_offsets = Vec::with_capacity(vec_a.len());
-		for i in 0..vec_a.len() {
-		    gate_offsets.push(3 * i);
-		}
-                let (assigned_cells, col_index)
-		    = self.assign_region_smart(cells, gate_offsets, vec![], vec![], 0, &mut region)?;
+                let mut gate_offsets = Vec::with_capacity(vec_a.len());
+                for i in 0..vec_a.len() {
+                    gate_offsets.push(3 * i);
+                }
+                let assigned_cells =
+                    self.assign_region_smart(cells, gate_offsets, vec![], vec![], 0, &mut region)?;
                 let mut a_assigned = Vec::with_capacity(vec_a.len());
                 let mut b_assigned = Vec::with_capacity(vec_a.len());
                 for i in 0..vec_a.len() {
@@ -531,8 +577,14 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateChip<F> {
                         a.value().zip(b.value()).map(|(av, bv)| *av + *bv - (*av) * (*bv)),
                     ),
                 ];
-                let (assigned_cells, col_index)
-		    = self.assign_region_smart(cells, vec![0, 4], vec![(0, 6)], vec![], 0, &mut region)?;
+                let assigned_cells = self.assign_region_smart(
+                    cells,
+                    vec![0, 4],
+                    vec![(0, 6)],
+                    vec![],
+                    0,
+                    &mut region,
+                )?;
                 Ok(assigned_cells.last().unwrap().clone())
             },
         )
@@ -554,8 +606,8 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateChip<F> {
                     b.clone(),
                     QuantumCell::Witness(a.value().zip(b.value()).map(|(av, bv)| (*av) * (*bv))),
                 ];
-                let (assigned_cells, col_index)
-		    = self.assign_region_smart(cells, vec![0], vec![], vec![], 0, &mut region)?;
+                let assigned_cells =
+                    self.assign_region_smart(cells, vec![0], vec![], vec![], 0, &mut region)?;
                 Ok(assigned_cells.last().unwrap().clone())
             },
         )
@@ -591,8 +643,14 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateChip<F> {
                             .map(|((av, bv), sv)| (*av) * (*sv) + (*bv) * (F::from(1) - *sv)),
                     ),
                 ];
-                let (assigned_cells, col_index)
-		    = self.assign_region_smart(cells, vec![0, 4], vec![(0, 6)], vec![], 0, &mut region)?;
+                let assigned_cells = self.assign_region_smart(
+                    cells,
+                    vec![0, 4],
+                    vec![(0, 6)],
+                    vec![],
+                    0,
+                    &mut region,
+                )?;
                 Ok(assigned_cells.last().unwrap().clone())
             },
         )
@@ -632,8 +690,14 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateChip<F> {
                     QuantumCell::Constant(F::from(1)),
                     a.clone(),
                 ];
-                let (assigned_cells, col_index)
-		    = self.assign_region_smart(cells, vec![0, 3, 7], vec![(4, 7), (0, 5)], vec![], 0, &mut region)?;
+                let assigned_cells = self.assign_region_smart(
+                    cells,
+                    vec![0, 3, 7],
+                    vec![(4, 7), (0, 5)],
+                    vec![],
+                    0,
+                    &mut region,
+                )?;
                 Ok(assigned_cells[6].clone())
             },
         )
@@ -660,8 +724,8 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateChip<F> {
                         QuantumCell::Constant(F::from(1)),
                         QuantumCell::Constant(F::from(1)),
                     ];
-                    let (assigned_cells, col_index)
-			= self.assign_region_smart(cells, vec![0], vec![], vec![], 0, &mut region)?;
+                    let assigned_cells =
+                        self.assign_region_smart(cells, vec![0], vec![], vec![], 0, &mut region)?;
                     Ok((assigned_cells[0].clone(), assigned_cells[1].clone()))
                 },
             )?;

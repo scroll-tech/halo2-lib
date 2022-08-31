@@ -148,8 +148,14 @@ where
         || "constant 0",
         |mut region| {
             let zero_cells = vec![Constant(F::from(0))];
-            let (zero_cells_assigned, _) =
-                chip.range().gate().assign_region_smart(zero_cells, vec![], vec![], vec![], 0, &mut region)?;
+            let zero_cells_assigned = chip.range().gate().assign_region_smart(
+                zero_cells,
+                vec![],
+                vec![],
+                vec![],
+                0,
+                &mut region,
+            )?;
             Ok(zero_cells_assigned[0].clone())
         },
     )?;

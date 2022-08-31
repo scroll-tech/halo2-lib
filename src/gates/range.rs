@@ -5,7 +5,7 @@ use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*, poly::Rotation};
 use num_bigint::{BigInt, BigUint};
 
 use crate::gates::{
-    flex_gate::{FlexGateChip, FlexGateConfig},
+    flex_gate::{FlexGateChip, FlexGateConfig, GateStrategy},
     GateInstructions,
     QuantumCell::{self, Constant, Existing, Witness},
 };
@@ -39,7 +39,8 @@ impl<F: FieldExt> RangeConfig<F> {
         assert!(lookup_bits <= 28);
 
         let lookup = meta.lookup_table_column();
-        let gate_config = FlexGateConfig::configure(meta, num_advice, 0, num_fixed);
+        let gate_config =
+            FlexGateConfig::configure(meta, num_advice, num_fixed, GateStrategy::Vertical);
 
         let mut lookup_advice = Vec::with_capacity(num_lookup_advice);
         for _i in 0..num_lookup_advice {
@@ -245,20 +246,26 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
                     }
                 }
 
-		let mut eq_list = vec![];
+                let mut eq_list = vec![];
                 if rem_bits != 0 {
-		    eq_list.push((3 * k - 1, 3 * k - 4));
+                    eq_list.push((3 * k - 1, 3 * k - 4));
                     if rem_bits == 1 {
                         //         | 3k - 4 | 3k - 3 | 3k - 2 | 3k - 1 | 3k    | 3k + 1 |
                         // we want | x      | a.cell | 0      | x      | x     | x      |
                         // with x = limbs[idx]
-			eq_list.push((3 * k, 3 * k - 4));
-			eq_list.push((3 * k + 1, 3 * k - 4));
+                        eq_list.push((3 * k, 3 * k - 4));
+                        eq_list.push((3 * k + 1, 3 * k - 4));
                     }
                 }
 
-		let (assigned_cells, column_index) =
-                    self.gate_chip.assign_region_smart(cells, enable_gates, eq_list, vec![(a, 3 * (k - 1))], 0, &mut region)?;
+                let assigned_cells = self.gate_chip.assign_region_smart(
+                    cells,
+                    enable_gates,
+                    eq_list,
+                    vec![(a, 3 * (k - 1))],
+                    0,
+                    &mut region,
+                )?;
                 for row in enable_lookups {
                     self.enable_lookup(&mut region, assigned_cells[row].clone(), row)?;
                 }
@@ -305,8 +312,14 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
                     Constant(F::from(1)),
                     Existing(&a),
                 ];
-                let (assigned_cells, column_index) =
-                    self.gate_chip.assign_region_smart(cells, vec![0, 3], vec![], vec![], 0, &mut region)?;
+                let assigned_cells = self.gate_chip.assign_region_smart(
+                    cells,
+                    vec![0, 3],
+                    vec![],
+                    vec![],
+                    0,
+                    &mut region,
+                )?;
                 Ok(assigned_cells[0].clone())
             },
         )?;
@@ -403,17 +416,23 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
                         cells.push(Constant(F::from(0)));
                     }
                 }
-		let mut eq_list = vec![];
-		eq_list.push((0, 7));
+                let mut eq_list = vec![];
+                eq_list.push((0, 7));
                 // check limb equalities for idx = k
-		eq_list.push((9 + 3 * k - 2, 9 + 3 * k + 1));
-		eq_list.push((9 + 3 * k - 2, 9 + 3 * k + 5));
-		// check is_zero equalities
-		eq_list.push((9 + 3 * k, 9 + 3 * k + 6));
-		
-                let (assigned_cells, column_index) =		    
-                    self.gate_chip.assign_region_smart(cells, enable_gates, eq_list, vec![], 0, &mut region)?;
-               for row in enable_lookups {
+                eq_list.push((9 + 3 * k - 2, 9 + 3 * k + 1));
+                eq_list.push((9 + 3 * k - 2, 9 + 3 * k + 5));
+                // check is_zero equalities
+                eq_list.push((9 + 3 * k, 9 + 3 * k + 6));
+
+                let assigned_cells = self.gate_chip.assign_region_smart(
+                    cells,
+                    enable_gates,
+                    eq_list,
+                    vec![],
+                    0,
+                    &mut region,
+                )?;
+                for row in enable_lookups {
                     self.enable_lookup(&mut region, assigned_cells[row].clone(), row)?;
                 }
                 Ok(assigned_cells[9 + 3 * k].clone())
@@ -445,8 +464,14 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
                     Witness(is_zero),
                     Constant(F::from(0)),
                 ];
-                let (assigned_cells, column_index) =
-                    self.gate_chip.assign_region_smart(cells, vec![0, 4], vec![(0, 6)], vec![], 0, &mut region)?;
+                let assigned_cells = self.gate_chip.assign_region_smart(
+                    cells,
+                    vec![0, 4],
+                    vec![(0, 6)],
+                    vec![],
+                    0,
+                    &mut region,
+                )?;
                 Ok(assigned_cells[0].clone())
             },
         )
@@ -467,8 +492,14 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
                     Existing(&b),
                     Existing(&a),
                 ];
-                let (assigned_cells, column_index) =
-                    self.gate_chip.assign_region_smart(cells, vec![0], vec![], vec![], 0, &mut region)?;
+                let assigned_cells = self.gate_chip.assign_region_smart(
+                    cells,
+                    vec![0],
+                    vec![],
+                    vec![],
+                    0,
+                    &mut region,
+                )?;
                 Ok(assigned_cells[0].clone())
             },
         )?;
@@ -502,9 +533,15 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
                     enable_gates.push(offset - 1);
                     offset = offset + 3;
                 }
-		let last_idx = cells.len() - 1;
-                let (assigned_cells, column_index) =
-                    self.gate_chip.assign_region_smart(cells, enable_gates, vec![], vec![(a, last_idx)], 0, &mut region)?;
+                let last_idx = cells.len() - 1;
+                let assigned_cells = self.gate_chip.assign_region_smart(
+                    cells,
+                    enable_gates,
+                    vec![],
+                    vec![(a, last_idx)],
+                    0,
+                    &mut region,
+                )?;
 
                 let mut assigned_bits = Vec::with_capacity(range_bits);
                 assigned_bits.push(assigned_cells[0].clone());
@@ -525,8 +562,14 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
                         Existing(&bit_cells[idx]),
                         Existing(&bit_cells[idx]),
                     ];
-                    let (_, column_index)
-			= self.gate_chip.assign_region_smart(cells, vec![0], vec![], vec![], 0, &mut region)?;
+                    self.gate_chip.assign_region_smart(
+                        cells,
+                        vec![0],
+                        vec![],
+                        vec![],
+                        0,
+                        &mut region,
+                    )?;
                     Ok(())
                 },
             )?;
