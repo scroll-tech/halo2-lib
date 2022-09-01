@@ -7,7 +7,7 @@ use super::pairing::PairingChip;
 use super::*;
 use crate::ecc::EccChip;
 use crate::fields::PrimeFieldChip;
-use crate::gates::range::RangeChip;
+use crate::gates::{flex_gate::GateStrategy, range::RangeChip};
 use ff::PrimeField;
 use halo2_proofs::arithmetic::BaseExt;
 use halo2_proofs::circuit::floor_planner::V1;
@@ -29,7 +29,7 @@ use num_bigint::BigInt;
 
 #[macro_export]
 macro_rules! create_pairing_circuit {
-    ( $num_advice:expr, $num_lookup_advice:expr, $num_fixed:expr, $lookup_bits:expr, $limb_bits:expr, $num_limbs:expr) => {
+    ($gate_strategy:expr, $num_advice:expr, $num_lookup_advice:expr, $num_fixed:expr, $lookup_bits:expr, $limb_bits:expr, $num_limbs:expr) => {
         struct PairingCircuit<F: FieldExt> {
             P: Option<G1Affine>,
             Q: Option<G2Affine>,
@@ -57,6 +57,7 @@ macro_rules! create_pairing_circuit {
             fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
                 PairingChip::configure(
                     meta,
+                    $gate_strategy,
                     $num_advice,
                     $num_lookup_advice,
                     $num_fixed,
@@ -128,19 +129,26 @@ macro_rules! create_pairing_circuit {
                 chip.fp_chip.range.copy_and_lookup_cells(&mut layouter)?;
 
                 if self.P != None {
-                    println!("Using:\nadvice columns: {}\nspecial lookup advice columns: {}\nfixed columns: {}\nlookup bits: {}\nlimb bits: {}\nnum limbs: {}", $num_advice, $num_lookup_advice, $num_fixed, $lookup_bits, $limb_bits, $num_limbs);
+                    println!("Using:\nadvice columns: {}\nspecial lookup advice columns: {}\nfixed columns: {}\nlookup bits: {}\nlimb bits: {}\nnum limbs: {}", chip.fp_chip.range.gate_chip.config.num_advice, $num_lookup_advice, $num_fixed, $lookup_bits, $limb_bits, $num_limbs);
                     let advice_rows = chip.fp_chip.range.gate_chip.advice_rows.iter();
+                    let horizontal_advice_rows = chip.fp_chip.range.gate_chip.horizontal_advice_rows.iter();
                     println!(
                         "maximum rows used by an advice column: {}",
-                        advice_rows.clone().max().unwrap()
+                        std::cmp::max(
+                            advice_rows.clone().max().or(Some(&0u64)).unwrap(),
+                            horizontal_advice_rows.clone().max().or(Some(&0u64)).unwrap()
+                        )
                     );
                     println!(
                         "minimum rows used by an advice column: {}",
-                        advice_rows.clone().min().unwrap()
+                        std::cmp::min(
+                            advice_rows.clone().min().or(Some(&u64::MAX)).unwrap(),
+                            horizontal_advice_rows.clone().min().or(Some(&u64::MAX)).unwrap()
+                        )
                     );
                     println!(
-                        "total cells use: {}",
-                        advice_rows.sum::<u64>()
+                        "total cells used: {}",
+                        advice_rows.sum::<u64>() + horizontal_advice_rows.sum::<u64>() * 4
                     );
                     println!(
                         "cells used in special lookup column: {}",
@@ -160,8 +168,8 @@ macro_rules! create_pairing_circuit {
 #[cfg(test)]
 #[test]
 fn test_pairing() {
-    let k = 23;
-    create_pairing_circuit!(1, 0, 1, 22, 88, 3);
+    let k = 19;
+    create_pairing_circuit!(GateStrategy::Vertical, 9, 1, 1, 18, 90, 3);
     let mut rng = rand::thread_rng();
 
     let P = Some(G1Affine::random(&mut rng));
@@ -190,7 +198,7 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
         let mut rng = rand::thread_rng();
         let start = Instant::now();
 
-        create_pairing_circuit!(NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3);
+        create_pairing_circuit!(GateStrategy::Vertical, NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3);
         let params = Params::<G1Affine>::unsafe_setup::<Bn256>(DEGREE[I]);
 
         let circuit = PairingCircuit::<Fr>::default();

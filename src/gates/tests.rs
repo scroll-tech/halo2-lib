@@ -27,7 +27,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        FlexGateConfig::configure(meta, 2, 1, GateStrategy::Horizontal)
+        FlexGateConfig::configure(meta, GateStrategy::Horizontal, 2, 1)
     }
 
     fn synthesize(
@@ -69,7 +69,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         println!(
             "maximum rows used by an advice column: {}",
             max(
-                chip.advice_rows.iter().max().unwrap(),
+                chip.advice_rows.iter().max().or(Some(&0u64)).unwrap(),
                 chip.horizontal_advice_rows.iter().max().or(Some(&0u64)).unwrap()
             )
         );
@@ -122,7 +122,7 @@ impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        range::RangeConfig::configure(meta, 2, 1, 1, 3)
+        range::RangeConfig::configure(meta, GateStrategy::Horizontal, 2, 1, 1, 3)
     }
 
     fn synthesize(

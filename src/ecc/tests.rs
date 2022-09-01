@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 
 use crate::fields::fp::{FpChip, FpConfig};
 use crate::fields::fp2::Fp2Chip;
+use crate::gates::flex_gate::GateStrategy;
 use crate::gates::range::RangeChip;
 
 use super::*;
@@ -38,7 +39,17 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         let value = meta.advice_column();
         let constant = meta.fixed_column();
-        FpConfig::configure(meta, NUM_ADVICE, 1, NUM_FIXED, 22, 88, 3, modulus::<Fq>())
+        FpConfig::configure(
+            meta,
+            GateStrategy::Vertical,
+            NUM_ADVICE,
+            1,
+            NUM_FIXED,
+            22,
+            88,
+            3,
+            modulus::<Fq>(),
+        )
     }
 
     fn synthesize(

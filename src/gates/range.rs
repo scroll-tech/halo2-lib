@@ -31,6 +31,7 @@ pub struct RangeConfig<F: FieldExt> {
 impl<F: FieldExt> RangeConfig<F> {
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
+        gate_strategy: GateStrategy,
         num_advice: usize,
         num_lookup_advice: usize,
         num_fixed: usize,
@@ -40,7 +41,7 @@ impl<F: FieldExt> RangeConfig<F> {
 
         let lookup = meta.lookup_table_column();
         let gate_config =
-            FlexGateConfig::configure(meta, num_advice, num_fixed, GateStrategy::Vertical);
+            FlexGateConfig::configure(meta, gate_strategy.clone(), num_advice, num_fixed);
 
         let mut lookup_advice = Vec::with_capacity(num_lookup_advice);
         for _i in 0..num_lookup_advice {
@@ -48,7 +49,7 @@ impl<F: FieldExt> RangeConfig<F> {
             meta.enable_equality(a);
             lookup_advice.push(a);
         }
-        let config = if num_advice > 1 {
+        let config = if num_advice > 1 || gate_strategy == GateStrategy::Horizontal {
             Self { lookup_advice, q_lookup: Vec::new(), lookup, lookup_bits, gate_config }
         } else {
             let q = meta.complex_selector();
@@ -189,6 +190,7 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
         range_bits: usize,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
         assert_ne!(range_bits, 0);
+        //println!("range check {} bits", range_bits);
         let k = (range_bits + self.lookup_bits - 1) / self.lookup_bits;
         let rem_bits = range_bits % self.lookup_bits;
 

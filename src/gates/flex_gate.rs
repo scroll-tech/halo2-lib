@@ -19,7 +19,7 @@ use super::{
     QuantumCell::{self, Constant, Existing, Witness},
 };
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum GateStrategy {
     Vertical,
     Horizontal,
@@ -108,9 +108,9 @@ pub struct FlexGateConfig<F: FieldExt> {
 impl<F: FieldExt> FlexGateConfig<F> {
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
+        strategy: GateStrategy,
         num_advice: usize,
         num_fixed: usize,
-        strategy: GateStrategy,
     ) -> Self {
         let mut constants = Vec::with_capacity(num_fixed);
         for _i in 0..num_fixed {
@@ -129,15 +129,14 @@ impl<F: FieldExt> FlexGateConfig<F> {
                 Self { gates, horizontal_gates: vec![], constants, num_advice, strategy }
             }
             GateStrategy::Horizontal => {
-                let num_horizontal = (num_advice - 1 + 3) / 4;
+                let num_horizontal = (num_advice + 3) / 4;
                 let num_advice = num_horizontal * 4;
-                let gate = GateConfig::configure(meta); // one column with selector to load private, for now
                 let mut horizontal_gates = Vec::with_capacity(num_horizontal);
                 for _i in 0..num_horizontal {
                     let horizontal_gate = HorizontalGateConfig::configure(meta);
                     horizontal_gates.push(horizontal_gate);
                 }
-                Self { gates: vec![gate], horizontal_gates, constants, num_advice, strategy }
+                Self { gates: vec![], horizontal_gates, constants, num_advice, strategy }
             }
         }
     }
@@ -321,10 +320,14 @@ impl<F: FieldExt> FlexGateChip<F> {
         let mut i = 0;
         let mut gate_offsets_id = 0;
         let mut offset = 0;
-        let mut num_private = 0;
+        let mut offset_col = 0;
         let mut overlap: Option<AssignedCell<F, F>> = None;
         while i < inputs.len() {
             if gate_offsets_id < gate_offsets.len() && gate_offsets[gate_offsets_id] == i {
+                if offset_col != 0 {
+                    offset += 1;
+                    offset_col = 0;
+                }
                 for j in 0..4 {
                     let assigned_cell = self.assign_cell(
                         inputs[i + j].clone(),
@@ -356,18 +359,24 @@ impl<F: FieldExt> FlexGateChip<F> {
             } else {
                 let assigned_cell = self.assign_cell(
                     inputs[i].clone(),
-                    self.config.gates[0].value,
-                    num_private,
+                    self.config.horizontal_gates[gate_index].values[offset_col],
+                    offset,
                     region,
                 )?;
                 assigned_cells.push(assigned_cell);
-                num_private += 1;
+                offset_col += 1;
+                if offset_col == 4 {
+                    offset += 1;
+                    offset_col = 0;
+                }
                 i += 1;
             }
         }
+        if offset_col != 0 {
+            offset += 1;
+        }
         if !self.using_simple_floor_planner || !self.first_pass {
             self.horizontal_advice_rows[gate_index] += offset as u64;
-            self.advice_rows[0] += num_private as u64;
             self.first_pass = true;
         } else if self.using_simple_floor_planner {
             self.first_pass = false;

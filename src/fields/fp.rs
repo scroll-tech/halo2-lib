@@ -18,6 +18,7 @@ use crate::{
     },
     gates::QuantumCell::{Constant, Existing, Witness},
     gates::{
+        flex_gate::GateStrategy,
         range::{RangeChip, RangeConfig},
         GateInstructions, QuantumCell, RangeInstructions,
     },
@@ -38,6 +39,7 @@ pub struct FpConfig<F: FieldExt> {
 impl<F: FieldExt> FpConfig<F> {
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
+        gate_strategy: GateStrategy,
         num_advice: usize,
         num_lookup_advice: usize,
         num_fixed: usize,
@@ -49,6 +51,7 @@ impl<F: FieldExt> FpConfig<F> {
         FpConfig {
             range_config: RangeConfig::<F>::configure(
                 meta,
+                gate_strategy,
                 num_advice,
                 num_lookup_advice,
                 num_fixed,
@@ -358,6 +361,7 @@ pub(crate) mod tests {
 
     use crate::fields::fp::{FpChip, FpConfig};
     use crate::fields::{FieldChip, PrimeFieldChip};
+    use crate::gates::flex_gate::GateStrategy;
     use crate::gates::range::RangeChip;
     use crate::gates::RangeInstructions;
     use crate::utils::{fe_to_bigint, modulus};
@@ -382,7 +386,17 @@ pub(crate) mod tests {
         }
 
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-            FpConfig::configure(meta, NUM_ADVICE, 1, NUM_FIXED, 17, 68, 4, modulus::<Fq>())
+            FpConfig::configure(
+                meta,
+                GateStrategy::Vertical,
+                NUM_ADVICE,
+                1,
+                NUM_FIXED,
+                17,
+                68,
+                4,
+                modulus::<Fq>(),
+            )
         }
 
         fn synthesize(

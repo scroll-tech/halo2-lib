@@ -94,10 +94,11 @@ pub fn assign<F: FieldExt>(
         },
     )?;
     // which is valid as long as `range_bits + n * w < native_modulus::<F>().bits() - 1`
-    // round `max_limb_bits - limb_bits` up to the next multiple of range.lookup_bits
+    // round `max_limb_bits - limb_bits + 1` up to the next multiple of range.lookup_bits
     const EPSILON: usize = 1;
-
     let range_bits = (max_limb_bits as usize) - limb_bits + EPSILON;
+    let range_bits =
+        ((range_bits + range.lookup_bits()) / range.lookup_bits()) * range.lookup_bits() - 1;
     // which is valid as long as `(m - n + EPSILON) + n * (w+1) < native_modulus::<F>().bits() - 1`
     let window = (native_modulus::<F>().bits() as usize - 2 - range_bits) / limb_bits;
     assert!(window > 0);
@@ -204,10 +205,12 @@ pub fn truncate<F: FieldExt>(
     )?;
 
     // which is valid as long as `range_bits + n * w < native_modulus::<F>().bits() - 1`
-    // round `max_limb_bits - limb_bits` up to the next multiple of range.lookup_bits
+    // round `max_limb_bits - limb_bits + 1` up to the next multiple of range.lookup_bits
     const EPSILON: usize = 1;
 
     let range_bits = (max_limb_bits as usize) - limb_bits + EPSILON;
+    let range_bits =
+        ((range_bits + range.lookup_bits()) / range.lookup_bits()) * range.lookup_bits() - 1;
     // which is valid as long as `(m - n + EPSILON) + n * (w+1) < native_modulus::<F>().bits() - 1`
     let window = (native_modulus::<F>().bits() as usize - 2 - range_bits) / limb_bits;
     assert!(window > 0);

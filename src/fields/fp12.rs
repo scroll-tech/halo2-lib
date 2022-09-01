@@ -429,6 +429,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::fields::fp::{FpChip, FpConfig};
     use crate::fields::{FieldChip, PrimeFieldChip};
+    use crate::gates::flex_gate::GateStrategy;
     use crate::gates::RangeInstructions;
     use crate::utils::{fe_to_bigint, modulus};
     use num_bigint::{BigInt, BigUint};
@@ -452,7 +453,17 @@ pub(crate) mod tests {
         }
 
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-            FpConfig::configure(meta, NUM_ADVICE, 1, NUM_FIXED, 17, 68, 4, modulus::<Fq>())
+            FpConfig::configure(
+                meta,
+                GateStrategy::Vertical,
+                NUM_ADVICE,
+                1,
+                NUM_FIXED,
+                17,
+                68,
+                4,
+                modulus::<Fq>(),
+            )
         }
 
         fn synthesize(

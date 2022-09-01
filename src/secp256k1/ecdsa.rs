@@ -21,17 +21,22 @@ use num_bigint::{BigInt, BigUint};
 use rand_core::OsRng;
 
 use super::{FpChip, FqOverflowChip, Secp256k1Chip, SECP_B};
-use crate::gates::range::RangeConfig;
 use crate::{
     ecc::{ecdsa_verify_no_pubkey_check, fixed::FixedEccPoint, EccChip},
     fields::{fp::FpConfig, FieldChip, PrimeFieldChip},
-    gates::{range::RangeChip, GateInstructions, QuantumCell::Witness, RangeInstructions},
+    gates::{
+        flex_gate::GateStrategy,
+        range::{RangeChip, RangeConfig},
+        GateInstructions,
+        QuantumCell::Witness,
+        RangeInstructions,
+    },
     utils::{bigint_to_fe, biguint_to_fe, decompose_biguint_option, fe_to_biguint, modulus},
 };
 
 #[macro_export]
 macro_rules! create_ecdsa_circuit {
-    ( $num_advice:expr, $num_lookup_advice:expr, $num_fixed:expr, $lookup_bits:expr, $limb_bits:expr, $num_limbs:expr) => {
+    ($gate_strategy:expr, $num_advice:expr, $num_lookup_advice:expr, $num_fixed:expr, $lookup_bits:expr, $limb_bits:expr, $num_limbs:expr) => {
         pub struct ECDSACircuit<F> {
             pub r: Option<Fq>,
             pub s: Option<Fq>,
@@ -62,7 +67,7 @@ macro_rules! create_ecdsa_circuit {
             }
 
             fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-                RangeConfig::configure(meta, $num_advice, $num_lookup_advice, $num_fixed, $lookup_bits)
+                RangeConfig::configure(meta, $gate_strategy, $num_advice, $num_lookup_advice, $num_fixed, $lookup_bits)
             }
 
             fn synthesize(
@@ -138,19 +143,26 @@ macro_rules! create_ecdsa_circuit {
                     if self.r != None {
                         println!("ECDSA res {:?}", ecdsa);
 
-                        println!("Using:\nadvice columns: {}\nspecial lookup advice columns: {}\nfixed columns: {}\nlookup bits: {}\nlimb bits: {}\nnum limbs: {}", $num_advice, $num_lookup_advice, $num_fixed, $lookup_bits, $limb_bits, $num_limbs);
+                        println!("Using:\nadvice columns: {}\nspecial lookup advice columns: {}\nfixed columns: {}\nlookup bits: {}\nlimb bits: {}\nnum limbs: {}", range_chip.gate_chip.config.num_advice, $num_lookup_advice, $num_fixed, $lookup_bits, $limb_bits, $num_limbs);
                         let advice_rows = range_chip.gate_chip.advice_rows.iter();
+                        let horizontal_advice_rows = range_chip.gate_chip.horizontal_advice_rows.iter();
                         println!(
                             "maximum rows used by an advice column: {}",
-                            advice_rows.clone().max().unwrap()
+                            std::cmp::max(
+                                advice_rows.clone().max().or(Some(&0u64)).unwrap(),
+                                horizontal_advice_rows.clone().max().or(Some(&0u64)).unwrap()
+                            )
                         );
                         println!(
                             "minimum rows used by an advice column: {}",
-                            advice_rows.clone().min().unwrap()
+                            std::cmp::min(
+                                advice_rows.clone().min().or(Some(&u64::MAX)).unwrap(),
+                                horizontal_advice_rows.clone().min().or(Some(&u64::MAX)).unwrap()
+                            )
                         );
                         println!(
                             "total cells used: {}",
-                            advice_rows.sum::<u64>()
+                            advice_rows.sum::<u64>() + horizontal_advice_rows.sum::<u64>() * 4
                         );
                         println!(
                             "cells used in special lookup columns: {}",
@@ -263,8 +275,8 @@ macro_rules! create_ecdsa_circuit {
 #[cfg(test)]
 #[test]
 fn test_secp() {
-    const K: u32 = 13;
-    create_ecdsa_circuit!(73, 12, 1, 12, 88, 3);
+    const K: u32 = 15;
+    create_ecdsa_circuit!(GateStrategy::Vertical, 17, 3, 1, 14, 88, 3);
     let mut rng = rand::thread_rng();
 
     // generate random pub key and sign random message
@@ -300,19 +312,20 @@ fn test_secp() {
 #[test]
 fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
     const DEGREE: [u32; 8] = [19, 17, 16, 15, 14, 13, 12, 11];
-    const NUM_ADVICE: [usize; 8] = [1, 4, 9, 17, 36, 73, 148, 323];
+    const NUM_ADVICE: [usize; 8] =
+        [1, /*4*/ 5, 9, 17, /*36*/ 41, 73, /*148*/ 149, 323];
     const NUM_LOOKUP: [usize; 8] = [0, 1, 2, 3, 6, 12, 21, 38];
     const NUM_FIXED: [usize; 8] = [1, 1, 1, 1, 1, 1, 2, 5];
     const LOOKUP_BITS: [usize; 8] = [18, 16, 15, 14, 13, 12, 11, 10];
     const LIMB_BITS: [usize; 8] = [88, 88, 90, 88, 91, 88, 88, 90];
 
-    seq!(I in 0..7 {
+    seq!(I in 1..7 {
         {
         println!("----------------------------------------------------");
         let mut rng = rand::thread_rng();
         let start = Instant::now();
 
-        create_ecdsa_circuit!(NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3);
+        create_ecdsa_circuit!(GateStrategy::Horizontal, NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3);
         let params = Params::<G1Affine>::unsafe_setup::<Bn256>(DEGREE[I]);
 
         let circuit = ECDSACircuit::<Fr>::default();
@@ -368,7 +381,7 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
 #[test]
 fn plot_secp() {
     let k = 19;
-    create_ecdsa_circuit!(1, 1, 1, 19, 88, 3);
+    create_ecdsa_circuit!(GateStrategy::Vertical, 1, 1, 1, 19, 88, 3);
     use plotters::prelude::*;
 
     let root = BitMapBackend::new("layout.png", (512, 16384)).into_drawing_area();
