@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 use seq_macro::seq;
+use std::io::Write;
 use std::marker::PhantomData;
 use std::time::{Duration, Instant};
 
@@ -275,8 +276,8 @@ macro_rules! create_ecdsa_circuit {
 #[cfg(test)]
 #[test]
 fn test_secp() {
-    const K: u32 = 15;
-    create_ecdsa_circuit!(GateStrategy::Vertical, 17, 3, 1, 14, 88, 3);
+    const K: u32 = 16;
+    create_ecdsa_circuit!(GateStrategy::Vertical, 9, 2, 1, 15, 90, 3);
     let mut rng = rand::thread_rng();
 
     // generate random pub key and sign random message
@@ -311,32 +312,57 @@ fn test_secp() {
 #[cfg(test)]
 #[test]
 fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
-    const DEGREE: [u32; 8] = [19, 17, 16, 15, 14, 13, 12, 11];
-    const NUM_ADVICE: [usize; 8] =
-        [1, /*4*/ 5, 9, 17, /*36*/ 41, 73, /*148*/ 149, 323];
-    const NUM_LOOKUP: [usize; 8] = [0, 1, 2, 3, 6, 12, 21, 38];
-    const NUM_FIXED: [usize; 8] = [1, 1, 1, 1, 1, 1, 2, 5];
-    const LOOKUP_BITS: [usize; 8] = [18, 16, 15, 14, 13, 12, 11, 10];
-    const LIMB_BITS: [usize; 8] = [88, 88, 90, 88, 91, 88, 88, 90];
+    const DEGREE: [u32; 9] = [19, 18, 17, 16, 15, 14, 13, 12, 11];
+    const NUM_ADVICE: [usize; 9] = [1, 2, 4, 9, 17, 36, 73, 147, 320];
+    const NUM_LOOKUP: [usize; 9] = [0, 1, 1, 2, 3, 6, 12, 24, 53];
+    const NUM_FIXED: [usize; 9] = [1, 1, 1, 1, 1, 1, 1, 2, 5];
+    const LOOKUP_BITS: [usize; 9] = [18, 17, 16, 15, 14, 13, 12, 11, 10];
+    const LIMB_BITS: [usize; 9] = [88, 88, 88, 90, 88, 91, 88, 88, 90];
 
-    seq!(I in 1..7 {
+    let mut folder = std::path::PathBuf::new();
+    folder.push("./src/secp256k1");
+    folder.push("ecdsa_bench.csv");
+    let mut fs_results = std::fs::File::create(folder.as_path()).unwrap();
+    folder.pop();
+    write!(fs_results, "degree,num_advice,num_lookup,num_fixed,lookup_bits,limb_bits,num_limbs,vk_size,proof_time,proof_size\n")?;
+    folder.push("data");
+    seq!(I in 0..8 {
         {
         println!("----------------------------------------------------");
         let mut rng = rand::thread_rng();
         let start = Instant::now();
 
-        create_ecdsa_circuit!(GateStrategy::Horizontal, NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3);
+        create_ecdsa_circuit!(GateStrategy::Vertical, NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3);
         let params = Params::<G1Affine>::unsafe_setup::<Bn256>(DEGREE[I]);
-
         let circuit = ECDSACircuit::<Fr>::default();
         let circuit_duration = start.elapsed();
         println!("Time elapsed in circuit & params construction: {:?}", circuit_duration);
+        {
+            folder.push(format!("ecdsa_circuit_{}.params", DEGREE[I]));
+            let mut fd = std::fs::File::create(folder.as_path()).unwrap();
+            folder.pop();
+            params.write(&mut fd).unwrap();
+        }
         let vk = keygen_vk(&params, &circuit)?;
         let vk_duration = start.elapsed();
         println!("Time elapsed in generating vkey: {:?}", vk_duration - circuit_duration);
+        let vk_size = {
+            folder.push(format!("ecdsa_circuit_{}_{}_{}_{}_{}_{}_{}.vkey", DEGREE[I], NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3));
+            let mut fd = std::fs::File::create(folder.as_path()).unwrap();
+            folder.pop();
+            vk.write(&mut fd).unwrap();
+            fd.metadata().unwrap().len()
+        };
+        let vk_duration = start.elapsed();
         let pk = keygen_pk(&params, vk, &circuit)?;
         let pk_duration = start.elapsed();
         println!("Time elapsed in generating pkey: {:?}", pk_duration - vk_duration);
+        /*{
+            folder.push(format!("ecdsa_circuit_{}_{}_{}_{}_{}_{}_{}.pkey", DEGREE[I], NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3));
+            let mut fd = std::fs::File::create(folder.as_path()).unwrap();
+            folder.pop();
+        }*/
+        let pk_duration = start.elapsed();
 
         // generate random pub key and sign random message
         let G = Secp256k1Affine::generator();
@@ -367,9 +393,18 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
         // create a proof
         let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
         create_proof(&params, &pk, &[proof_circuit], &[&[]], rng, &mut transcript)?;
-        let _proof = transcript.finalize();
+        let proof = transcript.finalize();
         let proof_duration = start.elapsed();
-        println!("Proving time: {:?}", proof_duration - fill_duration);
+        let proof_time = proof_duration - fill_duration;
+        println!("Proving time: {:?}", proof_time);
+        let proof_size = {
+            folder.push(format!("ecdsa_circuit_proof_{}_{}_{}_{}_{}_{}_{}.data", DEGREE[I], NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3));
+            let mut fd = std::fs::File::create(folder.as_path()).unwrap();
+            folder.pop();
+            fd.write_all(&proof).unwrap();
+            fd.metadata().unwrap().len()
+        };
+        write!(fs_results, "{},{},{},{},{},{},{},{},{:?},{}\n", DEGREE[I], NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3, vk_size, proof_time, proof_size)?;
         println!("----------------------------------------------------");
         }
     });

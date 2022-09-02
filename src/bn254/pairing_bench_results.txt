@@ -1,181 +1,201 @@
 ----------------------------------------------------
 test bn254::tests::bench_pairing has been running for over 60 seconds
-Time elapsed in circuit & params construction: 542.886801125s
+Time elapsed in circuit & params construction: 541.340415583s
+Time elapsed in generating vkey: 57.402663125s
+Time elapsed in generating pkey: 102.837159125s
+Time elapsed in filling circuit: 217.625µs
 Using:
 advice columns: 1
+special lookup advice columns: 0
 fixed columns: 1
 lookup bits: 22
 limb bits: 88
 num limbs: 3
-maximum rows used by an advice column: 4252532
-minimum rows used by an advice column: 4252532
-total cells use: 4252532
-maximum rows used by a fixed column: 132
-Time elapsed in generating vkey: 28.947065125s
-Using:
-advice columns: 1
-fixed columns: 1
-lookup bits: 22
-limb bits: 88
-num limbs: 3
-maximum rows used by an advice column: 4252532
-minimum rows used by an advice column: 4252532
-total cells use: 4252532
-maximum rows used by a fixed column: 132
-Time elapsed in generating pkey: 104.943367083s
-Time elapsed in filling circuit: 227.583µs
-Using:
-advice columns: 1
-fixed columns: 1
-lookup bits: 22
-limb bits: 88
-num limbs: 3
-maximum rows used by an advice column: 4252532
-minimum rows used by an advice column: 4252532
-total cells use: 4252532
-maximum rows used by a fixed column: 132
-Proving time: 255.13035625s
+maximum rows used by an advice column: 4162868
+minimum rows used by an advice column: 4162868
+total cells used: 4162868
+cells used in special lookup column: 0
+maximum rows used by a fixed column: 117
+Proving time: 250.0791315s
 ----------------------------------------------------
-Time elapsed in circuit & params construction: 35.504096041s
+test bn254::tests::bench_pairing has been running for over 60 seconds
+Time elapsed in circuit & params construction: 277.340272208s
+Time elapsed in generating vkey: 41.748198125s
+Time elapsed in generating pkey: 60.628593542s
+Time elapsed in filling circuit: 187.625µs
+Using:
+advice columns: 2
+special lookup advice columns: 1
+fixed columns: 1
+lookup bits: 21
+limb bits: 88
+num limbs: 3
+maximum rows used by an advice column: 2145057
+minimum rows used by an advice column: 2145051
+total cells used: 4290108
+cells used in special lookup column: 374896
+maximum rows used by a fixed column: 120
+Proving time: 143.234710666s
+----------------------------------------------------
+Time elapsed in circuit & params construction: 134.840710833s
+Time elapsed in generating vkey: 25.269720292s
+Time elapsed in generating pkey: 35.3119595s
+Time elapsed in filling circuit: 134.916µs
+Using:
+advice columns: 3
+special lookup advice columns: 1
+fixed columns: 1
+lookup bits: 20
+limb bits: 88
+num limbs: 3
+maximum rows used by an advice column: 1430039
+minimum rows used by an advice column: 1430031
+total cells used: 4290108
+cells used in special lookup column: 374896
+maximum rows used by a fixed column: 120
+Proving time: 80.685299375s
+----------------------------------------------------
+Time elapsed in circuit & params construction: 69.853329708s
+Time elapsed in generating vkey: 17.065334s
+Time elapsed in generating pkey: 23.277267208s
+Time elapsed in filling circuit: 169.917µs
+Using:
+advice columns: 5
+special lookup advice columns: 1
+fixed columns: 1
+lookup bits: 19
+limb bits: 88
+num limbs: 3
+maximum rows used by an advice column: 871898
+minimum rows used by an advice column: 871895
+total cells used: 4359486
+cells used in special lookup column: 398022
+maximum rows used by a fixed column: 121
+Proving time: 50.859340667s
+----------------------------------------------------
+Time elapsed in circuit & params construction: 35.40030475s
+Time elapsed in generating vkey: 13.046276875s
+Time elapsed in generating pkey: 16.695402375s
+Time elapsed in filling circuit: 301.5µs
 Using:
 advice columns: 9
+special lookup advice columns: 1
 fixed columns: 1
 lookup bits: 18
 limb bits: 90
 num limbs: 3
-maximum rows used by an advice column: 494997
-minimum rows used by an advice column: 494984
-total cells use: 4454924
-maximum rows used by a fixed column: 133
-Time elapsed in generating vkey: 11.241846709s
-Using:
-advice columns: 9
-fixed columns: 1
-lookup bits: 18
-limb bits: 90
-num limbs: 3
-maximum rows used by an advice column: 494997
-minimum rows used by an advice column: 494984
-total cells use: 4454924
-maximum rows used by a fixed column: 133
-Time elapsed in generating pkey: 22.4440535s
-Time elapsed in filling circuit: 148.875µs
-Using:
-advice columns: 9
-fixed columns: 1
-lookup bits: 18
-limb bits: 90
-num limbs: 3
-maximum rows used by an advice column: 494997
-minimum rows used by an advice column: 494984
-total cells use: 4454924
-maximum rows used by a fixed column: 133
-Proving time: 67.043982125s
+maximum rows used by an advice column: 485033
+minimum rows used by an advice column: 485023
+total cells used: 4365260
+cells used in special lookup column: 375040
+maximum rows used by a fixed column: 118
+Proving time: 35.388983083s
 ----------------------------------------------------
-Time elapsed in circuit & params construction: 4.665298916s
+Time elapsed in circuit & params construction: 17.4746535s
+Time elapsed in generating vkey: 12.719350333s
+Time elapsed in generating pkey: 14.945457917s
+Time elapsed in filling circuit: 238.958µs
+Using:
+advice columns: 18
+special lookup advice columns: 2
+fixed columns: 1
+lookup bits: 17
+limb bits: 88
+num limbs: 3
+maximum rows used by an advice column: 249591
+minimum rows used by an advice column: 249576
+total cells used: 4492500
+cells used in special lookup column: 442360
+maximum rows used by a fixed column: 121
+Proving time: 32.476175292s
+----------------------------------------------------
+Time elapsed in circuit & params construction: 8.815308708s
+Time elapsed in generating vkey: 13.152315333s
+Time elapsed in generating pkey: 13.241632542s
+Time elapsed in filling circuit: 140.458µs
+Using:
+advice columns: 35
+special lookup advice columns: 4
+fixed columns: 1
+lookup bits: 16
+limb bits: 88
+num limbs: 3
+maximum rows used by an advice column: 129434
+minimum rows used by an advice column: 129419
+total cells used: 4529922
+cells used in special lookup column: 454834
+maximum rows used by a fixed column: 122
+Proving time: 30.312692417s
+----------------------------------------------------
+Time elapsed in circuit & params construction: 4.420250458s
+Time elapsed in generating vkey: 13.550088958s
+Time elapsed in generating pkey: 12.788206792s
+Time elapsed in filling circuit: 173.958µs
 Using:
 advice columns: 71
+special lookup advice columns: 7
 fixed columns: 1
 lookup bits: 15
 limb bits: 90
 num limbs: 3
-maximum rows used by an advice column: 65294
-minimum rows used by an advice column: 65272
-total cells use: 4634900
-maximum rows used by a fixed column: 133
-Time elapsed in generating vkey: 13.194662084s
+maximum rows used by an advice column: 64031
+minimum rows used by an advice column: 64009
+total cells used: 4545236
+cells used in special lookup column: 435032
+maximum rows used by a fixed column: 118
+Proving time: 30.140905542s
+----------------------------------------------------
+Time elapsed in circuit & params construction: 2.308403125s
+Time elapsed in generating vkey: 15.649224208s
+Time elapsed in generating pkey: 13.002903s
+Time elapsed in filling circuit: 134.542µs
 Using:
-advice columns: 71
+advice columns: 145
+special lookup advice columns: 16
 fixed columns: 1
-lookup bits: 15
+lookup bits: 14
 limb bits: 90
 num limbs: 3
-maximum rows used by an advice column: 65294
-minimum rows used by an advice column: 65272
-total cells use: 4634900
-maximum rows used by a fixed column: 133
-Time elapsed in generating pkey: 17.86082925s
-Time elapsed in filling circuit: 165.791µs
-Using:
-advice columns: 71
-fixed columns: 1
-lookup bits: 15
-limb bits: 90
-num limbs: 3
-maximum rows used by an advice column: 65294
-minimum rows used by an advice column: 65272
-total cells use: 4634900
-maximum rows used by a fixed column: 133
-Proving time: 62.53340425s
+maximum rows used by an advice column: 32650
+minimum rows used by an advice column: 32628
+total cells used: 4732314
+cells used in special lookup column: 522298
+maximum rows used by a fixed column: 123
+Proving time: 32.815077041s
 ----------------------------------------------------
-Time elapsed in circuit & params construction: 594.489875ms
+Time elapsed in circuit & params construction: 1.080514833s
+Time elapsed in generating vkey: 17.62235475s
+Time elapsed in generating pkey: 13.581576167s
+Time elapsed in filling circuit: 186.166µs
 Using:
-advice columns: 615
+advice columns: 291
+special lookup advice columns: 32
 fixed columns: 1
-lookup bits: 12
-limb bits: 88
+lookup bits: 13
+limb bits: 91
 num limbs: 3
-maximum rows used by an advice column: 8170
-minimum rows used by an advice column: 8141
-total cells use: 5011650
-maximum rows used by a fixed column: 133
-Time elapsed in generating vkey: 21.96263375s
-Using:
-advice columns: 615
-fixed columns: 1
-lookup bits: 12
-limb bits: 88
-num limbs: 3
-maximum rows used by an advice column: 8170
-minimum rows used by an advice column: 8141
-total cells use: 5011650
-maximum rows used by a fixed column: 133
-Time elapsed in generating pkey: 21.392686125s
-Time elapsed in filling circuit: 223.416µs
-Using:
-advice columns: 615
-fixed columns: 1
-lookup bits: 12
-limb bits: 88
-num limbs: 3
-maximum rows used by an advice column: 8170
-minimum rows used by an advice column: 8141
-total cells use: 5011650
-maximum rows used by a fixed column: 133
-Proving time: 87.4158325s
+maximum rows used by an advice column: 16330
+minimum rows used by an advice column: 16304
+total cells used: 4747628
+cells used in special lookup column: 502496
+maximum rows used by a fixed column: 120
+Proving time: 35.795120125s
 ----------------------------------------------------
-Time elapsed in circuit & params construction: 297.365708ms
+Time elapsed in circuit & params construction: 555.919958ms
+Time elapsed in generating vkey: 23.1692205s
+Time elapsed in generating pkey: 15.953347417s
+Time elapsed in filling circuit: 253.458µs
 Using:
-advice columns: 1248
+advice columns: 615
+special lookup advice columns: 74
 fixed columns: 1
-lookup bits: 11
+lookup bits: 12
 limb bits: 88
 num limbs: 3
-maximum rows used by an advice column: 4070
-minimum rows used by an advice column: 4041
-total cells use: 5052188
-maximum rows used by a fixed column: 133
-Time elapsed in generating vkey: 28.444316875s
-Using:
-advice columns: 1248
-fixed columns: 1
-lookup bits: 11
-limb bits: 88
-num limbs: 3
-maximum rows used by an advice column: 4070
-minimum rows used by an advice column: 4041
-total cells use: 5052188
-maximum rows used by a fixed column: 133
-Time elapsed in generating pkey: 24.458524667s
-Time elapsed in filling circuit: 168.333µs
-Using:
-advice columns: 1248
-fixed columns: 1
-lookup bits: 11
-limb bits: 88
-num limbs: 3
-maximum rows used by an advice column: 4070
-minimum rows used by an advice column: 4041
-total cells use: 5052188
-maximum rows used by a fixed column: 133
-Proving time: 95.636187417s
+maximum rows used by an advice column: 8042
+minimum rows used by an advice column: 8016
+total cells used: 4934706
+cells used in special lookup column: 589762
+maximum rows used by a fixed column: 124
+Proving time: 43.444752208s
+----------------------------------------------------

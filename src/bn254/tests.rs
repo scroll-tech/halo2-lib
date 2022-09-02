@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 use seq_macro::seq;
+use std::io::Write;
 use std::marker::PhantomData;
 use std::time::{Duration, Instant};
 
@@ -168,8 +169,8 @@ macro_rules! create_pairing_circuit {
 #[cfg(test)]
 #[test]
 fn test_pairing() {
-    let k = 19;
-    create_pairing_circuit!(GateStrategy::Vertical, 9, 1, 1, 18, 90, 3);
+    let k = 14;
+    create_pairing_circuit!(GateStrategy::Vertical, 291, 32, 1, 13, 91, 3);
     let mut rng = rand::thread_rng();
 
     let P = Some(G1Affine::random(&mut rng));
@@ -185,14 +186,21 @@ fn test_pairing() {
 #[cfg(test)]
 #[test]
 fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
-    const DEGREE: [u32; 5] = [23, 19, 16, 13, 12];
-    const NUM_ADVICE: [usize; 5] = [1, 9, 71, 615, 1248];
-    const NUM_LOOKUP: [usize; 5] = [0, 1, 7, 74, 120];
-    const NUM_FIXED: [usize; 5] = [1, 1, 1, 1, 1];
-    const LOOKUP_BITS: [usize; 5] = [22, 18, 15, 12, 11];
-    const LIMB_BITS: [usize; 5] = [88, 90, 90, 88, 88];
+    const DEGREE: [u32; 11] = [23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13];
+    const NUM_ADVICE: [usize; 11] = [1, 2, 3, 5, 9, 18, 35, 71, 145, 291, 615];
+    const NUM_LOOKUP: [usize; 11] = [0, 1, 1, 1, 1, 2, 4, 7, 16, 32, 74];
+    const NUM_FIXED: [usize; 11] = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+    const LOOKUP_BITS: [usize; 11] = [22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12];
+    const LIMB_BITS: [usize; 11] = [88, 88, 88, 88, 90, 88, 88, 90, 90, 91, 88];
 
-    seq!(I in 0..5 {
+    let mut folder = std::path::PathBuf::new();
+    folder.push("./src/bn254");
+    folder.push("pairing_bench.csv");
+    let mut fs_results = std::fs::File::create(folder.as_path()).unwrap();
+    folder.pop();
+    write!(fs_results, "degree,num_advice,num_lookup,num_fixed,lookup_bits,limb_bits,num_limbs,vk_size,proof_time,proof_size\n")?;
+    folder.push("data");
+    seq!(I in 1..12 {
         {
         println!("----------------------------------------------------");
         let mut rng = rand::thread_rng();
@@ -204,12 +212,30 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
         let circuit = PairingCircuit::<Fr>::default();
         let circuit_duration = start.elapsed();
         println!("Time elapsed in circuit & params construction: {:?}", circuit_duration);
+        {
+            folder.push(format!("pairing_circuit_{}.params", DEGREE[I]));
+            let mut fd = std::fs::File::create(folder.as_path()).unwrap();
+            folder.pop();
+            params.write(&mut fd).unwrap();
+        }
         let vk = keygen_vk(&params, &circuit)?;
         let vk_duration = start.elapsed();
         println!("Time elapsed in generating vkey: {:?}", vk_duration - circuit_duration);
+        let vk_size = {
+            folder.push(format!("pairing_circuit_{}_{}_{}_{}_{}_{}_{}.vkey", DEGREE[I], NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3));
+            let mut fd = std::fs::File::create(folder.as_path()).unwrap();
+            folder.pop();
+            vk.write(&mut fd).unwrap();
+            fd.metadata().unwrap().len()
+        };
         let pk = keygen_pk(&params, vk, &circuit)?;
         let pk_duration = start.elapsed();
         println!("Time elapsed in generating pkey: {:?}", pk_duration - vk_duration);
+        /*{
+            folder.push(format!("pairing_circuit_{}_{}_{}_{}_{}_{}_{}.pkey", DEGREE[I], NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3));
+            let mut fd = std::fs::File::create(folder.as_path()).unwrap();
+            folder.pop();
+        }*/
 
         let P = Some(G1Affine::random(&mut rng));
         let Q = Some(G2Affine::random(&mut rng));
@@ -220,9 +246,18 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
         // create a proof
         let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
         create_proof(&params, &pk, &[circuit], &[&[]], rng, &mut transcript)?;
-        let _proof = transcript.finalize();
+        let proof = transcript.finalize();
         let proof_duration = start.elapsed();
-        println!("Proving time: {:?}", proof_duration - fill_duration);
+        let proof_time = proof_duration - fill_duration;
+        println!("Proving time: {:?}", proof_time);
+        let proof_size = {
+            folder.push(format!("pairing_circuit_proof_{}_{}_{}_{}_{}_{}_{}.data", DEGREE[I], NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3));
+            let mut fd = std::fs::File::create(folder.as_path()).unwrap();
+            folder.pop();
+            fd.write_all(&proof).unwrap();
+            fd.metadata().unwrap().len()
+        };
+        write!(fs_results, "{},{},{},{},{},{},{},{},{:?},{}\n", DEGREE[I], NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3, vk_size, proof_time, proof_size)?;
         }
     });
     Ok(())
