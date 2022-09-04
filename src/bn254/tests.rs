@@ -23,7 +23,7 @@ use halo2_proofs::{
     pairing::bn256::Fr,
     plonk::*,
     poly::commitment::Params,
-    transcript::{Blake2bWrite, Challenge255},
+    transcript::{Blake2bRead, Blake2bWrite, Challenge255},
 };
 use halo2curves::bn254::Fq12;
 use num_bigint::BigInt;
@@ -200,7 +200,7 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
     folder.pop();
     write!(fs_results, "degree,num_advice,num_lookup,num_fixed,lookup_bits,limb_bits,num_limbs,vk_size,proof_time,proof_size\n")?;
     folder.push("data");
-    seq!(I in 1..12 {
+    seq!(I in 1..11 {
         {
         println!("----------------------------------------------------");
         let mut rng = rand::thread_rng();
@@ -239,17 +239,24 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
 
         let P = Some(G1Affine::random(&mut rng));
         let Q = Some(G2Affine::random(&mut rng));
-        let circuit = PairingCircuit::<Fr> { P, Q, _marker: PhantomData };
+        let proof_circuit = PairingCircuit::<Fr> { P, Q, _marker: PhantomData };
         let fill_duration = start.elapsed();
         println!("Time elapsed in filling circuit: {:?}", fill_duration - pk_duration);
 
         // create a proof
         let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
-        create_proof(&params, &pk, &[circuit], &[&[]], rng, &mut transcript)?;
+        create_proof(&params, &pk, &[proof_circuit], &[&[]], rng, &mut transcript)?;
         let proof = transcript.finalize();
         let proof_duration = start.elapsed();
         let proof_time = proof_duration - fill_duration;
         println!("Proving time: {:?}", proof_time);
+
+	let verifier_params = params.verifier::<Bn256>(0)?;
+	let strategy = SingleVerifier::new(&verifier_params);
+	let vk2 = keygen_vk(&params, &circuit)?;
+	let mut transcript_read = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
+	assert!(verify_proof(&verifier_params, &vk2, strategy, &[], &mut transcript_read).is_ok());
+
         let proof_size = {
             folder.push(format!("pairing_circuit_proof_{}_{}_{}_{}_{}_{}_{}.data", DEGREE[I], NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3));
             let mut fd = std::fs::File::create(folder.as_path()).unwrap();
@@ -268,7 +275,7 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
 fn plot_pairing() {
     let k = 23;
     use plotters::prelude::*;
-    create_pairing_circuit!(1, 1, 1, 22, 88, 3);
+    create_pairing_circuit!(GateStrategy::Vertical, 1, 1, 1, 22, 88, 3);
 
     let root = BitMapBackend::new("layout.png", (512, 40384)).into_drawing_area();
     root.fill(&WHITE).unwrap();
