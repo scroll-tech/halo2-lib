@@ -22,7 +22,7 @@ use halo2_proofs::{
     dev::MockProver,
     pairing::bn256::Fr,
     plonk::*,
-    poly::commitment::Params,
+    poly::commitment::{Params, ParamsVerifier},
     transcript::{Blake2bRead, Blake2bWrite, Challenge255},
 };
 use halo2curves::bn254::Fq12;
@@ -198,7 +198,7 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
     folder.push("pairing_bench.csv");
     let mut fs_results = std::fs::File::create(folder.as_path()).unwrap();
     folder.pop();
-    write!(fs_results, "degree,num_advice,num_lookup,num_fixed,lookup_bits,limb_bits,num_limbs,vk_size,proof_time,proof_size\n")?;
+    write!(fs_results, "degree,num_advice,num_lookup,num_fixed,lookup_bits,limb_bits,num_limbs,vk_size,proof_time,proof_size,verify_time\n")?;
     folder.push("data");
     seq!(I in 1..11 {
         {
@@ -251,12 +251,6 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
         let proof_time = proof_duration - fill_duration;
         println!("Proving time: {:?}", proof_time);
 
-	let verifier_params = params.verifier::<Bn256>(0)?;
-	let strategy = SingleVerifier::new(&verifier_params);
-	let vk2 = keygen_vk(&params, &circuit)?;
-	let mut transcript_read = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
-	assert!(verify_proof(&verifier_params, &vk2, strategy, &[], &mut transcript_read).is_ok());
-
         let proof_size = {
             folder.push(format!("pairing_circuit_proof_{}_{}_{}_{}_{}_{}_{}.data", DEGREE[I], NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3));
             let mut fd = std::fs::File::create(folder.as_path()).unwrap();
@@ -264,7 +258,16 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
             fd.write_all(&proof).unwrap();
             fd.metadata().unwrap().len()
         };
-        write!(fs_results, "{},{},{},{},{},{},{},{},{:?},{}\n", DEGREE[I], NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3, vk_size, proof_time, proof_size)?;
+
+        let params_verifier: ParamsVerifier<Bn256> = params.verifier(0).unwrap();
+        let strategy = SingleVerifier::new(&params_verifier);
+        let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
+        assert!(verify_proof(&params_verifier, pk.get_vk(), strategy, &[&[]], &mut transcript).is_ok());
+        let verify_duration = start.elapsed();
+        let verify_time = verify_duration - proof_duration;
+        println!("Verify time: {:?}", verify_time);
+
+        write!(fs_results, "{},{},{},{},{},{},{},{},{:?},{},{:?}\n", DEGREE[I], NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3, vk_size, proof_time, proof_size, verify_time)?;
         }
     });
     Ok(())

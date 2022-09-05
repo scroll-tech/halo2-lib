@@ -170,14 +170,13 @@ pub fn assign<F: FieldExt>(
                 }
 
                 let mut out_cell = None;
-                let mut check_cell = None;
                 if i < k {
                     out_cell = Some(
                         prod_computation_assignments[prod_computation_assignments.len() - 2]
                             .clone(),
                     );
                 }
-                check_cell = Some(prod_computation_assignments.last().unwrap().clone());
+                let check_cell = Some(prod_computation_assignments.last().unwrap().clone());
                 Ok((mod_cell, quot_cell, out_cell, check_cell))
             },
         )?;

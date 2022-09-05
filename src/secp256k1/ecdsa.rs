@@ -8,7 +8,7 @@ use ff::{Field, PrimeField};
 use halo2_proofs::circuit::floor_planner::*;
 use halo2_proofs::pairing::bn256::{Bn256, G1Affine};
 use halo2_proofs::pairing::group::Group;
-use halo2_proofs::poly::commitment::Params;
+use halo2_proofs::poly::commitment::{Params, ParamsVerifier};
 use halo2_proofs::{
     arithmetic::{CurveAffine, FieldExt},
     circuit::*,
@@ -324,7 +324,7 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
     folder.push("ecdsa_bench.csv");
     let mut fs_results = std::fs::File::create(folder.as_path()).unwrap();
     folder.pop();
-    write!(fs_results, "degree,num_advice,num_lookup,num_fixed,lookup_bits,limb_bits,num_limbs,vk_size,proof_time,proof_size\n")?;
+    write!(fs_results, "degree,num_advice,num_lookup,num_fixed,lookup_bits,limb_bits,num_limbs,vk_size,proof_time,proof_size,verify_time\n")?;
     folder.push("data");
     seq!(I in 0..8 {
         {
@@ -411,7 +411,16 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
             fd.write_all(&proof).unwrap();
             fd.metadata().unwrap().len()
         };
-        write!(fs_results, "{},{},{},{},{},{},{},{},{:?},{}\n", DEGREE[I], NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3, vk_size, proof_time, proof_size)?;
+
+        let params_verifier: ParamsVerifier<Bn256> = params.verifier(0).unwrap();
+        let strategy = SingleVerifier::new(&params_verifier);
+        let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
+        assert!(verify_proof(&params_verifier, pk.get_vk(), strategy, &[&[]], &mut transcript).is_ok());
+        let verify_duration = start.elapsed();
+        let verify_time = verify_duration - proof_duration;
+        println!("Verify time: {:?}", verify_time);
+
+        write!(fs_results, "{},{},{},{},{},{},{},{},{:?},{},{:?}\n", DEGREE[I], NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3, vk_size, proof_time, proof_size, verify_time)?;
         println!("----------------------------------------------------");
         }
     });
