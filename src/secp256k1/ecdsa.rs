@@ -398,12 +398,6 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
         let proof_time = proof_duration - fill_duration;
         println!("Proving time: {:?}", proof_time);
 
-	let verifier_params = params.verifier::<Bn256>(0)?;
-	let strategy = SingleVerifier::new(&verifier_params);	
-	let vk2 = keygen_vk(&params, &circuit)?;
-	let mut transcript_read = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
-	assert!(verify_proof(&verifier_params, &vk2, strategy, &[], &mut transcript_read).is_ok());
-
         let proof_size = {
             folder.push(format!("ecdsa_circuit_proof_{}_{}_{}_{}_{}_{}_{}.data", DEGREE[I], NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3));
             let mut fd = std::fs::File::create(folder.as_path()).unwrap();
