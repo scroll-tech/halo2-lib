@@ -26,8 +26,7 @@ use crate::{
     ecc::{ecdsa_verify_no_pubkey_check, fixed::FixedEccPoint, EccChip},
     fields::{fp::FpConfig, FieldChip, PrimeFieldChip},
     gates::{
-        flex_gate::GateStrategy,
-        range::{RangeChip, RangeConfig},
+        range::{RangeChip, RangeConfig, RangeStrategy},
         GateInstructions,
         QuantumCell::Witness,
         RangeInstructions,
@@ -37,7 +36,7 @@ use crate::{
 
 #[macro_export]
 macro_rules! create_ecdsa_circuit {
-    ($gate_strategy:expr, $num_advice:expr, $num_lookup_advice:expr, $num_fixed:expr, $lookup_bits:expr, $limb_bits:expr, $num_limbs:expr) => {
+    ($range_strategy:expr, $num_advice:expr, $num_lookup_advice:expr, $num_fixed:expr, $lookup_bits:expr, $limb_bits:expr, $num_limbs:expr) => {
         pub struct ECDSACircuit<F> {
             pub r: Option<Fq>,
             pub s: Option<Fq>,
@@ -68,7 +67,9 @@ macro_rules! create_ecdsa_circuit {
             }
 
             fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-                RangeConfig::configure(meta, $gate_strategy, $num_advice, $num_lookup_advice, $num_fixed, $lookup_bits)
+                let range_len_lo = ((modulus::<F>().bits() as usize - ($num_limbs - 1) * $limb_bits + $lookup_bits - 1) / $lookup_bits) as u8;
+                let range_len_hi = (($limb_bits + $lookup_bits - 1) / $lookup_bits) as u8 + 1u8;
+                RangeConfig::configure(meta, $range_strategy, $num_advice, $num_lookup_advice, $num_fixed, $lookup_bits, (range_len_lo..=range_len_hi).collect())
             }
 
             fn synthesize(
@@ -136,7 +137,7 @@ macro_rules! create_ecdsa_circuit {
                     // IMPORTANT: this assigns all constants to the fixed columns
                     // This is not optional.
                     let const_rows =
-                        range_chip.gate_chip.assign_and_constrain_constants(&mut layouter)?;
+                        range_chip.gate.assign_and_constrain_constants(&mut layouter)?;
                     // IMPORTANT: this copies cells to the lookup advice column to perform range check lookups
                     // This is not optional when there is more than 1 advice column.
                     range_chip.copy_and_lookup_cells(&mut layouter)?;
@@ -144,9 +145,9 @@ macro_rules! create_ecdsa_circuit {
                     if self.r != None {
                         println!("ECDSA res {:?}", ecdsa);
 
-                        println!("Using:\nadvice columns: {}\nspecial lookup advice columns: {}\nfixed columns: {}\nlookup bits: {}\nlimb bits: {}\nnum limbs: {}", range_chip.gate_chip.config.num_advice, $num_lookup_advice, $num_fixed, $lookup_bits, $limb_bits, $num_limbs);
-                        let advice_rows = range_chip.gate_chip.advice_rows.iter();
-                        let horizontal_advice_rows = range_chip.gate_chip.horizontal_advice_rows.iter();
+                        println!("Using:\nadvice columns: {}\nspecial lookup advice columns: {}\nfixed columns: {}\nlookup bits: {}\nlimb bits: {}\nnum limbs: {}", range_chip.gate.config.num_advice, $num_lookup_advice, $num_fixed, $lookup_bits, $limb_bits, $num_limbs);
+                        let advice_rows = range_chip.gate.advice_rows.iter();
+                        let horizontal_advice_rows = range_chip.gate.horizontal_advice_rows.iter();
                         println!(
                             "maximum rows used by an advice column: {}",
                             std::cmp::max(
@@ -276,9 +277,8 @@ macro_rules! create_ecdsa_circuit {
 #[cfg(test)]
 #[test]
 fn test_secp() {
-    const K: u32 = 16;
-    create_ecdsa_circuit!(GateStrategy::Vertical, 9, 2, 1, 15, 90, 3);
-    let mut rng = rand::thread_rng();
+    const K: u32 = 12;
+    create_ecdsa_circuit!(RangeStrategy::CustomVertical, 107, 24, 2, 11, 88, 3);
 
     // generate random pub key and sign random message
     let G = Secp256k1Affine::generator();
@@ -312,12 +312,23 @@ fn test_secp() {
 #[cfg(test)]
 #[test]
 fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
+    /*
+    // Parameters for use with RangeStrategy::Vertical
     const DEGREE: [u32; 9] = [19, 18, 17, 16, 15, 14, 13, 12, 11];
     const NUM_ADVICE: [usize; 9] = [1, 2, 4, 9, 17, 36, 73, 147, 320];
     const NUM_LOOKUP: [usize; 9] = [0, 1, 1, 2, 3, 6, 12, 24, 53];
     const NUM_FIXED: [usize; 9] = [1, 1, 1, 1, 1, 1, 1, 2, 5];
     const LOOKUP_BITS: [usize; 9] = [18, 17, 16, 15, 14, 13, 12, 11, 10];
     const LIMB_BITS: [usize; 9] = [88, 88, 88, 90, 88, 91, 88, 88, 90];
+    */
+
+    // Parameters for use with RangeStrategy::CustomVertical
+    const DEGREE: [u32; 9] = [19, 18, 17, 16, 15, 14, 13, 12, 11];
+    const NUM_ADVICE: [usize; 9] = [1, 2, 4, 7, 14, 27, 55, 107, 222];
+    const NUM_LOOKUP: [usize; 9] = [0, 1, 1, 2, 3, 6, 12, 24, 53];
+    const NUM_FIXED: [usize; 9] = [1, 1, 1, 1, 1, 1, 1, 2, 5];
+    const LOOKUP_BITS: [usize; 9] = [18, 17, 16, 15, 14, 13, 12, 11, 10];
+    const LIMB_BITS: [usize; 9] = [88, 88, 88, 88, 88, 88, 88, 88, 88];
 
     let mut folder = std::path::PathBuf::new();
     folder.push("./src/secp256k1");
@@ -326,13 +337,13 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
     folder.pop();
     write!(fs_results, "degree,num_advice,num_lookup,num_fixed,lookup_bits,limb_bits,num_limbs,vk_size,proof_time,proof_size,verify_time\n")?;
     folder.push("data");
-    seq!(I in 0..6 {
+    seq!(I in 0..9 {
         {
         println!("----------------------------------------------------");
         let mut rng = rand::thread_rng();
         let start = Instant::now();
 
-        create_ecdsa_circuit!(GateStrategy::Vertical, NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3);
+        create_ecdsa_circuit!(RangeStrategy::CustomVertical, NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3);
         let params = Params::<G1Affine>::unsafe_setup::<Bn256>(DEGREE[I]);
         let circuit = ECDSACircuit::<Fr>::default();
         let circuit_duration = start.elapsed();

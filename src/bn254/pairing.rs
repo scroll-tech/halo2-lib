@@ -17,7 +17,7 @@ use std::marker::PhantomData;
 use super::{Fp12Chip, Fp2Chip, FpChip, FpConfig};
 use crate::{
     bigint::CRTInteger,
-    gates::flex_gate::GateStrategy,
+    gates::range::RangeStrategy,
     utils::{
         bigint_to_fe, biguint_to_fe, decompose_bigint_option, decompose_biguint, fe_to_bigint,
         fe_to_biguint, modulus,
@@ -409,7 +409,7 @@ impl<'a, F: FieldExt> PairingChip<'a, F> {
 
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
-        gate_strategy: GateStrategy,
+        range_strategy: RangeStrategy,
         num_advice: usize,
         num_lookup_advice: usize,
         num_fixed: usize,
@@ -419,7 +419,7 @@ impl<'a, F: FieldExt> PairingChip<'a, F> {
     ) -> FpConfig<F> {
         FpConfig::configure(
             meta,
-            gate_strategy,
+            range_strategy,
             num_advice,
             num_lookup_advice,
             num_fixed,

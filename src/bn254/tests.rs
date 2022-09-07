@@ -8,7 +8,7 @@ use super::pairing::PairingChip;
 use super::*;
 use crate::ecc::EccChip;
 use crate::fields::PrimeFieldChip;
-use crate::gates::{flex_gate::GateStrategy, range::RangeChip};
+use crate::gates::range::{RangeChip, RangeStrategy};
 use ff::PrimeField;
 use halo2_proofs::arithmetic::BaseExt;
 use halo2_proofs::circuit::floor_planner::V1;
@@ -123,16 +123,16 @@ macro_rules! create_pairing_circuit {
                 // IMPORTANT: this assigns all constants to the fixed columns
                 // This is not optional.
                 let const_rows =
-                    chip.fp_chip.range.gate_chip.assign_and_constrain_constants(&mut layouter)?;
+                    chip.fp_chip.range.gate.assign_and_constrain_constants(&mut layouter)?;
 
                 // IMPORTANT: this copies cells to the lookup advice column to perform range check lookups
                 // This is not optional when there is more than 1 advice column.
                 chip.fp_chip.range.copy_and_lookup_cells(&mut layouter)?;
 
                 if self.P != None {
-                    println!("Using:\nadvice columns: {}\nspecial lookup advice columns: {}\nfixed columns: {}\nlookup bits: {}\nlimb bits: {}\nnum limbs: {}", chip.fp_chip.range.gate_chip.config.num_advice, $num_lookup_advice, $num_fixed, $lookup_bits, $limb_bits, $num_limbs);
-                    let advice_rows = chip.fp_chip.range.gate_chip.advice_rows.iter();
-                    let horizontal_advice_rows = chip.fp_chip.range.gate_chip.horizontal_advice_rows.iter();
+                    println!("Using:\nadvice columns: {}\nspecial lookup advice columns: {}\nfixed columns: {}\nlookup bits: {}\nlimb bits: {}\nnum limbs: {}", chip.fp_chip.range.gate.config.num_advice, $num_lookup_advice, $num_fixed, $lookup_bits, $limb_bits, $num_limbs);
+                    let advice_rows = chip.fp_chip.range.gate.advice_rows.iter();
+                    let horizontal_advice_rows = chip.fp_chip.range.gate.horizontal_advice_rows.iter();
                     println!(
                         "maximum rows used by an advice column: {}",
                         std::cmp::max(
@@ -170,7 +170,7 @@ macro_rules! create_pairing_circuit {
 #[test]
 fn test_pairing() {
     let k = 14;
-    create_pairing_circuit!(GateStrategy::Vertical, 291, 32, 1, 13, 91, 3);
+    create_pairing_circuit!(RangeStrategy::CustomVertical, 291, 32, 1, 13, 91, 3);
     let mut rng = rand::thread_rng();
 
     let P = Some(G1Affine::random(&mut rng));
@@ -186,12 +186,23 @@ fn test_pairing() {
 #[cfg(test)]
 #[test]
 fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
+    /*
+    // Parameters for RangeStrategy::Vertical
     const DEGREE: [u32; 11] = [23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13];
     const NUM_ADVICE: [usize; 11] = [1, 2, 3, 5, 9, 18, 35, 71, 145, 291, 615];
     const NUM_LOOKUP: [usize; 11] = [0, 1, 1, 1, 1, 2, 4, 7, 16, 32, 74];
     const NUM_FIXED: [usize; 11] = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
     const LOOKUP_BITS: [usize; 11] = [22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12];
     const LIMB_BITS: [usize; 11] = [88, 88, 88, 88, 90, 88, 88, 90, 90, 91, 88];
+    */
+
+    // Parameters for RangeStrategy::CustomVertical
+    const DEGREE: [u32; 10] = [22, 21, 20, 19, 18, 17, 16, 15, 14, 13];
+    const NUM_ADVICE: [usize; 10] = [1, 2, 5, 9, 18, 35, 71, 145, 291, 615];
+    const NUM_LOOKUP: [usize; 10] = [0, 1, 1, 1, 2, 4, 7, 16, 32, 74];
+    const NUM_FIXED: [usize; 10] = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+    const LOOKUP_BITS: [usize; 10] = [21, 20, 19, 18, 17, 16, 15, 14, 13, 12];
+    const LIMB_BITS: [usize; 10] = [88, 88, 88, 88, 88, 88, 88, 88, 88, 88];
 
     let mut folder = std::path::PathBuf::new();
     folder.push("./src/bn254");
@@ -200,13 +211,13 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
     folder.pop();
     write!(fs_results, "degree,num_advice,num_lookup,num_fixed,lookup_bits,limb_bits,num_limbs,vk_size,proof_time,proof_size,verify_time\n")?;
     folder.push("data");
-    seq!(I in 3..4 {
+    seq!(I in 0..10 {
         {
         println!("----------------------------------------------------");
         let mut rng = rand::thread_rng();
         let start = Instant::now();
 
-        create_pairing_circuit!(GateStrategy::Vertical, NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3);
+        create_pairing_circuit!(RangeStrategy::CustomVertical, NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3);
         let params = Params::<G1Affine>::unsafe_setup::<Bn256>(DEGREE[I]);
 
         let circuit = PairingCircuit::<Fr>::default();

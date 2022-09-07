@@ -272,13 +272,13 @@ impl<F: FieldExt> FlexGateChip<F> {
 
     /// The "contract" is that in any region you should only call `self.assign_region`
     /// once if using `SimpleFloorPlanner`. Otherwise the column allocation may break
-    fn assign_region(
+    pub fn assign_region(
         &mut self,
         inputs: Vec<QuantumCell<F>>,
         gate_offsets: Vec<usize>,
         offset: usize,
         region: &mut Region<'_, F>,
-    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+    ) -> Result<(Vec<AssignedCell<F, F>>, usize), Error> {
         let gate_index = self.min_gate_index();
 
         let mut assigned_cells = Vec::with_capacity(inputs.len());
@@ -301,7 +301,7 @@ impl<F: FieldExt> FlexGateChip<F> {
             self.config.gates[gate_index].q_enable.enable(region, offset + gate_relative_offset)?;
         }
 
-        Ok(assigned_cells)
+        Ok((assigned_cells, gate_index))
     }
 
     /// The "contract" is that in any region you should only call `self.assign_region_horizontal`
@@ -404,12 +404,16 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateChip<F> {
         region: &mut Region<'_, F>,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
         let assigned_cells = match self.config.strategy {
-            GateStrategy::Vertical => self.assign_region(inputs, gate_offsets, offset, region),
+            GateStrategy::Vertical => {
+                self.assign_region(inputs, gate_offsets, offset, region)
+                    .expect("assign region should not fail")
+                    .0
+            }
             GateStrategy::Horizontal => {
                 assert_eq!(offset, 0);
-                self.assign_region_horizontal(inputs, gate_offsets, region)
+                self.assign_region_horizontal(inputs, gate_offsets, region)?
             }
-        }?;
+        };
 
         for (offset1, offset2) in equality_offsets {
             region.constrain_equal(

@@ -123,12 +123,14 @@ pub trait RangeInstructions<F: FieldExt> {
 
     fn lookup_bits(&self) -> usize;
 
+    /*
     fn enable_lookup(
         &mut self,
         region: &mut Region<'_, F>,
         acell: AssignedCell<F, F>,
         offset: usize,
     ) -> Result<(), Error>;
+    */
 
     fn range_check(
         &mut self,

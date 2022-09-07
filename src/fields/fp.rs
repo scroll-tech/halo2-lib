@@ -18,8 +18,7 @@ use crate::{
     },
     gates::QuantumCell::{Constant, Existing, Witness},
     gates::{
-        flex_gate::GateStrategy,
-        range::{RangeChip, RangeConfig},
+        range::{RangeChip, RangeConfig, RangeStrategy},
         GateInstructions, QuantumCell, RangeInstructions,
     },
     utils::{
@@ -39,7 +38,7 @@ pub struct FpConfig<F: FieldExt> {
 impl<F: FieldExt> FpConfig<F> {
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
-        gate_strategy: GateStrategy,
+        range_strategy: RangeStrategy,
         num_advice: usize,
         num_lookup_advice: usize,
         num_fixed: usize,
@@ -48,14 +47,19 @@ impl<F: FieldExt> FpConfig<F> {
         num_limbs: usize,
         p: BigUint,
     ) -> Self {
+        let range_len_lo =
+            ((modulus::<F>().bits() as usize - (num_limbs - 1) * limb_bits + lookup_bits - 1)
+                / lookup_bits) as u8;
+        let range_len_hi = ((limb_bits + lookup_bits - 1) / lookup_bits) as u8 + 1u8;
         FpConfig {
             range_config: RangeConfig::<F>::configure(
                 meta,
-                gate_strategy,
+                range_strategy,
                 num_advice,
                 num_lookup_advice,
                 num_fixed,
                 lookup_bits,
+                (range_len_lo..=range_len_hi).collect(),
             ),
             limb_bits,
             num_limbs,
@@ -388,7 +392,7 @@ pub(crate) mod tests {
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
             FpConfig::configure(
                 meta,
-                GateStrategy::Vertical,
+                crate::gates::range::RangeStrategy::Vertical,
                 NUM_ADVICE,
                 1,
                 NUM_FIXED,

@@ -1,3 +1,4 @@
+RangeStrategy::Vertical
 ----------------------------------------------------
 Time elapsed in circuit & params construction: 33.633936208s
 ecdsa done
@@ -182,3 +183,176 @@ cells used in special lookup columns: 94133
 maximum rows used by a fixed column: 4012
 ecdsa done
 Proving time: 6.305700291s
+
+
+=================================================================
+RangeStrategy::CustomVertical
+----------------------------------------------------
+Time elapsed in circuit & params construction: 33.782027625s
+ecdsa done
+Time elapsed in generating vkey: 3.648620833s
+ecdsa done
+Time elapsed in generating pkey: 5.881785458s
+Time elapsed in filling circuit: 399.833µs
+ECDSA res AssignedCell { value: Some(0x0000000000000000000000000000000000000000000000000000000000000001), cell: Cell { region_index: RegionIndex(65808), row_offset: 3, column: Column { index: 0, column_type: Advice } }, _marker: PhantomData }
+Using:
+advice columns: 1
+special lookup advice columns: 0
+fixed columns: 1
+lookup bits: 18
+limb bits: 88
+num limbs: 3
+maximum rows used by an advice column: 404508
+minimum rows used by an advice column: 404508
+total cells used: 404508
+cells used in special lookup columns: 0
+maximum rows used by a fixed column: 8023
+ecdsa done
+Proving time: 14.758030042s
+Verify time: 5.216583ms
+----------------------------------------------------
+----------------------------------------------------
+test secp256k1::ecdsa::bench_secp has been running for over 60 seconds
+Time elapsed in circuit & params construction: 16.801704583s
+ecdsa done
+Time elapsed in generating vkey: 2.992190833s
+ecdsa done
+Time elapsed in generating pkey: 4.036015208s
+Time elapsed in filling circuit: 376.5µs
+ECDSA res AssignedCell { value: Some(0x0000000000000000000000000000000000000000000000000000000000000001), cell: Cell { region_index: RegionIndex(64591), row_offset: 3, column: Column { index: 0, column_type: Advice } }, _marker: PhantomData }
+Using:
+advice columns: 2
+special lookup advice columns: 1
+fixed columns: 1
+lookup bits: 17
+limb bits: 88
+num limbs: 3
+maximum rows used by an advice column: 202290
+minimum rows used by an advice column: 202288
+total cells used: 404578
+cells used in special lookup columns: 69667
+maximum rows used by a fixed column: 8023
+ecdsa done
+Proving time: 9.376470084s
+Verify time: 5.7935ms
+----------------------------------------------------
+----------------------------------------------------
+Time elapsed in circuit & params construction: 8.494150041s
+ecdsa done
+Time elapsed in generating vkey: 2.289731417s
+ecdsa done
+Time elapsed in generating pkey: 2.851477292s
+Time elapsed in filling circuit: 387.333µs
+ECDSA res AssignedCell { value: Some(0x0000000000000000000000000000000000000000000000000000000000000001), cell: Cell { region_index: RegionIndex(64591), row_offset: 3, column: Column { index: 2, column_type: Advice } }, _marker: PhantomData }
+Using:
+advice columns: 4
+special lookup advice columns: 1
+fixed columns: 1
+lookup bits: 16
+limb bits: 88
+num limbs: 3
+maximum rows used by an advice column: 101451
+minimum rows used by an advice column: 101448
+total cells used: 405795
+cells used in special lookup columns: 70884
+maximum rows used by a fixed column: 8023
+ecdsa done
+Proving time: 6.517681875s
+Verify time: 6.061875ms
+----------------------------------------------------
+----------------------------------------------------
+Time elapsed in circuit & params construction: 4.287078666s
+ecdsa done
+Time elapsed in generating vkey: 1.934673334s
+ecdsa done
+Time elapsed in generating pkey: 2.228389875s
+Time elapsed in filling circuit: 380.375µs
+ECDSA res AssignedCell { value: Some(0x0000000000000000000000000000000000000000000000000000000000000001), cell: Cell { region_index: RegionIndex(65808), row_offset: 3, column: Column { index: 5, column_type: Advice } }, _marker: PhantomData }
+Using:
+advice columns: 7
+special lookup advice columns: 2
+fixed columns: 1
+lookup bits: 15
+limb bits: 88
+num limbs: 3
+maximum rows used by an advice column: 59374
+minimum rows used by an advice column: 59357
+total cells used: 415541
+cells used in special lookup columns: 76979
+maximum rows used by a fixed column: 8023
+ecdsa done
+Proving time: 5.238919292s
+Verify time: 5.541791ms
+----------------------------------------------------
+----------------------------------------------------
+Time elapsed in circuit & params construction: 2.131211958s
+ecdsa done
+Time elapsed in generating vkey: 1.890349542s
+ecdsa done
+Time elapsed in generating pkey: 2.008157666s
+Time elapsed in filling circuit: 377.959µs
+ECDSA res AssignedCell { value: Some(0x0000000000000000000000000000000000000000000000000000000000000001), cell: Cell { region_index: RegionIndex(65808), row_offset: 3, column: Column { index: 2, column_type: Advice } }, _marker: PhantomData }
+Using:
+advice columns: 14
+special lookup advice columns: 3
+fixed columns: 1
+lookup bits: 14
+limb bits: 88
+num limbs: 3
+maximum rows used by an advice column: 30135
+minimum rows used by an advice column: 30112
+total cells used: 421696
+cells used in special lookup columns: 80664
+maximum rows used by a fixed column: 8023
+ecdsa done
+Proving time: 4.734963041s
+Verify time: 9.121542ms
+----------------------------------------------------
+----------------------------------------------------
+Time elapsed in circuit & params construction: 1.093879333s
+ecdsa done
+Time elapsed in generating vkey: 1.902496875s
+ecdsa done
+Time elapsed in generating pkey: 1.779465375s
+Time elapsed in filling circuit: 382.625µs
+ECDSA res AssignedCell { value: Some(0x0000000000000000000000000000000000000000000000000000000000000001), cell: Cell { region_index: RegionIndex(65808), row_offset: 3, column: Column { index: 8, column_type: Advice } }, _marker: PhantomData }
+Using:
+advice columns: 27
+special lookup advice columns: 6
+fixed columns: 1
+lookup bits: 13
+limb bits: 88
+num limbs: 3
+maximum rows used by an advice column: 15821
+minimum rows used by an advice column: 15786
+total cells used: 426574
+cells used in special lookup columns: 87976
+maximum rows used by a fixed column: 8023
+ecdsa done
+Proving time: 4.667989042s
+Verify time: 12.912166ms
+----------------------------------------------------
+----------------------------------------------------
+Time elapsed in circuit & params construction: 597.820416ms
+ecdsa done
+Time elapsed in generating vkey: 2.249534875s
+ecdsa done
+Time elapsed in generating pkey: 1.811460667s
+Time elapsed in filling circuit: 380.584µs
+ECDSA res AssignedCell { value: Some(0x0000000000000000000000000000000000000000000000000000000000000001), cell: Cell { region_index: RegionIndex(65808), row_offset: 3, column: Column { index: 24, column_type: Advice } }, _marker: PhantomData }
+Using:
+advice columns: 55
+special lookup advice columns: 12
+fixed columns: 1
+lookup bits: 12
+limb bits: 88
+num limbs: 3
+maximum rows used by an advice column: 7898
+minimum rows used by an advice column: 7858
+total cells used: 432729
+cells used in special lookup columns: 91661
+maximum rows used by a fixed column: 8023
+ecdsa done
+Proving time: 5.053711041s
+Verify time: 20.528084ms
+----------------------------------------------------

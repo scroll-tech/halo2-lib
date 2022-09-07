@@ -3,8 +3,7 @@ use std::marker::PhantomData;
 
 use crate::fields::fp::{FpChip, FpConfig};
 use crate::fields::fp2::Fp2Chip;
-use crate::gates::flex_gate::GateStrategy;
-use crate::gates::range::RangeChip;
+use crate::gates::range::{RangeChip, RangeStrategy};
 
 use super::*;
 use halo2_proofs::arithmetic::BaseExt;
@@ -41,7 +40,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         let constant = meta.fixed_column();
         FpConfig::configure(
             meta,
-            GateStrategy::Vertical,
+            RangeStrategy::Vertical,
             NUM_ADVICE,
             1,
             NUM_FIXED,

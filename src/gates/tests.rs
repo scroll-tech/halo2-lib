@@ -122,7 +122,7 @@ impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        range::RangeConfig::configure(meta, GateStrategy::Horizontal, 2, 1, 1, 3)
+        range::RangeConfig::configure(meta, range::RangeStrategy::Vertical, 2, 1, 1, 3, vec![])
     }
 
     fn synthesize(
@@ -136,7 +136,7 @@ impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
         let (a, b) = layouter.assign_region(
             || "inputs",
             |mut region| {
-                let cells = chip.gate_chip.assign_region_smart(
+                let cells = chip.gate.assign_region_smart(
                     vec![Witness(self.a), Witness(self.b)],
                     vec![],
                     vec![],
@@ -169,10 +169,10 @@ impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
 
         println!(
             "maximum rows used by an advice column: {}",
-            chip.gate_chip.advice_rows.iter().max().unwrap()
+            chip.gate.advice_rows.iter().max().unwrap()
         );
 
-        let const_rows = chip.gate_chip.assign_and_constrain_constants(&mut layouter)?;
+        let const_rows = chip.gate.assign_and_constrain_constants(&mut layouter)?;
         println!("maximum rows used by a fixed column: {}", const_rows);
         chip.copy_and_lookup_cells(&mut layouter)?;
         println!("lookup cells used: {}", chip.cells_to_lookup.len());
