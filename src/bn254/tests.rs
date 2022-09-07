@@ -200,7 +200,7 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
     folder.pop();
     write!(fs_results, "degree,num_advice,num_lookup,num_fixed,lookup_bits,limb_bits,num_limbs,vk_size,proof_time,proof_size,verify_time\n")?;
     folder.push("data");
-    seq!(I in 1..11 {
+    seq!(I in 3..4 {
         {
         println!("----------------------------------------------------");
         let mut rng = rand::thread_rng();
