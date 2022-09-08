@@ -1,7 +1,7 @@
 #![allow(unused_assignments, unused_imports, unused_variables)]
 use std::marker::PhantomData;
 
-use crate::fields::fp::{FpChip, FpConfig};
+use crate::fields::fp::{FpChip, FpConfig, FpStrategy};
 use crate::fields::fp2::Fp2Chip;
 use crate::gates::range::{RangeChip, RangeStrategy};
 
@@ -40,7 +40,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         let constant = meta.fixed_column();
         FpConfig::configure(
             meta,
-            RangeStrategy::Vertical,
+            FpStrategy::Simple,
             NUM_ADVICE,
             1,
             NUM_FIXED,

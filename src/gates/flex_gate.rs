@@ -270,40 +270,6 @@ impl<F: FieldExt> FlexGateChip<F> {
         }
     }
 
-    /// The "contract" is that in any region you should only call `self.assign_region`
-    /// once if using `SimpleFloorPlanner`. Otherwise the column allocation may break
-    pub fn assign_region(
-        &mut self,
-        inputs: Vec<QuantumCell<F>>,
-        gate_offsets: Vec<usize>,
-        offset: usize,
-        region: &mut Region<'_, F>,
-    ) -> Result<(Vec<AssignedCell<F, F>>, usize), Error> {
-        let gate_index = self.min_gate_index();
-
-        let mut assigned_cells = Vec::with_capacity(inputs.len());
-        for (i, input) in inputs.iter().enumerate() {
-            let assigned_cell = self.assign_cell(
-                input.clone(),
-                self.config.gates[gate_index].value,
-                offset + i,
-                region,
-            )?;
-            assigned_cells.push(assigned_cell);
-        }
-        if !self.using_simple_floor_planner || !self.first_pass {
-            self.advice_rows[gate_index] += inputs.len() as u64;
-            self.first_pass = true;
-        } else if self.using_simple_floor_planner {
-            self.first_pass = false;
-        }
-        for gate_relative_offset in gate_offsets {
-            self.config.gates[gate_index].q_enable.enable(region, offset + gate_relative_offset)?;
-        }
-
-        Ok((assigned_cells, gate_index))
-    }
-
     /// The "contract" is that in any region you should only call `self.assign_region_horizontal`
     /// once if using `SimpleFloorPlanner`. Otherwise the column allocation may break
     ///
@@ -387,6 +353,42 @@ impl<F: FieldExt> FlexGateChip<F> {
 }
 
 impl<F: FieldExt> GateInstructions<F> for FlexGateChip<F> {
+    /// The "contract" is that in any region you should only call `self.assign_region`
+    /// once if using `SimpleFloorPlanner`. Otherwise the column allocation may break
+    fn assign_region(
+        &mut self,
+        inputs: Vec<QuantumCell<F>>,
+        gate_offsets: Vec<usize>,
+        offset: usize,
+        region: &mut Region<'_, F>,
+    ) -> Result<(Vec<AssignedCell<F, F>>, usize), Error> {
+        assert!(self.config.strategy == GateStrategy::Vertical);
+
+        let gate_index = self.min_gate_index();
+
+        let mut assigned_cells = Vec::with_capacity(inputs.len());
+        for (i, input) in inputs.iter().enumerate() {
+            let assigned_cell = self.assign_cell(
+                input.clone(),
+                self.config.gates[gate_index].value,
+                offset + i,
+                region,
+            )?;
+            assigned_cells.push(assigned_cell);
+        }
+        if !self.using_simple_floor_planner || !self.first_pass {
+            self.advice_rows[gate_index] += inputs.len() as u64;
+            self.first_pass = true;
+        } else if self.using_simple_floor_planner {
+            self.first_pass = false;
+        }
+        for gate_relative_offset in gate_offsets {
+            self.config.gates[gate_index].q_enable.enable(region, offset + gate_relative_offset)?;
+        }
+
+        Ok((assigned_cells, gate_index))
+    }
+
     /// The "contract" is that in any region you should only call `self.assign_region_smart` once if using `SimpleFloorPlanner`. Otherwise the
     /// column allocation may break
     ///

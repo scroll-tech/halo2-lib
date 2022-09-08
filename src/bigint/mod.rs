@@ -1,6 +1,7 @@
-use std::io::ErrorKind;
+use std::{collections::HashMap, io::ErrorKind, marker::PhantomData};
 
 use crate::gates::{
+    flex_gate::FlexGateConfig,
     GateInstructions,
     QuantumCell::{self, Constant, Existing},
 };
@@ -8,7 +9,8 @@ use crate::utils::*;
 use halo2_proofs::{
     arithmetic::{Field, FieldExt},
     circuit::*,
-    plonk::Error,
+    plonk::{Advice, Column, ConstraintSystem, Error, Expression, Selector},
+    poly::Rotation,
 };
 use num_bigint::{BigInt, BigUint};
 use num_traits::Zero;
@@ -202,5 +204,155 @@ impl<F: FieldExt> FixedCRTInteger<F> {
             self.max_size.clone(),
         );
         Ok(assigned)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum BigIntStrategy {
+    Simple,              // use existing gates
+    CustomVerticalTrunc, // vertical custom gates for truncative polynomial operations
+}
+
+#[derive(Clone, Debug)]
+pub struct BigIntConfig<F: FieldExt> {
+    // everything is empty if strategy is `Simple`
+
+    // selector for custom gate for `mul_no_carry`
+    // `q_mul_no_carry[k][i]` stores the selector for a custom gate to multiply two degree `k - 1` polynomials using index `i` vertical gate
+    // gate implementation depends on the strategy
+    pub q_mul_no_carry: HashMap<usize, Vec<Selector>>,
+    // selector for custom gate that multiplies bigint with `num_limbs` limbs with a constant bigint with `num_limbs` limbs
+    // `q_mul_no_carry_constant[p][i]` stores the selector for gate to multiply by constant `p` using index `i` vertical gate
+    pub q_mul_no_carry_constant: HashMap<BigUint, Vec<Selector>>,
+    strategy: BigIntStrategy,
+    _marker: PhantomData<F>,
+}
+
+impl<F: FieldExt> BigIntConfig<F> {
+    pub fn configure(
+        meta: &mut ConstraintSystem<F>,
+        strategy: BigIntStrategy,
+        limb_bits: usize,
+        num_limbs: usize,
+        gate_config: &FlexGateConfig<F>,
+        constants: Vec<BigUint>,
+    ) -> Self {
+        let mut q_mul_no_carry = HashMap::new();
+        let mut q_mul_no_carry_constant = HashMap::new();
+        match strategy {
+            BigIntStrategy::CustomVerticalTrunc => {
+                q_mul_no_carry.insert(
+                    num_limbs,
+                    gate_config
+                        .gates
+                        .iter()
+                        .map(|gate| {
+                            let q = meta.selector();
+                            create_vertical_mul_no_carry_gate(
+                                meta,
+                                &strategy,
+                                num_limbs,
+                                gate.value.clone(),
+                                q,
+                            );
+                            q
+                        })
+                        .collect(),
+                );
+                for constant in &constants {
+                    q_mul_no_carry_constant.insert(
+                        constant.clone(),
+                        gate_config
+                            .gates
+                            .iter()
+                            .map(|gate| {
+                                let q = meta.selector();
+                                create_vertical_mul_no_carry_constant_gate(
+                                    meta,
+                                    &strategy,
+                                    limb_bits,
+                                    num_limbs,
+                                    constant,
+                                    gate.value.clone(),
+                                    q,
+                                );
+                                q
+                            })
+                            .collect(),
+                    );
+                }
+            }
+            _ => {}
+        }
+        Self { q_mul_no_carry, q_mul_no_carry_constant, strategy, _marker: PhantomData }
+    }
+}
+
+fn create_vertical_mul_no_carry_gate<F: FieldExt>(
+    meta: &mut ConstraintSystem<F>,
+    strategy: &BigIntStrategy,
+    k: usize,
+    value: Column<Advice>,
+    selector: Selector,
+) {
+    if *strategy == BigIntStrategy::CustomVerticalTrunc {
+        meta.create_gate("custom vertical mul_no_carry gate", |meta| {
+            let q = meta.query_selector(selector);
+            let a: Vec<Expression<F>> =
+                (0..k).map(|i| meta.query_advice(value.clone(), Rotation(i as i32))).collect();
+            let b: Vec<Expression<F>> = (0..k)
+                .map(|i| meta.query_advice(value.clone(), Rotation((k + i) as i32)))
+                .collect();
+            let out: Vec<Expression<F>> =
+                (0..k).map(|i| meta.query_advice(value, Rotation((k + k + i) as i32))).collect();
+            let ab: Vec<Expression<F>> = (0..k)
+                .map(|i| {
+                    (0..=i).fold(Expression::Constant(F::from(0)), |sum, j| {
+                        sum + a[j].clone() * b[i - j].clone()
+                    })
+                })
+                .collect();
+            out.iter()
+                .zip(ab.iter())
+                .map(|(out, ab)| q.clone() * (ab.clone() - out.clone()))
+                .collect::<Vec<Expression<F>>>()
+        })
+    }
+}
+
+fn create_vertical_mul_no_carry_constant_gate<F: FieldExt>(
+    meta: &mut ConstraintSystem<F>,
+    strategy: &BigIntStrategy,
+    limb_bits: usize,
+    num_limbs: usize,
+    constant: &BigUint,
+    value: Column<Advice>,
+    selector: Selector,
+) {
+    if *strategy == BigIntStrategy::CustomVerticalTrunc {
+        meta.create_gate("custom vertical mul_no_carry_with_p gate", |meta| {
+            let q = meta.query_selector(selector);
+            let a: Vec<Expression<F>> = (0..num_limbs)
+                .map(|i| meta.query_advice(value.clone(), Rotation(i as i32)))
+                .collect();
+            let b: Vec<Expression<F>> = decompose_biguint(constant, num_limbs, limb_bits)
+                .iter()
+                .map(|x| Expression::Constant(*x))
+                .collect();
+            let out: Vec<Expression<F>> = (0..num_limbs)
+                .map(|i| meta.query_advice(value, Rotation((num_limbs + i) as i32)))
+                .collect();
+            let ab: Vec<Expression<F>> = (0..num_limbs)
+                .map(|i| {
+                    (0..=i).fold(Expression::Constant(F::from(0)), |sum, j| {
+                        sum + a[j].clone() * b[i - j].clone()
+                    })
+                })
+                .collect();
+            out.iter()
+                .zip(ab.iter())
+                .map(|(out, ab)| q.clone() * (ab.clone() - out.clone()))
+                .collect::<Vec<Expression<F>>>()
+        })
     }
 }

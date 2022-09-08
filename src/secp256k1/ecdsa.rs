@@ -24,7 +24,7 @@ use rand_core::OsRng;
 use super::{FpChip, FqOverflowChip, Secp256k1Chip, SECP_B};
 use crate::{
     ecc::{ecdsa_verify_no_pubkey_check, fixed::FixedEccPoint, EccChip},
-    fields::{fp::FpConfig, FieldChip, PrimeFieldChip},
+    fields::{fp::FpConfig, fp::FpStrategy, FieldChip, PrimeFieldChip},
     gates::{
         range::{RangeChip, RangeConfig, RangeStrategy},
         GateInstructions,
@@ -36,7 +36,7 @@ use crate::{
 
 #[macro_export]
 macro_rules! create_ecdsa_circuit {
-    ($range_strategy:expr, $num_advice:expr, $num_lookup_advice:expr, $num_fixed:expr, $lookup_bits:expr, $limb_bits:expr, $num_limbs:expr) => {
+    ($strategy:expr, $num_advice:expr, $num_lookup_advice:expr, $num_fixed:expr, $lookup_bits:expr, $limb_bits:expr, $num_limbs:expr) => {
         pub struct ECDSACircuit<F> {
             pub r: Option<Fq>,
             pub s: Option<Fq>,
@@ -59,7 +59,7 @@ macro_rules! create_ecdsa_circuit {
         }
 
         impl<F: FieldExt> Circuit<F> for ECDSACircuit<F> {
-            type Config = RangeConfig<F>;
+            type Config = FpConfig<F>;
             type FloorPlanner = SimpleFloorPlanner;
 
             fn without_witnesses(&self) -> Self {
@@ -67,9 +67,7 @@ macro_rules! create_ecdsa_circuit {
             }
 
             fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-                let range_len_lo = ((modulus::<F>().bits() as usize - ($num_limbs - 1) * $limb_bits + $lookup_bits - 1) / $lookup_bits) as u8;
-                let range_len_hi = (($limb_bits + $lookup_bits - 1) / $lookup_bits) as u8 + 1u8;
-                RangeConfig::configure(meta, $range_strategy, $num_advice, $num_lookup_advice, $num_fixed, $lookup_bits, (range_len_lo..=range_len_hi).collect())
+                FpConfig::<F>::configure(meta, $strategy, $num_advice, $num_lookup_advice, $num_fixed, $lookup_bits, $limb_bits, $num_limbs, modulus::<Fp>())
             }
 
             fn synthesize(
@@ -77,14 +75,16 @@ macro_rules! create_ecdsa_circuit {
                 config: Self::Config,
                 mut layouter: impl Layouter<F>,
             ) -> Result<(), Error> {
-                let mut range_chip = RangeChip::<F>::construct(config.clone(), true);
+                let fp_config = config;
+                let mut range_chip = RangeChip::<F>::construct(fp_config.range_config.clone(), true);
                 range_chip.load_lookup_table(&mut layouter)?;
 
                 // ECDSA verify
                 {
                     let (r_assigned, s_assigned, m_assigned) = {
                         let fq_config = FpConfig {
-                            range_config: config.clone(),
+                            range_config: fp_config.range_config.clone(),
+                            bigint_config: fp_config.bigint_config.clone(),
                             limb_bits: $limb_bits,
                             num_limbs: $num_limbs,
                             p: modulus::<Fq>(),
@@ -109,12 +109,6 @@ macro_rules! create_ecdsa_circuit {
                     };
                     // end of fq_chip mutably borrowing range_chip
                     // now fp_chip will mutably borrow range_chip
-                    let fp_config = FpConfig {
-                        range_config: config.clone(),
-                        limb_bits: $limb_bits,
-                        num_limbs: $num_limbs,
-                        p: modulus::<Fp>(),
-                    };
                     let mut fp_chip = FpChip::<F>::construct(fp_config, &mut range_chip, true);
                     let mut ecc_chip = EccChip::<F, FpChip<F>>::construct(&mut fp_chip);
                     let pk_assigned = ecc_chip.load_private(
@@ -277,8 +271,8 @@ macro_rules! create_ecdsa_circuit {
 #[cfg(test)]
 #[test]
 fn test_secp() {
-    const K: u32 = 12;
-    create_ecdsa_circuit!(RangeStrategy::CustomVertical, 107, 24, 2, 11, 88, 3);
+    const K: u32 = 17;
+    create_ecdsa_circuit!(FpStrategy::CustomVerticalCRT, 3, 1, 1, 16, 88, 3);
 
     // generate random pub key and sign random message
     let G = Secp256k1Affine::generator();
@@ -313,7 +307,7 @@ fn test_secp() {
 #[test]
 fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
     /*
-    // Parameters for use with RangeStrategy::Vertical
+    // Parameters for use with FpStrategy::Simple
     const DEGREE: [u32; 9] = [19, 18, 17, 16, 15, 14, 13, 12, 11];
     const NUM_ADVICE: [usize; 9] = [1, 2, 4, 9, 17, 36, 73, 147, 320];
     const NUM_LOOKUP: [usize; 9] = [0, 1, 1, 2, 3, 6, 12, 24, 53];
@@ -322,9 +316,9 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
     const LIMB_BITS: [usize; 9] = [88, 88, 88, 90, 88, 91, 88, 88, 90];
     */
 
-    // Parameters for use with RangeStrategy::CustomVertical
+    // Parameters for use with FpStrategy::CustomVerticalCRT
     const DEGREE: [u32; 9] = [19, 18, 17, 16, 15, 14, 13, 12, 11];
-    const NUM_ADVICE: [usize; 9] = [1, 2, 4, 7, 14, 27, 55, 107, 222];
+    const NUM_ADVICE: [usize; 9] = [1, 2, 3, 7, 13, 26, 51, 101, 208];
     const NUM_LOOKUP: [usize; 9] = [0, 1, 1, 2, 3, 6, 12, 24, 53];
     const NUM_FIXED: [usize; 9] = [1, 1, 1, 1, 1, 1, 1, 2, 5];
     const LOOKUP_BITS: [usize; 9] = [18, 17, 16, 15, 14, 13, 12, 11, 10];
@@ -340,10 +334,11 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
     seq!(I in 0..9 {
         {
         println!("----------------------------------------------------");
+        #[allow(unused_mut)]
         let mut rng = rand::thread_rng();
         let start = Instant::now();
 
-        create_ecdsa_circuit!(RangeStrategy::CustomVertical, NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3);
+        create_ecdsa_circuit!(FpStrategy::CustomVerticalCRT, NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3);
         let params = Params::<G1Affine>::unsafe_setup::<Bn256>(DEGREE[I]);
         let circuit = ECDSACircuit::<Fr>::default();
         let circuit_duration = start.elapsed();

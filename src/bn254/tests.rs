@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 use super::pairing::PairingChip;
 use super::*;
 use crate::ecc::EccChip;
-use crate::fields::PrimeFieldChip;
+use crate::fields::{fp::FpStrategy, PrimeFieldChip};
 use crate::gates::range::{RangeChip, RangeStrategy};
 use ff::PrimeField;
 use halo2_proofs::arithmetic::BaseExt;
@@ -170,7 +170,7 @@ macro_rules! create_pairing_circuit {
 #[test]
 fn test_pairing() {
     let k = 14;
-    create_pairing_circuit!(RangeStrategy::CustomVertical, 291, 32, 1, 13, 91, 3);
+    create_pairing_circuit!(FpStrategy::CustomVerticalCRT, 291, 32, 1, 13, 91, 3);
     let mut rng = rand::thread_rng();
 
     let P = Some(G1Affine::random(&mut rng));
@@ -217,7 +217,7 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
         let mut rng = rand::thread_rng();
         let start = Instant::now();
 
-        create_pairing_circuit!(RangeStrategy::CustomVertical, NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3);
+        create_pairing_circuit!(FpStrategy::CustomVerticalCRT, NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3);
         let params = Params::<G1Affine>::unsafe_setup::<Bn256>(DEGREE[I]);
 
         let circuit = PairingCircuit::<Fr>::default();

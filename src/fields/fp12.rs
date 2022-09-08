@@ -427,7 +427,7 @@ pub(crate) mod tests {
     use rand::Rng;
 
     use super::*;
-    use crate::fields::fp::{FpChip, FpConfig};
+    use crate::fields::fp::{FpChip, FpConfig, FpStrategy};
     use crate::fields::{FieldChip, PrimeFieldChip};
     use crate::gates::flex_gate::GateStrategy;
     use crate::gates::range::RangeStrategy;
@@ -456,7 +456,7 @@ pub(crate) mod tests {
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
             FpConfig::configure(
                 meta,
-                RangeStrategy::Vertical,
+                FpStrategy::Simple,
                 NUM_ADVICE,
                 1,
                 NUM_FIXED,

@@ -6,8 +6,11 @@ use num_bigint::BigUint;
 use num_bigint::Sign;
 use num_traits::{One, Zero};
 
+use super::BigIntConfig;
 use super::{check_carry_to_zero, CRTInteger, OverflowInteger};
 use crate::bigint::carry_mod::get_carry_witness;
+use crate::bigint::mul_no_carry;
+use crate::bigint::BigIntStrategy;
 use crate::gates::{
     GateInstructions,
     QuantumCell::{self, Constant, Existing, Witness},
@@ -215,6 +218,7 @@ pub fn assign<F: FieldExt>(
 // same as carry_mod::crt but `out = 0` so no need to range check
 pub fn crt<F: FieldExt>(
     range: &mut impl RangeInstructions<F>,
+    chip: &BigIntConfig<F>,
     layouter: &mut impl Layouter<F>,
     a: &CRTInteger<F>,
     modulus: &BigUint,
@@ -276,79 +280,103 @@ pub fn crt<F: FieldExt>(
     let mut quot_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(k);
     let mut check_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(k);
 
-    for i in 0..k {
-        let (mod_cell, quot_cell, check_cell) = layouter.assign_region(
-            || format!("check_carry_mod_to_zero_crt_{}", i),
-            |mut region| {
-                let mut offset = 0;
+    match chip.strategy {
+        BigIntStrategy::Simple => {
+            for i in 0..k {
+                let (mod_cell, quot_cell, check_cell) = layouter.assign_region(
+                    || format!("check_carry_mod_to_zero_crt_{}", i),
+                    |mut region| {
+                        let mut offset = 0;
 
-                let mut prod_computation: Vec<QuantumCell<F>> =
-                    Vec::with_capacity(4 + 3 * std::cmp::min(i + 1, k));
-                let mut prod_val = Some(F::zero());
-                prod_computation.push(Constant(F::zero()));
-                let mut enable_gates = Vec::new();
+                        let mut prod_computation: Vec<QuantumCell<F>> =
+                            Vec::with_capacity(4 + 3 * std::cmp::min(i + 1, k));
+                        let mut prod_val = Some(F::zero());
+                        prod_computation.push(Constant(F::zero()));
+                        let mut enable_gates = Vec::new();
 
-                for j in 0..std::cmp::min(i + 1, k) {
-                    enable_gates.push(offset);
+                        for j in 0..std::cmp::min(i + 1, k) {
+                            enable_gates.push(offset);
 
-                    if j != i {
-                        // does it matter whether we are enabling equality from advice column or fixed column for constants?
-                        prod_computation.push(Existing(&mod_assigned[j]));
-                    } else {
-                        prod_computation.push(Constant(mod_vec[j]));
-                    }
+                            if j != i {
+                                // does it matter whether we are enabling equality from advice column or fixed column for constants?
+                                prod_computation.push(Existing(&mod_assigned[j]));
+                            } else {
+                                prod_computation.push(Constant(mod_vec[j]));
+                            }
 
-                    if j != 0 {
-                        prod_computation.push(Existing(&quot_assigned[i - j]));
-                    } else {
-                        prod_computation.push(Witness(quot_vec[i - j]));
-                    };
+                            if j != 0 {
+                                prod_computation.push(Existing(&quot_assigned[i - j]));
+                            } else {
+                                prod_computation.push(Witness(quot_vec[i - j]));
+                            };
 
-                    prod_val = prod_val.zip(quot_vec[i - j]).map(|(sum, b)| sum + mod_vec[j] * b);
-                    prod_computation.push(Witness(prod_val));
+                            prod_val =
+                                prod_val.zip(quot_vec[i - j]).map(|(sum, b)| sum + mod_vec[j] * b);
+                            prod_computation.push(Witness(prod_val));
 
-                    offset += 3;
-                }
+                            offset += 3;
+                        }
 
-                // perform step 2: compute prod - a + out
-                // transpose of:
-                // | prod | -1 | a | prod - a |
-                // where prod is at relative row `offset`
-                enable_gates.push(offset);
+                        // perform step 2: compute prod - a + out
+                        // transpose of:
+                        // | prod | -1 | a | prod - a |
+                        // where prod is at relative row `offset`
+                        enable_gates.push(offset);
 
-                let check_val =
-                    prod_val.zip(a.truncation.limbs[i].value()).map(|(prod, &a)| prod - a);
+                        let check_val =
+                            prod_val.zip(a.truncation.limbs[i].value()).map(|(prod, &a)| prod - a);
 
-                prod_computation.append(&mut vec![
-                    Constant(-F::from(1)),
-                    Existing(&a.truncation.limbs[i]),
-                    Witness(check_val),
-                ]);
-                // assign all the cells above
-                let prod_computation_assignments = range.gate().assign_region_smart(
-                    prod_computation,
-                    enable_gates,
-                    vec![],
-                    vec![],
-                    0,
-                    &mut region,
+                        prod_computation.append(&mut vec![
+                            Constant(-F::from(1)),
+                            Existing(&a.truncation.limbs[i]),
+                            Witness(check_val),
+                        ]);
+                        // assign all the cells above
+                        let prod_computation_assignments = range.gate().assign_region_smart(
+                            prod_computation,
+                            enable_gates,
+                            vec![],
+                            vec![],
+                            0,
+                            &mut region,
+                        )?;
+
+                        Ok((
+                            // new mod_assigned at
+                            // offset at j = i
+                            prod_computation_assignments[3 * i + 1].clone(),
+                            // new quot_assigned at
+                            // offset at j = 0
+                            prod_computation_assignments[2].clone(),
+                            // new check_assigned
+                            prod_computation_assignments[offset + 3].clone(),
+                        ))
+                    },
                 )?;
-
-                Ok((
-                    // new mod_assigned at
-                    // offset at j = i
-                    prod_computation_assignments[3 * i + 1].clone(),
-                    // new quot_assigned at
-                    // offset at j = 0
-                    prod_computation_assignments[2].clone(),
-                    // new check_assigned
-                    prod_computation_assignments[offset + 3].clone(),
-                ))
-            },
-        )?;
-        mod_assigned.push(mod_cell);
-        quot_assigned.push(quot_cell);
-        check_assigned.push(check_cell);
+                mod_assigned.push(mod_cell);
+                quot_assigned.push(quot_cell);
+                check_assigned.push(check_cell);
+            }
+        }
+        BigIntStrategy::CustomVerticalTrunc => {
+            let (assigned, prod_assigned) = mul_no_carry::witness_by_constant(
+                range.gate(),
+                chip,
+                layouter,
+                &quot_vec,
+                &mod_vec,
+                modulus,
+            )?;
+            check_assigned.extend(prod_assigned.iter().zip(a.truncation.limbs.iter()).map(
+                |(prod, a)| {
+                    range
+                        .gate()
+                        .sub(layouter, &Existing(prod), &Existing(a))
+                        .expect("subtraction should not fail")
+                },
+            ));
+            quot_assigned = assigned;
+        }
     }
 
     let limb_base: F = biguint_to_fe(&(BigUint::one() << n));

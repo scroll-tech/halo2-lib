@@ -38,7 +38,7 @@ pub struct RangeConfig<F: FieldExt> {
     pub lookup_bits: usize,
     // selector for custom range gate
     // `q_range[k][i]` stores the selector for a custom range gate of length `k`
-    pub q_range: HashMap<u8, Vec<Selector>>,
+    pub q_range: HashMap<usize, Vec<Selector>>,
     pub gate_config: FlexGateConfig<F>,
     strategy: RangeStrategy,
 }
@@ -71,7 +71,7 @@ impl<F: FieldExt> RangeConfig<F> {
         num_lookup_advice: usize,
         num_fixed: usize,
         lookup_bits: usize,
-        range_len: Vec<u8>,
+        range_len: Vec<usize>,
     ) -> Self {
         assert!(lookup_bits <= 28);
 
@@ -333,7 +333,7 @@ impl<F: FieldExt> RangeChip<F> {
         range_bits: usize,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
         let k = (range_bits + self.config.lookup_bits - 1) / self.config.lookup_bits;
-        if !self.config.q_range.contains_key(&(k as u8)) {
+        if !self.config.q_range.contains_key(&k) {
             println!("no length {} custom range gate", k);
             panic!()
         }
@@ -349,7 +349,7 @@ impl<F: FieldExt> RangeChip<F> {
                 cells.extend(limbs.iter().map(|x| Witness(x.clone())));
                 let (mut assigned_cells, gate_index) =
                     self.gate.assign_region(cells, vec![], 0, &mut region)?;
-                self.config.q_range.get(&(k as u8)).unwrap()[gate_index].enable(&mut region, 0)?;
+                self.config.q_range.get(&k).unwrap()[gate_index].enable(&mut region, 0)?;
                 for idx in 1..=k {
                     if idx != k || rem_bits != 1 {
                         self.enable_lookup(&mut region, assigned_cells[idx].clone(), idx)?;

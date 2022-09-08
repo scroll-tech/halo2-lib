@@ -4,7 +4,8 @@ use ff::PrimeField;
 use halo2_proofs::{
     arithmetic::{BaseExt, Field, FieldExt},
     circuit::{AssignedCell, Layouter},
-    plonk::{Advice, Column, ConstraintSystem, Error, Fixed, Selector, TableColumn},
+    plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed, Selector, TableColumn},
+    poly::Rotation,
 };
 use num_bigint::{BigInt, BigUint};
 use num_traits::Num;
@@ -13,8 +14,8 @@ use super::{FieldChip, PrimeFieldChip, Selectable};
 use crate::{
     bigint::{
         add_no_carry, big_is_equal, big_is_zero, big_less_than, carry_mod, check_carry_mod_to_zero,
-        inner_product, mul_no_carry, scalar_mul_no_carry, select, sub, sub_no_carry, CRTInteger,
-        FixedCRTInteger, OverflowInteger,
+        inner_product, mul_no_carry, scalar_mul_no_carry, select, sub, sub_no_carry, BigIntConfig,
+        BigIntStrategy, CRTInteger, FixedCRTInteger, OverflowInteger,
     },
     gates::QuantumCell::{Constant, Existing, Witness},
     gates::{
@@ -27,9 +28,16 @@ use crate::{
     },
 };
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum FpStrategy {
+    Simple,
+    CustomVerticalCRT,
+}
+
 #[derive(Clone, Debug)]
 pub struct FpConfig<F: FieldExt> {
     pub range_config: RangeConfig<F>,
+    pub bigint_config: BigIntConfig<F>,
     pub limb_bits: usize,
     pub num_limbs: usize,
     pub p: BigUint,
@@ -38,7 +46,7 @@ pub struct FpConfig<F: FieldExt> {
 impl<F: FieldExt> FpConfig<F> {
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
-        range_strategy: RangeStrategy,
+        strategy: FpStrategy,
         num_advice: usize,
         num_lookup_advice: usize,
         num_fixed: usize,
@@ -48,29 +56,41 @@ impl<F: FieldExt> FpConfig<F> {
         p: BigUint,
     ) -> Self {
         let range_len_lo =
-            ((modulus::<F>().bits() as usize - (num_limbs - 1) * limb_bits + lookup_bits - 1)
-                / lookup_bits) as u8;
-        let range_len_hi = ((limb_bits + lookup_bits - 1) / lookup_bits) as u8 + 1u8;
-        FpConfig {
-            range_config: RangeConfig::<F>::configure(
-                meta,
-                range_strategy,
-                num_advice,
-                num_lookup_advice,
-                num_fixed,
-                lookup_bits,
-                (range_len_lo..=range_len_hi).collect(),
-            ),
+            (modulus::<F>().bits() as usize - (num_limbs - 1) * limb_bits + lookup_bits - 1)
+                / lookup_bits;
+        let range_len_hi = (limb_bits + lookup_bits - 1) / lookup_bits + 1;
+
+        let range_config = RangeConfig::<F>::configure(
+            meta,
+            match strategy {
+                FpStrategy::Simple => RangeStrategy::Vertical,
+                FpStrategy::CustomVerticalCRT => RangeStrategy::CustomVertical,
+            },
+            num_advice,
+            num_lookup_advice,
+            num_fixed,
+            lookup_bits,
+            (range_len_lo..=range_len_hi).collect(),
+        );
+        let bigint_config = BigIntConfig::<F>::configure(
+            meta,
+            match strategy {
+                FpStrategy::Simple => BigIntStrategy::Simple,
+                FpStrategy::CustomVerticalCRT => BigIntStrategy::CustomVerticalTrunc,
+            },
             limb_bits,
             num_limbs,
-            p,
-        }
+            &range_config.gate_config,
+            vec![p.clone()],
+        );
+        FpConfig { range_config, bigint_config, limb_bits, num_limbs, p }
     }
 }
 
 #[derive(Debug)]
 pub struct FpChip<'a, F: FieldExt, Fp: PrimeField> {
     pub range: &'a mut RangeChip<F>,
+    pub bigint_config: BigIntConfig<F>,
     pub limb_bits: usize,
     pub num_limbs: usize,
     pub p: BigUint,
@@ -94,6 +114,7 @@ impl<'a, F: FieldExt, Fp: PrimeField> PrimeFieldChip<'a, F> for FpChip<'a, F, Fp
     ) -> Self {
         Self {
             range: range_chip,
+            bigint_config: config.bigint_config,
             limb_bits: config.limb_bits,
             num_limbs: config.num_limbs,
             p: config.p,
@@ -247,7 +268,7 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpChip<'_, F, Fp> {
         a: &CRTInteger<F>,
         b: &CRTInteger<F>,
     ) -> Result<CRTInteger<F>, Error> {
-        mul_no_carry::crt(self.range.gate(), layouter, a, b)
+        mul_no_carry::crt(self.range.gate(), &self.bigint_config, layouter, a, b)
     }
 
     fn check_carry_mod_to_zero(
@@ -255,7 +276,7 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpChip<'_, F, Fp> {
         layouter: &mut impl Layouter<F>,
         a: &CRTInteger<F>,
     ) -> Result<(), Error> {
-        check_carry_mod_to_zero::crt(self.range, layouter, a, &self.p)
+        check_carry_mod_to_zero::crt(self.range, &self.bigint_config, layouter, a, &self.p)
     }
 
     fn carry_mod(
@@ -263,7 +284,7 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpChip<'_, F, Fp> {
         layouter: &mut impl Layouter<F>,
         a: &CRTInteger<F>,
     ) -> Result<CRTInteger<F>, Error> {
-        carry_mod::crt(self.range, layouter, a, &self.p)
+        carry_mod::crt(self.range, &self.bigint_config, layouter, a, &self.p)
     }
 
     fn range_check(
@@ -371,6 +392,8 @@ pub(crate) mod tests {
     use crate::utils::{fe_to_bigint, modulus};
     use num_bigint::{BigInt, BigUint};
 
+    use super::FpStrategy;
+
     #[derive(Default)]
     struct MyCircuit<F> {
         a: Option<Fq>,
@@ -392,7 +415,7 @@ pub(crate) mod tests {
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
             FpConfig::configure(
                 meta,
-                crate::gates::range::RangeStrategy::Vertical,
+                FpStrategy::Simple,
                 NUM_ADVICE,
                 1,
                 NUM_FIXED,
