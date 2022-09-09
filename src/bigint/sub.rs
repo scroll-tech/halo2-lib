@@ -66,7 +66,12 @@ pub fn assign<F: FieldExt>(
         borrow = Some(lt);
     }
     Ok((
-        OverflowInteger::construct(out_limbs, a.max_limb_size.clone(), a.limb_bits),
+        OverflowInteger::construct(
+            out_limbs,
+            a.max_limb_size.clone(),
+            a.limb_bits,
+            a.max_size.clone(),
+        ),
         borrow.unwrap(),
     ))
 }
@@ -82,5 +87,5 @@ pub fn crt<F: FieldExt>(
     let (out_trunc, underflow) = assign(range, layouter, &a.truncation, &b.truncation)?;
     let out_native = range.gate().sub(layouter, &Existing(&a.native), &Existing(&b.native))?;
     let out_val = a.value.as_ref().zip(b.value.as_ref()).map(|(a, b)| a - b);
-    Ok((CRTInteger::construct(out_trunc, out_native, out_val, a.max_size.clone()), underflow))
+    Ok((CRTInteger::construct(out_trunc, out_native, out_val), underflow))
 }

@@ -17,5 +17,10 @@ pub fn assign<F: FieldExt>(
         out_limbs.push(out_limb);
     }
 
-    Ok(OverflowInteger::construct(out_limbs, a.max_limb_size.clone(), a.limb_bits))
+    Ok(OverflowInteger::construct(
+        out_limbs,
+        a.max_limb_size.clone(),
+        a.limb_bits,
+        a.max_size.clone(),
+    ))
 }

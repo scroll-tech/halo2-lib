@@ -19,7 +19,7 @@ use crate::utils::{
 };
 use crate::{
     ecc::{EccChip, EccPoint},
-    fields::{fp::FpConfig, FieldChip, FqPoint},
+    fields::{fp::FpConfig, FieldChip, FieldExtPoint},
 };
 
 impl<'a, 'b, F: FieldExt> Fp12Chip<'a, 'b, F> {
@@ -28,9 +28,9 @@ impl<'a, 'b, F: FieldExt> Fp12Chip<'a, 'b, F> {
     pub fn frobenius_map(
         &mut self,
         layouter: &mut impl Layouter<F>,
-        a: &FqPoint<F>,
+        a: &<Self as FieldChip<F>>::FieldPoint,
         power: usize,
-    ) -> Result<FqPoint<F>, Error> {
+    ) -> Result<<Self as FieldChip<F>>::FieldPoint, Error> {
         assert_eq!(modulus::<Fq>() % 4u64, BigUint::from(3u64));
         assert_eq!(modulus::<Fq>() % 6u64, BigUint::from(1u64));
         assert_eq!(a.coeffs.len(), 12);
@@ -44,7 +44,7 @@ impl<'a, 'b, F: FieldExt> Fp12Chip<'a, 'b, F> {
             // frobenius map is used infrequently so this is a small optimization
 
             let mut a_fp2 =
-                FqPoint::construct(vec![a.coeffs[i].clone(), a.coeffs[i + 6].clone()], 2);
+                FieldExtPoint::construct(vec![a.coeffs[i].clone(), a.coeffs[i + 6].clone()]);
             if pow % 2 != 0 {
                 a_fp2 = fp2_chip.conjugate(layouter, &a_fp2)?;
             }
@@ -77,16 +77,16 @@ impl<'a, 'b, F: FieldExt> Fp12Chip<'a, 'b, F> {
             .chain(out_fp2.iter().map(|x| x.coeffs[1].clone()))
             .collect();
 
-        Ok(FqPoint::construct(out_coeffs, 12))
+        Ok(FieldExtPoint::construct(out_coeffs))
     }
 
     // exp is in little-endian
     pub fn pow(
         &mut self,
         layouter: &mut impl Layouter<F>,
-        a: &FqPoint<F>,
+        a: &<Self as FieldChip<F>>::FieldPoint,
         mut exp: Vec<u64>,
-    ) -> Result<FqPoint<F>, Error> {
+    ) -> Result<<Self as FieldChip<F>>::FieldPoint, Error> {
         // https://en.wikipedia.org/wiki/Non-adjacent_form
         // NAF for exp:
         let mut naf: Vec<i8> = Vec::with_capacity(64 * exp.len());
@@ -158,8 +158,8 @@ impl<'a, 'b, F: FieldExt> Fp12Chip<'a, 'b, F> {
     pub fn hard_part_BN(
         &mut self,
         layouter: &mut impl Layouter<F>,
-        m: &FqPoint<F>,
-    ) -> Result<FqPoint<F>, Error> {
+        m: &<Self as FieldChip<F>>::FieldPoint,
+    ) -> Result<<Self as FieldChip<F>>::FieldPoint, Error> {
         // x = BN_X
 
         // m^x
@@ -223,8 +223,8 @@ impl<'a, 'b, F: FieldExt> Fp12Chip<'a, 'b, F> {
     pub fn easy_part(
         &mut self,
         layouter: &mut impl Layouter<F>,
-        a: &FqPoint<F>,
-    ) -> Result<FqPoint<F>, Error> {
+        a: &<Self as FieldChip<F>>::FieldPoint,
+    ) -> Result<<Self as FieldChip<F>>::FieldPoint, Error> {
         // a^{q^6} = conjugate of a
         let f1 = self.conjugate(layouter, a)?;
         let f2 = self.divide(layouter, &f1, a)?;
@@ -237,8 +237,8 @@ impl<'a, 'b, F: FieldExt> Fp12Chip<'a, 'b, F> {
     pub fn final_exp(
         &mut self,
         layouter: &mut impl Layouter<F>,
-        a: &FqPoint<F>,
-    ) -> Result<FqPoint<F>, Error> {
+        a: &<Self as FieldChip<F>>::FieldPoint,
+    ) -> Result<<Self as FieldChip<F>>::FieldPoint, Error> {
         let f0 = self.easy_part(layouter, a)?;
         let f = self.hard_part_BN(layouter, &f0)?;
         Ok(f)

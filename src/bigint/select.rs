@@ -27,6 +27,7 @@ pub fn assign<F: FieldExt>(
         out_limbs,
         cmp::max(a.max_limb_size.clone(), b.max_limb_size.clone()),
         a.limb_bits,
+        cmp::max(a.max_size.clone(), b.max_size.clone()),
     ))
 }
 
@@ -51,6 +52,7 @@ pub fn crt<F: FieldExt>(
         out_limbs,
         cmp::max(a.truncation.max_limb_size.clone(), b.truncation.max_limb_size.clone()),
         a.truncation.limb_bits,
+        cmp::max(a.truncation.max_size.clone(), b.truncation.max_size.clone()),
     );
 
     let out_native =
@@ -59,10 +61,5 @@ pub fn crt<F: FieldExt>(
         let s = fe_to_bigint(s);
         (a * &s) + ((BigInt::from(1) - &s) * b)
     });
-    Ok(CRTInteger::construct(
-        out_trunc,
-        out_native,
-        out_val,
-        cmp::max(a.max_size.clone(), b.max_size.clone()),
-    ))
+    Ok(CRTInteger::construct(out_trunc, out_native, out_val))
 }

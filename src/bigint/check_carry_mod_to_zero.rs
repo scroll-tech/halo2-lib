@@ -35,11 +35,10 @@ pub fn assign<F: FieldExt>(
     let k = a.limbs.len();
     assert!(k > 0);
 
-    // overflow := a.max_limb_size.bits()
-    // quot <= ceil(2^overflow * 2^{n * k} / modulus) < 2^{overflow + n * k - modulus.bits() + 1}
-    // therefore quot will need ceil( (overflow + n * k - modulus.bits() + 1 ) / n ) limbs
-    let overflow = a.max_limb_size.bits() as usize;
-    let m = (overflow + n * k - modulus.bits() as usize + n) / n;
+    // quot <= ceil(a.max_size / modulus)
+    let quot_max_size = (&a.max_size + modulus - 1usize) / modulus;
+    // therefore quot will need ceil( ceil(a.max_size / modulus).bits() / n ) limbs
+    let m = (quot_max_size.bits() as usize + n - 1) / n;
     assert!(m > 0);
 
     let a_val = a.to_bigint();
@@ -76,6 +75,9 @@ pub fn assign<F: FieldExt>(
 
     let k_prod = mod_vec.len() + m - 1;
     assert!(k_prod >= k);
+    if k_prod != k {
+        println!("check_carry_mod_to_zero, k_prod: {}, k: {}", k_prod, k);
+    }
     let mut mod_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(mod_vec.len());
     let mut quot_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(m);
     let mut check_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(k_prod);
@@ -208,6 +210,7 @@ pub fn assign<F: FieldExt>(
         check_assigned,
         &a.max_limb_size + (BigUint::from(std::cmp::min(mod_vec.len(), m)) << (mod_overflow + n)),
         n,
+        BigUint::zero(),
     );
     // check that `- a + modulus * quotient == 0` after carry
     check_carry_to_zero::assign(range, layouter, check_overflow_int)?;
@@ -230,7 +233,8 @@ pub fn crt<F: FieldExt>(
     // in order for CRT method to work, we need `abs(modulus * quotient - a) < 2^{trunc_len - 1} * native_modulus::<F>`
     // this is ensured if
     // `modulus * quotient` < 2^{trunc_len - 1} * native_modulus::<F> - a.max_size
-    let quot_max_bits = ((BigUint::one().shl(trunc_len - 1) * native_modulus::<F>() - &a.max_size)
+    let quot_max_bits = ((BigUint::one().shl(trunc_len - 1) * native_modulus::<F>()
+        - &a.truncation.max_size)
         / modulus)
         .bits() as usize;
     assert!(quot_max_bits < trunc_len);
@@ -421,6 +425,7 @@ pub fn crt<F: FieldExt>(
         check_assigned,
         &a.truncation.max_limb_size + (BigUint::from(k) << (2 * n)),
         n,
+        BigUint::zero(),
     );
     // check that `modulus * quotient - a == 0 mod 2^{trunc_len}` after carry
     check_carry_to_zero::truncate(range, layouter, check_overflow_int)?;

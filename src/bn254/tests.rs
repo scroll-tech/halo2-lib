@@ -104,20 +104,21 @@ macro_rules! create_pairing_circuit {
                 // test optimal ate pairing
                 {
                     let f = chip.pairing(&mut layouter, &Q_assigned, &P_assigned)?;
-                    for fc in &f.coeffs {
+                    /* for fc in &f.coeffs {
                         assert_eq!(fc.value, fc.truncation.to_bigint());
-                    }
-                    /* if self.P != None {
+                    }*/
+                    if self.P != None {
                         let actual_f = pairing(&self.P.unwrap(), &self.Q.unwrap());
                         let f_val: Vec<String> = f
                             .coeffs
                             .iter()
                             .map(|x| x.value.clone().unwrap().to_str_radix(16))
+                            //.map(|x| x.to_bigint().clone().unwrap().to_str_radix(16))
                             .collect();
                         println!("optimal ate pairing:");
                         println!("actual f: {:#?}", actual_f);
                         println!("circuit f: {:#?}", f_val);
-                    }*/
+                    }
                 }
 
                 // IMPORTANT: this assigns all constants to the fixed columns

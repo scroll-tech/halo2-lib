@@ -50,12 +50,7 @@ impl<'a, F: FieldExt, Fp: PrimeField> FpOverflowChip<'a, F, Fp> {
             OverflowInteger::evaluate(self.range.gate(), layouter, &a.limbs, a.limb_bits)?;
         let a_bigint = a.to_bigint();
 
-        Ok(CRTInteger::construct(
-            a.clone(),
-            a_native,
-            a_bigint,
-            (BigUint::from(1u64) << self.p.bits()) - 1usize,
-        ))
+        Ok(CRTInteger::construct(a.clone(), a_native, a_bigint))
     }
 
     pub fn from_fp_chip(
@@ -127,7 +122,12 @@ impl<'a, F: FieldExt, Fp: PrimeField> FieldChip<F> for FpOverflowChip<'a, F, Fp>
             },
         )?;
 
-        Ok(OverflowInteger::construct(limbs, BigUint::from(1u64) << self.limb_bits, self.limb_bits))
+        Ok(OverflowInteger::construct(
+            limbs,
+            BigUint::from(1u64) << self.limb_bits,
+            self.limb_bits,
+            &self.p - 1usize,
+        ))
     }
 
     fn load_constant(
@@ -155,6 +155,7 @@ impl<'a, F: FieldExt, Fp: PrimeField> FieldChip<F> for FpOverflowChip<'a, F, Fp>
             a_limbs,
             BigUint::from(1u64) << self.limb_bits,
             self.limb_bits,
+            &self.p - 1usize,
         ))
     }
 
@@ -239,7 +240,7 @@ impl<'a, F: FieldExt, Fp: PrimeField> FieldChip<F> for FpOverflowChip<'a, F, Fp>
         layouter: &mut impl Layouter<F>,
         a: &OverflowInteger<F>,
     ) -> Result<OverflowInteger<F>, Error> {
-        carry_mod::assign(self.range, layouter, a, &self.p)
+        carry_mod::assign(self.range, layouter, a, &self.p, self.num_limbs)
     }
 
     fn range_check(

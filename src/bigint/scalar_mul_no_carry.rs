@@ -24,7 +24,13 @@ pub fn assign<F: FieldExt>(
         let out_cell = gate.mul(layouter, &Existing(&a.limbs[i]), &Constant(b))?;
         out_limbs.push(out_cell);
     }
-    Ok(OverflowInteger::construct(out_limbs, &a.max_limb_size * fe_to_biguint(&b), a.limb_bits))
+    let b_abs = fe_to_bigint(&b).abs().to_biguint().unwrap();
+    Ok(OverflowInteger::construct(
+        out_limbs,
+        &a.max_limb_size * &b_abs,
+        a.limb_bits,
+        &a.max_size * &b_abs,
+    ))
 }
 
 pub fn crt<F: FieldExt>(
@@ -52,9 +58,9 @@ pub fn crt<F: FieldExt>(
             out_limbs,
             &a.truncation.max_limb_size * &b_abs,
             a.truncation.limb_bits,
+            &a.truncation.max_size * &b_abs,
         ),
         out_native,
         out_val,
-        &a.max_size * &b_abs,
     ))
 }

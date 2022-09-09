@@ -9,6 +9,7 @@ use crate::gates::{
 };
 use crate::utils::fe_to_bigint;
 
+/// only use case is when coeffs has only a single 1, rest are 0
 pub fn assign<F: FieldExt>(
     gate: &mut impl GateInstructions<F>,
     layouter: &mut impl Layouter<F>,
@@ -32,11 +33,12 @@ pub fn assign<F: FieldExt>(
 
     let max_limb_size =
         a.iter().fold(BigUint::from(0u64), |acc, x| cmp::max(acc, x.max_limb_size.clone()));
+    let max_size = a.iter().fold(BigUint::from(0u64), |acc, x| cmp::max(acc, x.max_size.clone()));
 
-    Ok(OverflowInteger::construct(out_limbs, max_limb_size, a[0].limb_bits))
+    Ok(OverflowInteger::construct(out_limbs, max_limb_size, a[0].limb_bits, max_size))
 }
 
-// only use case is when coeffs has only a single 1, rest are 0
+/// only use case is when coeffs has only a single 1, rest are 0
 pub fn crt<F: FieldExt>(
     gate: &mut impl GateInstructions<F>,
     layouter: &mut impl Layouter<F>,
@@ -61,15 +63,16 @@ pub fn crt<F: FieldExt>(
     let max_limb_size = a
         .iter()
         .fold(BigUint::from(0u64), |acc, x| cmp::max(acc, x.truncation.max_limb_size.clone()));
+    let max_size =
+        a.iter().fold(BigUint::from(0u64), |acc, x| cmp::max(acc, x.truncation.max_size.clone()));
 
-    let out_trunc = OverflowInteger::construct(out_limbs, max_limb_size, a[0].truncation.limb_bits);
+    let out_trunc =
+        OverflowInteger::construct(out_limbs, max_limb_size, a[0].truncation.limb_bits, max_size);
     let a_native = a.iter().map(|x| Existing(&x.native)).collect();
     let (_, _, out_native) = gate.inner_product(layouter, &a_native, &coeffs_quantum)?;
     let out_val = a.iter().zip(coeffs.iter()).fold(Some(BigInt::from(0)), |acc, (x, y)| {
         acc.zip(x.value.as_ref()).zip(y.value()).map(|((a, x), y)| a + x * fe_to_bigint(y))
     });
 
-    let max_size = a.iter().fold(BigUint::from(0u64), |acc, x| cmp::max(acc, x.max_size.clone()));
-
-    Ok(CRTInteger::construct(out_trunc, out_native, out_val, max_size))
+    Ok(CRTInteger::construct(out_trunc, out_native, out_val))
 }

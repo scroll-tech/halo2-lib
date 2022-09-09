@@ -76,6 +76,7 @@ pub fn assign<F: FieldExt>(
         out_limbs,
         BigUint::from(std::cmp::min(k_a, k_b)) * &a.max_limb_size * &b.max_limb_size,
         a.limb_bits,
+        &a.max_size * &b.max_size,
     ))
 }
 
@@ -170,6 +171,7 @@ pub fn truncate<F: FieldExt>(
         out_limbs,
         BigUint::from(k) * &a.max_limb_size * &b.max_limb_size,
         a.limb_bits,
+        &a.max_size * &b.max_size,
     ))
 }
 
@@ -184,7 +186,7 @@ pub fn crt<F: FieldExt>(
     let out_native = gate.mul(layouter, &Existing(&a.native), &Existing(&b.native))?;
     let out_val = a.value.as_ref().zip(b.value.as_ref()).map(|(a, b)| a * b);
 
-    Ok(CRTInteger::construct(out_trunc, out_native, out_val, &a.max_size * &b.max_size))
+    Ok(CRTInteger::construct(out_trunc, out_native, out_val))
 }
 
 pub fn witness_by_constant<F: FieldExt>(

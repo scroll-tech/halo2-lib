@@ -22,7 +22,6 @@ pub mod big_less_than;
 pub mod carry_mod;
 pub mod check_carry_mod_to_zero;
 pub mod check_carry_to_zero;
-pub mod decompose;
 pub mod inner_product;
 // pub mod mod_reduce;
 pub mod mul_no_carry;
@@ -37,6 +36,7 @@ pub struct OverflowInteger<F: FieldExt> {
     pub limbs: Vec<AssignedCell<F, F>>,
     pub max_limb_size: BigUint, // max absolute value of integer value of a limb
     pub limb_bits: usize,
+    pub max_size: BigUint, // theoretical max absolute value of `value` allowed. This needs to be < 2^t * n / 2
 }
 
 impl<F: FieldExt> OverflowInteger<F> {
@@ -44,8 +44,9 @@ impl<F: FieldExt> OverflowInteger<F> {
         limbs: Vec<AssignedCell<F, F>>,
         max_limb_size: BigUint,
         limb_bits: usize,
+        max_size: BigUint,
     ) -> Self {
-        Self { limbs, max_limb_size, limb_bits }
+        Self { limbs, max_limb_size, limb_bits, max_size }
     }
 
     pub fn to_bigint(&self) -> Option<BigInt> {
@@ -93,6 +94,13 @@ impl<F: FieldExt> FixedOverflowInteger<F> {
         Self { limbs, max_limb_size: BigUint::from(1u64) << limb_bits, limb_bits }
     }
 
+    pub fn to_bigint(&self) -> BigUint {
+        self.limbs
+            .iter()
+            .rev()
+            .fold(BigUint::zero(), |acc, x| (acc << self.limb_bits) + fe_to_biguint(x))
+    }
+
     pub fn assign(
         &self,
         gate: &mut impl GateInstructions<F>,
@@ -107,8 +115,12 @@ impl<F: FieldExt> FixedOverflowInteger<F> {
                 Ok(limb_cells_assigned)
             },
         )?;
-        let assigned =
-            OverflowInteger::construct(assigned_limbs, self.max_limb_size.clone(), self.limb_bits);
+        let assigned = OverflowInteger::construct(
+            assigned_limbs,
+            self.max_limb_size.clone(),
+            self.limb_bits,
+            self.to_bigint(),
+        );
         Ok(assigned)
     }
 }
@@ -129,7 +141,6 @@ pub struct CRTInteger<F: FieldExt> {
     pub truncation: OverflowInteger<F>,
     pub native: AssignedCell<F, F>,
     pub value: Option<BigInt>,
-    pub max_size: BigUint, // theoretical max absolute value of `value` allowed. This needs to be < 2^t * n / 2
 }
 
 impl<F: FieldExt> CRTInteger<F> {
@@ -137,9 +148,8 @@ impl<F: FieldExt> CRTInteger<F> {
         truncation: OverflowInteger<F>,
         native: AssignedCell<F, F>,
         value: Option<BigInt>,
-        max_size: BigUint,
     ) -> Self {
-        Self { truncation, native, value, max_size }
+        Self { truncation, native, value }
     }
 }
 
@@ -197,12 +207,8 @@ impl<F: FieldExt> FixedCRTInteger<F> {
                 Ok(native_cells_assigned[0].clone())
             },
         )?;
-        let assigned = CRTInteger::construct(
-            assigned_truncation,
-            assigned_native,
-            Some(self.value.clone()),
-            self.max_size.clone(),
-        );
+        let assigned =
+            CRTInteger::construct(assigned_truncation, assigned_native, Some(self.value.clone()));
         Ok(assigned)
     }
 }

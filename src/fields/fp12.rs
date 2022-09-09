@@ -10,7 +10,6 @@ use num_bigint::{BigInt, BigUint};
 use num_traits::Num;
 
 use crate::fields::fp2::Fp2Chip;
-use crate::fields::FqPoint;
 use crate::gates::range;
 use crate::gates::range::RangeChip;
 use crate::gates::{
@@ -28,7 +27,7 @@ use crate::{
     utils::modulus,
 };
 
-use super::{FieldChip, FieldExtConstructor, PrimeFieldChip};
+use super::{FieldChip, FieldExtConstructor, FieldExtPoint, PrimeFieldChip};
 
 const XI_0: u64 = 9;
 /// Represent Fp12 point as FqPoint with degree = 12
@@ -46,7 +45,7 @@ pub struct Fp12Chip<'a, 'b, F: FieldExt, FpChip: PrimeFieldChip<'b, F>, Fp12: Fi
 impl<'a, 'b, F, FpChip, Fp12> Fp12Chip<'a, 'b, F, FpChip, Fp12>
 where
     F: FieldExt,
-    FpChip: PrimeFieldChip<'b, F, FieldPoint = CRTInteger<F>>,
+    FpChip: PrimeFieldChip<'b, F>,
     FpChip::FieldType: PrimeField,
     Fp12: Field + FieldExtConstructor<FpChip::FieldType, 12>,
 {
@@ -58,12 +57,12 @@ where
     pub fn fp2_mul_no_carry(
         &mut self,
         layouter: &mut impl Layouter<F>,
-        a: &FqPoint<F>,
-        fp2_pt: &FqPoint<F>,
-    ) -> Result<FqPoint<F>, Error> {
+        a: &FieldExtPoint<FpChip::FieldPoint>,
+        fp2_pt: &FieldExtPoint<FpChip::FieldPoint>,
+    ) -> Result<FieldExtPoint<FpChip::FieldPoint>, Error> {
         let deg = 6;
-        assert_eq!(a.degree, 12);
-        assert_eq!(fp2_pt.degree, 2);
+        assert_eq!(a.coeffs.len(), 12);
+        assert_eq!(fp2_pt.coeffs.len(), 2);
 
         let mut out_coeffs = Vec::with_capacity(12);
         for i in 0..6 {
@@ -80,16 +79,16 @@ where
             let coeff = self.fp_chip.add_no_carry(layouter, &coeff1, &coeff2)?;
             out_coeffs.push(coeff);
         }
-        Ok(FqPoint::construct(out_coeffs, 12))
+        Ok(FieldExtPoint::construct(out_coeffs))
     }
 
     // for \sum_i (a_i + b_i u) w^i, returns \sum_i (-1)^i (a_i + b_i u) w^i
     pub fn conjugate(
         &mut self,
         layouter: &mut impl Layouter<F>,
-        a: &FqPoint<F>,
-    ) -> Result<FqPoint<F>, Error> {
-        assert_eq!(a.degree, 12);
+        a: &FieldExtPoint<FpChip::FieldPoint>,
+    ) -> Result<FieldExtPoint<FpChip::FieldPoint>, Error> {
+        assert_eq!(a.coeffs.len(), 12);
 
         let coeffs = a
             .coeffs
@@ -103,26 +102,20 @@ where
                 }
             })
             .collect();
-        Ok(FqPoint::construct(coeffs, 12))
+        Ok(FieldExtPoint::construct(coeffs))
     }
 }
 
 impl<'a, 'b, F, FpChip, Fp12> FieldChip<F> for Fp12Chip<'a, 'b, F, FpChip, Fp12>
 where
     F: FieldExt,
-    FpChip: PrimeFieldChip<
-        'b,
-        F,
-        FieldPoint = CRTInteger<F>,
-        WitnessType = Option<BigInt>,
-        ConstantType = BigInt,
-    >,
+    FpChip: PrimeFieldChip<'b, F, WitnessType = Option<BigInt>, ConstantType = BigInt>,
     FpChip::FieldType: PrimeField,
     Fp12: Field + FieldExtConstructor<FpChip::FieldType, 12>,
 {
     type ConstantType = Fp12;
     type WitnessType = Vec<Option<BigInt>>;
-    type FieldPoint = FqPoint<F>;
+    type FieldPoint = FieldExtPoint<FpChip::FieldPoint>;
     type FieldType = Fp12;
     type RangeChip = FpChip::RangeChip;
 
@@ -130,20 +123,12 @@ where
         self.fp_chip.range()
     }
 
-    fn get_assigned_value(x: &FqPoint<F>) -> Option<Fp12> {
+    fn get_assigned_value(x: &Self::FieldPoint) -> Option<Fp12> {
         assert_eq!(x.coeffs.len(), 12);
-        let values: Vec<Option<BigInt>> = x.coeffs.iter().map(|v| v.value.clone()).collect();
-        let values_collected: Option<Vec<BigInt>> = values.into_iter().collect();
-        match values_collected {
-            Some(c_bigint) => {
-                let mut c = [FpChip::FieldType::zero(); 12];
-                for i in 0..12 {
-                    c[i] = bigint_to_fe(&c_bigint[i])
-                }
-                Some(Fp12::new(c))
-            }
-            None => None,
-        }
+        let values: Vec<Option<FpChip::FieldType>> =
+            x.coeffs.iter().map(|v| FpChip::get_assigned_value(v)).collect();
+        let values_collected: Option<Vec<FpChip::FieldType>> = values.into_iter().collect();
+        values_collected.map(|c| Fp12::new(c.try_into().unwrap()))
     }
 
     fn fe_to_witness(x: &Option<Fp12>) -> Vec<Option<BigInt>> {
@@ -157,98 +142,99 @@ where
         &mut self,
         layouter: &mut impl Layouter<F>,
         coeffs: Vec<Option<BigInt>>,
-    ) -> Result<FqPoint<F>, Error> {
+    ) -> Result<Self::FieldPoint, Error> {
+        assert_eq!(coeffs.len(), 12);
         let mut assigned_coeffs = Vec::with_capacity(12);
         for a in coeffs {
             let assigned_coeff = self.fp_chip.load_private(layouter, a.clone())?;
             assigned_coeffs.push(assigned_coeff);
         }
-        Ok(FqPoint::construct(assigned_coeffs, 12))
+        Ok(Self::FieldPoint::construct(assigned_coeffs))
     }
 
     fn load_constant(
         &mut self,
         layouter: &mut impl Layouter<F>,
         c: Fp12,
-    ) -> Result<FqPoint<F>, Error> {
+    ) -> Result<Self::FieldPoint, Error> {
         let mut assigned_coeffs = Vec::with_capacity(12);
         for a in &c.coeffs() {
             let assigned_coeff =
                 self.fp_chip.load_constant(layouter, BigInt::from(fe_to_biguint(a)))?;
             assigned_coeffs.push(assigned_coeff);
         }
-        Ok(FqPoint::construct(assigned_coeffs, 12))
+        Ok(Self::FieldPoint::construct(assigned_coeffs))
     }
 
     // signed overflow BigInt functions
     fn add_no_carry(
         &mut self,
         layouter: &mut impl Layouter<F>,
-        a: &FqPoint<F>,
-        b: &FqPoint<F>,
-    ) -> Result<FqPoint<F>, Error> {
-        assert_eq!(a.degree, b.degree);
-        let mut out_coeffs = Vec::with_capacity(a.degree);
-        for i in 0..a.degree {
+        a: &Self::FieldPoint,
+        b: &Self::FieldPoint,
+    ) -> Result<Self::FieldPoint, Error> {
+        assert_eq!(a.coeffs.len(), b.coeffs.len());
+        let mut out_coeffs = Vec::with_capacity(a.coeffs.len());
+        for i in 0..a.coeffs.len() {
             let coeff = self.fp_chip.add_no_carry(layouter, &a.coeffs[i], &b.coeffs[i])?;
             out_coeffs.push(coeff);
         }
-        Ok(FqPoint::construct(out_coeffs, a.degree))
+        Ok(Self::FieldPoint::construct(out_coeffs))
     }
 
     fn sub_no_carry(
         &mut self,
         layouter: &mut impl Layouter<F>,
-        a: &FqPoint<F>,
-        b: &FqPoint<F>,
-    ) -> Result<FqPoint<F>, Error> {
-        assert_eq!(a.degree, b.degree);
-        let mut out_coeffs = Vec::with_capacity(a.degree);
-        for i in 0..a.degree {
+        a: &Self::FieldPoint,
+        b: &Self::FieldPoint,
+    ) -> Result<Self::FieldPoint, Error> {
+        assert_eq!(a.coeffs.len(), b.coeffs.len());
+        let mut out_coeffs = Vec::with_capacity(a.coeffs.len());
+        for i in 0..a.coeffs.len() {
             let coeff = self.fp_chip.sub_no_carry(layouter, &a.coeffs[i], &b.coeffs[i])?;
             out_coeffs.push(coeff);
         }
-        Ok(FqPoint::construct(out_coeffs, a.degree))
+        Ok(Self::FieldPoint::construct(out_coeffs))
     }
 
     fn negate(
         &mut self,
         layouter: &mut impl Layouter<F>,
-        a: &FqPoint<F>,
-    ) -> Result<FqPoint<F>, Error> {
-        let mut out_coeffs = Vec::with_capacity(a.degree);
+        a: &Self::FieldPoint,
+    ) -> Result<Self::FieldPoint, Error> {
+        let mut out_coeffs = Vec::with_capacity(a.coeffs.len());
         for a_coeff in &a.coeffs {
             let out_coeff = self.fp_chip.negate(layouter, a_coeff)?;
             out_coeffs.push(out_coeff);
         }
-        Ok(FqPoint::construct(out_coeffs, a.degree))
+        Ok(Self::FieldPoint::construct(out_coeffs))
     }
 
     fn scalar_mul_no_carry(
         &mut self,
         layouter: &mut impl Layouter<F>,
-        a: &FqPoint<F>,
+        a: &Self::FieldPoint,
         b: F,
-    ) -> Result<FqPoint<F>, Error> {
-        let mut out_coeffs = Vec::with_capacity(a.degree);
-        for i in 0..a.degree {
+    ) -> Result<Self::FieldPoint, Error> {
+        let mut out_coeffs = Vec::with_capacity(a.coeffs.len());
+        for i in 0..a.coeffs.len() {
             let coeff = self.fp_chip.scalar_mul_no_carry(layouter, &a.coeffs[i], b)?;
             out_coeffs.push(coeff);
         }
-        Ok(FqPoint::construct(out_coeffs, a.degree))
+        Ok(Self::FieldPoint::construct(out_coeffs))
     }
 
     // w^6 = u + xi for xi = 9
     fn mul_no_carry(
         &mut self,
         layouter: &mut impl Layouter<F>,
-        a: &FqPoint<F>,
-        b: &FqPoint<F>,
-    ) -> Result<FqPoint<F>, Error> {
+        a: &Self::FieldPoint,
+        b: &Self::FieldPoint,
+    ) -> Result<Self::FieldPoint, Error> {
         let deg = 6;
         let xi = XI_0;
-        assert_eq!(a.degree, 12);
-        assert_eq!(b.degree, 12);
+        assert_eq!(a.coeffs.len(), 12);
+        assert_eq!(b.coeffs.len(), 12);
 
         // a = \sum_{i = 0}^5 (a_i * w^i + a_{i + 6} * w^i * u)
         // b = \sum_{i = 0}^5 (b_i * w^i + b_{i + 6} * w^i * u)
@@ -334,13 +320,13 @@ where
                 out_coeffs.push(a0b1_plus_a1b0[i].clone());
             }
         }
-        Ok(FqPoint::construct(out_coeffs, 12))
+        Ok(Self::FieldPoint::construct(out_coeffs))
     }
 
     fn check_carry_mod_to_zero(
         &mut self,
         layouter: &mut impl Layouter<F>,
-        a: &FqPoint<F>,
+        a: &Self::FieldPoint,
     ) -> Result<(), Error> {
         for coeff in &a.coeffs {
             self.fp_chip.check_carry_mod_to_zero(layouter, coeff)?;
@@ -351,22 +337,22 @@ where
     fn carry_mod(
         &mut self,
         layouter: &mut impl Layouter<F>,
-        a: &FqPoint<F>,
-    ) -> Result<FqPoint<F>, Error> {
-        let mut out_coeffs = Vec::with_capacity(a.degree);
+        a: &Self::FieldPoint,
+    ) -> Result<Self::FieldPoint, Error> {
+        let mut out_coeffs = Vec::with_capacity(a.coeffs.len());
         for a_coeff in &a.coeffs {
             let coeff = self.fp_chip.carry_mod(layouter, a_coeff)?;
             out_coeffs.push(coeff);
         }
-        Ok(FqPoint::construct(out_coeffs, a.degree))
+        Ok(Self::FieldPoint::construct(out_coeffs))
     }
 
     fn range_check(
         &mut self,
         layouter: &mut impl Layouter<F>,
-        a: &FqPoint<F>,
+        a: &Self::FieldPoint,
     ) -> Result<(), Error> {
-        let mut out_coeffs = Vec::with_capacity(a.degree);
+        let mut out_coeffs = Vec::with_capacity(a.coeffs.len());
         for a_coeff in &a.coeffs {
             let coeff = self.fp_chip.range_check(layouter, a_coeff)?;
             out_coeffs.push(coeff);
@@ -377,7 +363,7 @@ where
     fn is_soft_zero(
         &mut self,
         layouter: &mut impl Layouter<F>,
-        a: &FqPoint<F>,
+        a: &Self::FieldPoint,
     ) -> Result<AssignedCell<F, F>, Error> {
         let mut prev = None;
         for a_coeff in &a.coeffs {
@@ -396,7 +382,7 @@ where
     fn is_soft_nonzero(
         &mut self,
         layouter: &mut impl Layouter<F>,
-        a: &FqPoint<F>,
+        a: &Self::FieldPoint,
     ) -> Result<AssignedCell<F, F>, Error> {
         let mut prev = None;
         for a_coeff in &a.coeffs {
