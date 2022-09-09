@@ -81,29 +81,75 @@ impl<'a, 'b, F: FieldExt> Fp12Chip<'a, 'b, F> {
     }
 
     // exp is in little-endian
-    pub fn pow<S: AsRef<[u64]>>(
+    pub fn pow(
         &mut self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
-        exp: S,
+        mut exp: Vec<u64>,
     ) -> Result<FqPoint<F>, Error> {
-        let mut res = a.clone();
-        let mut is_started = false;
-        for e in exp.as_ref().iter().rev() {
-            for i in (0..64).rev() {
-                if is_started {
-                    res = self.mul(layouter, &res, &res)?;
-                }
+        // https://en.wikipedia.org/wiki/Non-adjacent_form
+        // NAF for exp:
+        let mut naf: Vec<i8> = Vec::with_capacity(64 * exp.len());
+        let len = exp.len();
 
-                if ((*e >> i) & 1) == 1 {
-                    if is_started {
-                        res = self.mul(layouter, &res, a)?;
-                    } else {
-                        is_started = true;
+        // generate the NAF for exp
+        for idx in 0..len {
+            let mut e: u64 = exp[idx];
+            for i in 0..64 {
+                if e & 1 == 1 {
+                    let z = 2i8 - (e % 4) as i8;
+                    e = e / 2;
+                    if z == -1 {
+                        e += 1;
                     }
+                    naf.push(z);
+                } else {
+                    naf.push(0);
+                    e = e / 2;
+                }
+            }
+            if e != 0 {
+                assert_eq!(e, 1);
+                let mut j = idx + 1;
+                while j < exp.len() && exp[j] == u64::MAX {
+                    exp[j] = 0;
+                    j += 1;
+                }
+                if j < exp.len() {
+                    exp[j] += 1;
+                } else {
+                    exp.push(1);
                 }
             }
         }
+        if exp.len() != len {
+            assert_eq!(len, exp.len() + 1);
+            assert!(exp[len] == 1);
+            naf.push(1);
+        }
+
+        let mut res = a.clone();
+        let mut is_started = false;
+        for &z in naf.iter().rev() {
+            if is_started {
+                res = self.mul(layouter, &res, &res)?;
+            }
+
+            if z != 0 {
+                assert!(z == 1 || z == -1);
+                if is_started {
+                    res = if z == 1 {
+                        self.mul(layouter, &res, a)?
+                    } else {
+                        self.divide(layouter, &res, a)?
+                    };
+                } else {
+                    assert_eq!(z, 1);
+                    is_started = true;
+                }
+            }
+        }
+
         Ok(res)
     }
 
@@ -117,11 +163,11 @@ impl<'a, 'b, F: FieldExt> Fp12Chip<'a, 'b, F> {
         // x = BN_X
 
         // m^x
-        let mx = self.pow(layouter, m, &[BN_X])?;
+        let mx = self.pow(layouter, m, vec![BN_X])?;
         // m^{x^2}
-        let mx2 = self.pow(layouter, &mx, &[BN_X])?;
+        let mx2 = self.pow(layouter, &mx, vec![BN_X])?;
         // m^{x^3}
-        let mx3 = self.pow(layouter, &mx2, &[BN_X])?;
+        let mx3 = self.pow(layouter, &mx2, vec![BN_X])?;
 
         // m^p
         let mp = self.frobenius_map(layouter, m, 1)?;
@@ -189,7 +235,7 @@ impl<'a, 'b, F: FieldExt> Fp12Chip<'a, 'b, F> {
 
     // out = in^{(q^12 - 1)/r}
     pub fn final_exp(
-        & mut self,
+        &mut self,
         layouter: &mut impl Layouter<F>,
         a: &FqPoint<F>,
     ) -> Result<FqPoint<F>, Error> {

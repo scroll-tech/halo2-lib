@@ -107,7 +107,7 @@ macro_rules! create_pairing_circuit {
                     for fc in &f.coeffs {
                         assert_eq!(fc.value, fc.truncation.to_bigint());
                     }
-                    /*if self.P != None {
+                    /* if self.P != None {
                         let actual_f = pairing(&self.P.unwrap(), &self.Q.unwrap());
                         let f_val: Vec<String> = f
                             .coeffs
@@ -169,8 +169,8 @@ macro_rules! create_pairing_circuit {
 #[cfg(test)]
 #[test]
 fn test_pairing() {
-    let k = 14;
-    create_pairing_circuit!(FpStrategy::CustomVerticalCRT, 291, 32, 1, 13, 91, 3);
+    let k = 23;
+    create_pairing_circuit!(FpStrategy::Simple, 1, 0, 1, 22, 88, 3);
     let mut rng = rand::thread_rng();
 
     let P = Some(G1Affine::random(&mut rng));
@@ -186,7 +186,6 @@ fn test_pairing() {
 #[cfg(test)]
 #[test]
 fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
-    /*
     // Parameters for RangeStrategy::Vertical
     const DEGREE: [u32; 11] = [23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13];
     const NUM_ADVICE: [usize; 11] = [1, 2, 3, 5, 9, 18, 35, 71, 145, 291, 615];
@@ -194,8 +193,8 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
     const NUM_FIXED: [usize; 11] = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
     const LOOKUP_BITS: [usize; 11] = [22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12];
     const LIMB_BITS: [usize; 11] = [88, 88, 88, 88, 90, 88, 88, 90, 90, 91, 88];
-    */
 
+    /*
     // Parameters for RangeStrategy::CustomVertical
     const DEGREE: [u32; 10] = [22, 21, 20, 19, 18, 17, 16, 15, 14, 13];
     const NUM_ADVICE: [usize; 10] = [1, 2, 5, 9, 18, 35, 71, 145, 291, 615];
@@ -203,6 +202,7 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
     const NUM_FIXED: [usize; 10] = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
     const LOOKUP_BITS: [usize; 10] = [21, 20, 19, 18, 17, 16, 15, 14, 13, 12];
     const LIMB_BITS: [usize; 10] = [88, 88, 88, 88, 88, 88, 88, 88, 88, 88];
+    */
 
     let mut folder = std::path::PathBuf::new();
     folder.push("./src/bn254");
@@ -211,24 +211,44 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
     folder.pop();
     write!(fs_results, "degree,num_advice,num_lookup,num_fixed,lookup_bits,limb_bits,num_limbs,vk_size,proof_time,proof_size,verify_time\n")?;
     folder.push("data");
+    if !folder.is_dir() {
+        std::fs::create_dir(folder.as_path())?;
+    }
+
+    let mut params_folder = std::path::PathBuf::new();
+    params_folder.push("./params");
+    if !params_folder.is_dir() {
+        std::fs::create_dir(params_folder.as_path())?;
+    }
+
     seq!(I in 0..10 {
         {
-        println!("----------------------------------------------------");
+        println!("---------------------- degree = {} ------------------------------", DEGREE[I]);
         let mut rng = rand::thread_rng();
         let start = Instant::now();
 
-        create_pairing_circuit!(FpStrategy::CustomVerticalCRT, NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3);
-        let params = Params::<G1Affine>::unsafe_setup::<Bn256>(DEGREE[I]);
+        create_pairing_circuit!(FpStrategy::Simple, NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3);
+        let params = {
+            params_folder.push(format!("bn254_{}.params", DEGREE[I]));
+            let fd = std::fs::File::open(params_folder.as_path());
+            let params = if let Ok(mut f) = fd {
+                println!("Found existing params file. Reading params...");
+                Params::<G1Affine>::read(&mut f).unwrap()
+            } else {
+                println!("Creating new params file...");
+                let mut f = std::fs::File::create(params_folder.as_path())?;
+                let params = Params::<G1Affine>::unsafe_setup::<Bn256>(DEGREE[I]);
+                params.write(&mut f).unwrap();
+                params
+            };
+            params_folder.pop();
+            params
+        };
 
         let circuit = PairingCircuit::<Fr>::default();
         let circuit_duration = start.elapsed();
         println!("Time elapsed in circuit & params construction: {:?}", circuit_duration);
-        {
-            folder.push(format!("pairing_circuit_{}.params", DEGREE[I]));
-            let mut fd = std::fs::File::create(folder.as_path()).unwrap();
-            folder.pop();
-            params.write(&mut fd).unwrap();
-        }
+
         let vk = keygen_vk(&params, &circuit)?;
         let vk_duration = start.elapsed();
         println!("Time elapsed in generating vkey: {:?}", vk_duration - circuit_duration);

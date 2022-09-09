@@ -318,7 +318,7 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
 
     // Parameters for use with FpStrategy::CustomVerticalCRT
     const DEGREE: [u32; 9] = [19, 18, 17, 16, 15, 14, 13, 12, 11];
-    const NUM_ADVICE: [usize; 9] = [1, 2, 3, 7, 13, 26, 51, 101, 208];
+    const NUM_ADVICE: [usize; 9] = [1, 2, 3, 6, 12, 25, 49, 98, 201];
     const NUM_LOOKUP: [usize; 9] = [0, 1, 1, 2, 3, 6, 12, 24, 53];
     const NUM_FIXED: [usize; 9] = [1, 1, 1, 1, 1, 1, 1, 2, 5];
     const LOOKUP_BITS: [usize; 9] = [18, 17, 16, 15, 14, 13, 12, 11, 10];
