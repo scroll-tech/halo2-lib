@@ -170,8 +170,8 @@ macro_rules! create_pairing_circuit {
 #[cfg(test)]
 #[test]
 fn test_pairing() {
-    let k = 23;
-    create_pairing_circuit!(FpStrategy::Simple, 1, 0, 1, 22, 88, 3);
+    let k = 16;
+    create_pairing_circuit!(FpStrategy::Simple, 111, 16, 1, 14, 90, 3);
     let mut rng = rand::thread_rng();
 
     let P = Some(G1Affine::random(&mut rng));
@@ -187,23 +187,23 @@ fn test_pairing() {
 #[cfg(test)]
 #[test]
 fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
-    // Parameters for RangeStrategy::Vertical
-    const DEGREE: [u32; 11] = [23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13];
-    const NUM_ADVICE: [usize; 11] = [1, 2, 3, 5, 9, 18, 35, 71, 145, 291, 615];
-    const NUM_LOOKUP: [usize; 11] = [0, 1, 1, 1, 1, 2, 4, 7, 16, 32, 74];
-    const NUM_FIXED: [usize; 11] = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
-    const LOOKUP_BITS: [usize; 11] = [22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12];
-    const LIMB_BITS: [usize; 11] = [88, 88, 88, 88, 90, 88, 88, 90, 90, 91, 88];
-
     /*
-    // Parameters for RangeStrategy::CustomVertical
+    // Parameters for FpStrategy::Simple
     const DEGREE: [u32; 10] = [22, 21, 20, 19, 18, 17, 16, 15, 14, 13];
-    const NUM_ADVICE: [usize; 10] = [1, 2, 5, 9, 18, 35, 71, 145, 291, 615];
+    const NUM_ADVICE: [usize; 10] = [1, 2, 4, 7, 13, 27, 53, 111, 223, 465];
+    const NUM_LOOKUP: [usize; 10] = [0, 1, 1, 1, 2, 4, 7, 16, 32, 74];
+    const NUM_FIXED: [usize; 10] = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
+    const LOOKUP_BITS: [usize; 10] = [21, 20, 19, 18, 17, 16, 15, 14, 13, 12];
+    const LIMB_BITS: [usize; 10] = [88, 88, 88, 90, 88, 88, 90, 90, 91, 88];
+    */
+
+    // Parameters for FpStrategy::CustomVerticalCRT
+    const DEGREE: [u32; 10] = [22, 21, 20, 19, 18, 17, 16, 15, 14, 13];
+    const NUM_ADVICE: [usize; 10] = [1, 2, 3, 5, 10, 19, 37, 75, 149, 307];
     const NUM_LOOKUP: [usize; 10] = [0, 1, 1, 1, 2, 4, 7, 16, 32, 74];
     const NUM_FIXED: [usize; 10] = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
     const LOOKUP_BITS: [usize; 10] = [21, 20, 19, 18, 17, 16, 15, 14, 13, 12];
     const LIMB_BITS: [usize; 10] = [88, 88, 88, 88, 88, 88, 88, 88, 88, 88];
-    */
 
     let mut folder = std::path::PathBuf::new();
     folder.push("./src/bn254");
@@ -228,7 +228,7 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
         let mut rng = rand::thread_rng();
         let start = Instant::now();
 
-        create_pairing_circuit!(FpStrategy::Simple, NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3);
+        create_pairing_circuit!(FpStrategy::CustomVerticalCRT, NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3);
         let params = {
             params_folder.push(format!("bn254_{}.params", DEGREE[I]));
             let fd = std::fs::File::open(params_folder.as_path());
