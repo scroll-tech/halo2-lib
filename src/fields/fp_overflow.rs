@@ -12,8 +12,8 @@ use num_traits::Num;
 use super::{FieldChip, PrimeFieldChip, Selectable};
 use crate::bigint::{
     add_no_carry, big_is_equal, big_is_zero, carry_mod, check_carry_mod_to_zero, inner_product,
-    mul_no_carry, scalar_mul_no_carry, select, sub, sub_no_carry, CRTInteger, FixedCRTInteger,
-    OverflowInteger,
+    mul_no_carry, scalar_mul_and_add_no_carry, scalar_mul_no_carry, select, sub, sub_no_carry,
+    CRTInteger, FixedCRTInteger, OverflowInteger,
 };
 use crate::fields::fp::{FpChip, FpConfig};
 use crate::gates::range::{RangeChip, RangeConfig};
@@ -216,6 +216,16 @@ impl<'a, F: FieldExt, Fp: PrimeField> FieldChip<F> for FpOverflowChip<'a, F, Fp>
         b: F,
     ) -> Result<OverflowInteger<F>, Error> {
         scalar_mul_no_carry::assign(self.range.gate(), layouter, a, b)
+    }
+
+    fn scalar_mul_and_add_no_carry(
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        a: &OverflowInteger<F>,
+        b: &OverflowInteger<F>,
+        c: F,
+    ) -> Result<OverflowInteger<F>, Error> {
+        scalar_mul_and_add_no_carry::assign(self.range.gate(), layouter, a, b, c)
     }
 
     fn mul_no_carry(

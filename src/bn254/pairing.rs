@@ -17,17 +17,15 @@ use std::marker::PhantomData;
 use super::{Fp12Chip, Fp2Chip, FpChip, FpConfig, FpPoint, FqPoint};
 use crate::{
     bigint::CRTInteger,
-    fields::fp::FpStrategy,
+    ecc::{EccChip, EccPoint},
+    fields::{fp::FpStrategy, fp12::mul_no_carry_w6},
+    fields::{FieldChip, FieldExtPoint, PrimeFieldChip},
     gates::range::RangeStrategy,
+    gates::{range::RangeChip, GateInstructions, RangeInstructions},
     utils::{
         bigint_to_fe, biguint_to_fe, decompose_bigint_option, decompose_biguint, fe_to_bigint,
         fe_to_biguint, modulus,
     },
-};
-use crate::{
-    ecc::{EccChip, EccPoint},
-    fields::{FieldChip, FieldExtPoint, PrimeFieldChip},
-    gates::{range::RangeChip, GateInstructions, RangeInstructions},
 };
 
 const XI_0: u64 = 9;
@@ -75,24 +73,6 @@ pub fn sparse_line_function_unequal<F: FieldExt>(
         .collect())
 }
 
-// multiply (a0 + a1 * u) * (XI0 + u) without carry
-pub fn mul_no_carry_w6<F: FieldExt>(
-    fp_chip: &mut FpChip<F>,
-    layouter: &mut impl Layouter<F>,
-    a: &FieldExtPoint<FpPoint<F>>,
-) -> Result<FieldExtPoint<FpPoint<F>>, Error> {
-    assert_eq!(a.coeffs.len(), 2);
-    let (a0, a1) = (&a.coeffs[0], &a.coeffs[1]);
-    // (a0 + a1 u) * (XI_0 + u) = (a0 * XI_0 - a1) + (a1 * XI_0 + a0) u     with u^2 = -1
-    // This should fit in the overflow representation if limb_bits is large enough
-    let a0_xi0 = fp_chip.scalar_mul_no_carry(layouter, a0, F::from(XI_0))?;
-    let out0_0_nocarry = fp_chip.sub_no_carry(layouter, &a0_xi0, a1)?;
-    let a1_xi0 = fp_chip.scalar_mul_no_carry(layouter, a1, F::from(XI_0))?;
-    let out0_1_nocarry = fp_chip.add_no_carry(layouter, &a1_xi0, a0)?;
-    let out0_0 = fp_chip.carry_mod(layouter, &out0_0_nocarry)?;
-    let out0_1 = fp_chip.carry_mod(layouter, &out0_1_nocarry)?;
-    Ok(FqPoint::construct(vec![out0_0, out0_1]))
-}
 // Assuming curve is of form Y^2 = X^3 + b (a = 0) to save operations
 // Inputs:
 //  Q = (x, y) is a point in E(Fp2)
@@ -118,7 +98,7 @@ pub fn sparse_line_function_equal<F: FieldExt>(
     let y_sq = fp2_chip.mul_no_carry(layouter, y, y)?;
     let two_y_sq = fp2_chip.scalar_mul_no_carry(layouter, &y_sq, F::from(2))?;
     let out0_left = fp2_chip.sub_no_carry(layouter, &three_x_cu, &two_y_sq)?;
-    let out0 = mul_no_carry_w6(&mut fp2_chip.fp_chip, layouter, &out0_left)?;
+    let out0 = mul_no_carry_w6::<F, FpChip<F>, XI_0>(fp2_chip.fp_chip, layouter, &out0_left)?;
 
     let x_sq_Px = fp2_chip.fp_mul_no_carry(layouter, &x_sq, &P.x)?;
     let out4 = fp2_chip.scalar_mul_no_carry(layouter, &x_sq_Px, -F::from(3))?;
@@ -177,7 +157,7 @@ pub fn sparse_fp12_multiply<F: FieldExt>(
         // prod_2d[i] + prod_2d[i+6] * w^6
         let prod_nocarry = if i != 5 {
             let eval_w6 = prod_2d[i + 6].as_ref().map(|a| {
-                mul_no_carry_w6(&mut fp2_chip.fp_chip, layouter, a)
+                mul_no_carry_w6::<F, FpChip<F>, XI_0>(fp2_chip.fp_chip, layouter, a)
                     .expect("mul_no_carry_w6 should not fail")
             });
             match (prod_2d[i].as_ref(), eval_w6) {

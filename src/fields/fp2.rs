@@ -24,7 +24,7 @@ use crate::{
     gates::range::RangeChip,
 };
 
-use super::{FieldChip, FieldExtConstructor, FieldExtPoint, PrimeFieldChip};
+use super::{FieldChip, FieldExtConstructor, FieldExtPoint, PrimeFieldChip, Selectable};
 
 /// Represent Fp2 point as `FieldExtPoint` with degree = 2
 /// `Fp2 = Fp[u] / (u^2 + 1)`
@@ -84,6 +84,25 @@ where
 
         let neg_a0 = self.fp_chip.negate(layouter, &a.coeffs[0])?;
         Ok(FieldExtPoint::construct(vec![neg_a0, a.coeffs[1].clone()]))
+    }
+
+    pub fn select(
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        a: &FieldExtPoint<FpChip::FieldPoint>,
+        b: &FieldExtPoint<FpChip::FieldPoint>,
+        sel: &AssignedCell<F, F>,
+    ) -> Result<FieldExtPoint<FpChip::FieldPoint>, Error>
+    where
+        FpChip: Selectable<F, Point = FpChip::FieldPoint>,
+    {
+        let coeffs: Vec<FpChip::FieldPoint> = a
+            .coeffs
+            .iter()
+            .zip(b.coeffs.iter())
+            .map(|(a, b)| self.fp_chip.select(layouter, a, b, sel).expect("select should not fail"))
+            .collect();
+        Ok(FieldExtPoint::construct(coeffs))
     }
 }
 
@@ -208,6 +227,26 @@ where
         Ok(Self::FieldPoint::construct(out_coeffs))
     }
 
+    fn scalar_mul_and_add_no_carry(
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        a: &Self::FieldPoint,
+        b: &Self::FieldPoint,
+        c: F,
+    ) -> Result<Self::FieldPoint, Error> {
+        let mut out_coeffs = Vec::with_capacity(a.coeffs.len());
+        for i in 0..a.coeffs.len() {
+            let coeff = self.fp_chip.scalar_mul_and_add_no_carry(
+                layouter,
+                &a.coeffs[i],
+                &b.coeffs[i],
+                c,
+            )?;
+            out_coeffs.push(coeff);
+        }
+        Ok(Self::FieldPoint::construct(out_coeffs))
+    }
+
     fn mul_no_carry(
         &mut self,
         layouter: &mut impl Layouter<F>,
@@ -308,6 +347,25 @@ where
             if let Some(p) = prev {
                 let new =
                     self.fp_chip.range().gate().or(layouter, &Existing(&coeff), &Existing(&p))?;
+                prev = Some(new);
+            } else {
+                prev = Some(coeff);
+            }
+        }
+        Ok(prev.unwrap())
+    }
+
+    fn is_zero(
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        a: &Self::FieldPoint,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        let mut prev = None;
+        for a_coeff in &a.coeffs {
+            let coeff = self.fp_chip.is_zero(layouter, a_coeff)?;
+            if let Some(p) = prev {
+                let new =
+                    self.fp_chip.range().gate().and(layouter, &Existing(&coeff), &Existing(&p))?;
                 prev = Some(new);
             } else {
                 prev = Some(coeff);

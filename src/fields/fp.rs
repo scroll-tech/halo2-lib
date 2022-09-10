@@ -14,8 +14,8 @@ use super::{FieldChip, PrimeFieldChip, Selectable};
 use crate::{
     bigint::{
         add_no_carry, big_is_equal, big_is_zero, big_less_than, carry_mod, check_carry_mod_to_zero,
-        inner_product, mul_no_carry, scalar_mul_no_carry, select, sub, sub_no_carry, BigIntConfig,
-        BigIntStrategy, CRTInteger, FixedCRTInteger, OverflowInteger,
+        inner_product, mul_no_carry, scalar_mul_and_add_no_carry, scalar_mul_no_carry, select, sub,
+        sub_no_carry, BigIntConfig, BigIntStrategy, CRTInteger, FixedCRTInteger, OverflowInteger,
     },
     gates::QuantumCell::{Constant, Existing, Witness},
     gates::{
@@ -262,6 +262,16 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpChip<'_, F, Fp> {
         scalar_mul_no_carry::crt(self.range.gate(), layouter, a, b)
     }
 
+    fn scalar_mul_and_add_no_carry(
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        a: &CRTInteger<F>,
+        b: &CRTInteger<F>,
+        c: F,
+    ) -> Result<CRTInteger<F>, Error> {
+        scalar_mul_and_add_no_carry::crt(self.range.gate(), layouter, a, b, c)
+    }
+
     fn mul_no_carry(
         &mut self,
         layouter: &mut impl Layouter<F>,
@@ -346,6 +356,35 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpChip<'_, F, Fp> {
         let res =
             self.range.gate().and(layouter, &Existing(&is_nonzero), &Existing(&range_check))?;
         Ok(res)
+    }
+
+    // constrain the witness `a` to be `< p`
+    // then check if `a` is 0
+    fn is_zero(
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        a: &CRTInteger<F>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        // underflow != 0 iff carry < p
+        let p = self.load_constant(layouter, BigInt::from(self.p.clone()))?;
+        let (diff, underflow) = sub::crt(self.range, layouter, a, &p)?;
+        let is_underflow_zero = self.range.is_zero(layouter, &underflow)?;
+        layouter.assign_region(
+            || "",
+            |mut region| {
+                self.range.gate.assign_region_smart(
+                    vec![Constant(F::from(0))],
+                    vec![],
+                    vec![],
+                    vec![(&is_underflow_zero, 0)],
+                    0,
+                    &mut region,
+                )?;
+                Ok(())
+            },
+        )?;
+
+        big_is_zero::crt(self.range, layouter, a)
     }
 }
 

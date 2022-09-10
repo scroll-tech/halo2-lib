@@ -104,9 +104,9 @@ macro_rules! create_pairing_circuit {
                 // test optimal ate pairing
                 {
                     let f = chip.pairing(&mut layouter, &Q_assigned, &P_assigned)?;
-                    /* for fc in &f.coeffs {
+                    for fc in &f.coeffs {
                         assert_eq!(fc.value, fc.truncation.to_bigint());
-                    }*/
+                    }
                     if self.P != None {
                         let actual_f = pairing(&self.P.unwrap(), &self.Q.unwrap());
                         let f_val: Vec<String> = f

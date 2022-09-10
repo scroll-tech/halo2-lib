@@ -78,11 +78,21 @@ pub trait FieldChip<F: FieldExt> {
         a: &Self::FieldPoint,
     ) -> Result<Self::FieldPoint, Error>;
 
+    /// a * b
     fn scalar_mul_no_carry(
         &mut self,
         layouter: &mut impl Layouter<F>,
         a: &Self::FieldPoint,
         b: F,
+    ) -> Result<Self::FieldPoint, Error>;
+
+    /// a * c + b
+    fn scalar_mul_and_add_no_carry(
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        a: &Self::FieldPoint,
+        b: &Self::FieldPoint,
+        c: F,
     ) -> Result<Self::FieldPoint, Error>;
 
     fn mul_no_carry(

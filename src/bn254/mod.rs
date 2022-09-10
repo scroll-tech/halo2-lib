@@ -17,7 +17,7 @@ type FpPoint<F> = CRTInteger<F>;
 // type FpPoint<F> = OverflowInteger<F>;
 type FqPoint<F> = FieldExtPoint<FpPoint<F>>;
 type Fp2Chip<'a, 'b, F> = fp2::Fp2Chip<'a, 'b, F, FpChip<'b, F>, Fq2>;
-type Fp12Chip<'a, 'b, F> = fp12::Fp12Chip<'a, 'b, F, FpChip<'b, F>, Fq12>;
+type Fp12Chip<'a, 'b, F> = fp12::Fp12Chip<'a, 'b, F, FpChip<'b, F>, Fq12, 9>;
 
 impl FieldExtConstructor<Fq, 2> for Fq2 {
     fn new(c: [Fq; 2]) -> Self {

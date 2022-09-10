@@ -29,20 +29,26 @@ use crate::{
 
 use super::{FieldChip, FieldExtConstructor, FieldExtPoint, PrimeFieldChip};
 
-const XI_0: u64 = 9;
 /// Represent Fp12 point as FqPoint with degree = 12
 /// `Fp12 = Fp2[w] / (w^6 - u - xi)`
 /// This implementation assumes p = 3 (mod 4) in order for the polynomial u^2 + 1 to
 /// be irreducible over Fp; i.e., in order for -1 to not be a square (quadratic residue) in Fp
 /// This means we store an Fp12 point as `\sum_{i = 0}^6 (a_{i0} + a_{i1} * u) * w^i`
 /// This is encoded in an FqPoint of degree 12 as `(a_{00}, ..., a_{50}, a_{01}, ..., a_{51})`
-pub struct Fp12Chip<'a, 'b, F: FieldExt, FpChip: PrimeFieldChip<'b, F>, Fp12: Field> {
+pub struct Fp12Chip<
+    'a,
+    'b,
+    F: FieldExt,
+    FpChip: PrimeFieldChip<'b, F>,
+    Fp12: Field,
+    const XI_0: u64,
+> {
     pub fp_chip: &'a mut FpChip,
     _f: PhantomData<&'b F>,
     _fp12: PhantomData<Fp12>,
 }
 
-impl<'a, 'b, F, FpChip, Fp12> Fp12Chip<'a, 'b, F, FpChip, Fp12>
+impl<'a, 'b, F, FpChip, Fp12, const XI_0: u64> Fp12Chip<'a, 'b, F, FpChip, Fp12, XI_0>
 where
     F: FieldExt,
     FpChip: PrimeFieldChip<'b, F>,
@@ -106,7 +112,24 @@ where
     }
 }
 
-impl<'a, 'b, F, FpChip, Fp12> FieldChip<F> for Fp12Chip<'a, 'b, F, FpChip, Fp12>
+/// multiply (a0 + a1 * u) * (XI0 + u) without carry
+pub fn mul_no_carry_w6<F: FieldExt, FC: FieldChip<F>, const XI_0: u64>(
+    fp_chip: &mut FC,
+    layouter: &mut impl Layouter<F>,
+    a: &FieldExtPoint<FC::FieldPoint>,
+) -> Result<FieldExtPoint<FC::FieldPoint>, Error> {
+    assert_eq!(a.coeffs.len(), 2);
+    let (a0, a1) = (&a.coeffs[0], &a.coeffs[1]);
+    // (a0 + a1 u) * (XI_0 + u) = (a0 * XI_0 - a1) + (a1 * XI_0 + a0) u     with u^2 = -1
+    // This should fit in the overflow representation if limb_bits is large enough
+    let a0_xi0 = fp_chip.scalar_mul_no_carry(layouter, a0, F::from(XI_0))?;
+    let out0_0_nocarry = fp_chip.sub_no_carry(layouter, &a0_xi0, a1)?;
+    let out0_1_nocarry = fp_chip.scalar_mul_and_add_no_carry(layouter, a1, a0, F::from(XI_0))?;
+    Ok(FieldExtPoint::construct(vec![out0_0_nocarry, out0_1_nocarry]))
+}
+
+impl<'a, 'b, F, FpChip, Fp12, const XI_0: u64> FieldChip<F>
+    for Fp12Chip<'a, 'b, F, FpChip, Fp12, XI_0>
 where
     F: FieldExt,
     FpChip: PrimeFieldChip<'b, F, WitnessType = Option<BigInt>, ConstantType = BigInt>,
@@ -219,6 +242,26 @@ where
         let mut out_coeffs = Vec::with_capacity(a.coeffs.len());
         for i in 0..a.coeffs.len() {
             let coeff = self.fp_chip.scalar_mul_no_carry(layouter, &a.coeffs[i], b)?;
+            out_coeffs.push(coeff);
+        }
+        Ok(Self::FieldPoint::construct(out_coeffs))
+    }
+
+    fn scalar_mul_and_add_no_carry(
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        a: &Self::FieldPoint,
+        b: &Self::FieldPoint,
+        c: F,
+    ) -> Result<Self::FieldPoint, Error> {
+        let mut out_coeffs = Vec::with_capacity(a.coeffs.len());
+        for i in 0..a.coeffs.len() {
+            let coeff = self.fp_chip.scalar_mul_and_add_no_carry(
+                layouter,
+                &a.coeffs[i],
+                &b.coeffs[i],
+                c,
+            )?;
             out_coeffs.push(coeff);
         }
         Ok(Self::FieldPoint::construct(out_coeffs))
@@ -397,6 +440,25 @@ where
         }
         Ok(prev.unwrap())
     }
+
+    fn is_zero(
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        a: &Self::FieldPoint,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        let mut prev = None;
+        for a_coeff in &a.coeffs {
+            let coeff = self.fp_chip.is_zero(layouter, a_coeff)?;
+            if let Some(p) = prev {
+                let new =
+                    self.fp_chip.range().gate().and(layouter, &Existing(&coeff), &Existing(&p))?;
+                prev = Some(new);
+            } else {
+                prev = Some(coeff);
+            }
+        }
+        Ok(prev.unwrap())
+    }
 }
 
 #[cfg(test)]
@@ -430,6 +492,7 @@ pub(crate) mod tests {
 
     const NUM_ADVICE: usize = 2;
     const NUM_FIXED: usize = 2;
+    const XI_0: u64 = 9;
 
     impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         type Config = FpConfig<F>;
@@ -461,15 +524,15 @@ pub(crate) mod tests {
             let mut range_chip = RangeChip::<F>::construct(config.range_config.clone(), true);
             let mut fp_chip = FpChip::<F, Fq>::construct(config, &mut range_chip, true);
             fp_chip.load_lookup_table(&mut layouter)?;
-            let mut chip = Fp12Chip::<F, FpChip<F, Fq>, Fq12>::construct(&mut fp_chip);
+            let mut chip = Fp12Chip::<F, FpChip<F, Fq>, Fq12, XI_0>::construct(&mut fp_chip);
 
             let a_assigned = chip.load_private(
                 &mut layouter,
-                Fp12Chip::<F, FpChip<F, Fq>, Fq12>::fe_to_witness(&self.a),
+                Fp12Chip::<F, FpChip<F, Fq>, Fq12, XI_0>::fe_to_witness(&self.a),
             )?;
             let b_assigned = chip.load_private(
                 &mut layouter,
-                Fp12Chip::<F, FpChip<F, Fq>, Fq12>::fe_to_witness(&self.b),
+                Fp12Chip::<F, FpChip<F, Fq>, Fq12, XI_0>::fe_to_witness(&self.b),
             )?;
 
             // test fp_multiply
