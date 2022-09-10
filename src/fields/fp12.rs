@@ -329,17 +329,13 @@ where
         let mut out_coeffs = Vec::with_capacity(12);
         for i in 0..6 {
             if i < 5 {
-                let coeff1 = self.fp_chip.sub_no_carry(
-                    layouter,
-                    &a0b0_minus_a1b1[i],
-                    &a0b1_plus_a1b0[i + 6],
-                )?;
-                let coeff2 = self.fp_chip.scalar_mul_no_carry(
+                let mut coeff = self.fp_chip.scalar_mul_and_add_no_carry(
                     layouter,
                     &a0b0_minus_a1b1[i + 6],
+                    &a0b0_minus_a1b1[i],
                     F::from(XI_0),
                 )?;
-                let coeff = self.fp_chip.add_no_carry(layouter, &coeff1, &coeff2)?;
+                coeff = self.fp_chip.sub_no_carry(layouter, &coeff, &a0b1_plus_a1b0[i + 6])?;
                 out_coeffs.push(coeff);
             } else {
                 out_coeffs.push(a0b0_minus_a1b1[i].clone());
@@ -347,17 +343,17 @@ where
         }
         for i in 0..6 {
             if i < 5 {
-                let coeff1 = self.fp_chip.add_no_carry(
+                let mut coeff = self.fp_chip.add_no_carry(
                     layouter,
                     &a0b1_plus_a1b0[i],
                     &a0b0_minus_a1b1[i + 6],
                 )?;
-                let coeff2 = self.fp_chip.scalar_mul_no_carry(
+                coeff = self.fp_chip.scalar_mul_and_add_no_carry(
                     layouter,
                     &a0b1_plus_a1b0[i + 6],
+                    &coeff,
                     F::from(XI_0),
                 )?;
-                let coeff = self.fp_chip.add_no_carry(layouter, &coeff1, &coeff2)?;
                 out_coeffs.push(coeff);
             } else {
                 out_coeffs.push(a0b1_plus_a1b0[i].clone());
