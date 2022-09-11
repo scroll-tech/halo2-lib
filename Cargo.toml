@@ -1,5 +1,5 @@
 [package]
-name = "halo2-pairing"
+name = "halo2_ecc"
 version = "0.1.0"
 edition = "2021"
 
