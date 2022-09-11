@@ -25,6 +25,50 @@ use crate::{
 
 const XI_0: u64 = 9;
 
+pub fn get_naf(mut exp: Vec<u64>) -> Vec<i8> {
+    // https://en.wikipedia.org/wiki/Non-adjacent_form
+    // NAF for exp:
+    let mut naf: Vec<i8> = Vec::with_capacity(64 * exp.len());
+    let len = exp.len();
+
+    // generate the NAF for exp
+    for idx in 0..len {
+        let mut e: u64 = exp[idx];
+        for i in 0..64 {
+            if e & 1 == 1 {
+                let z = 2i8 - (e % 4) as i8;
+                e = e / 2;
+                if z == -1 {
+                    e += 1;
+                }
+                naf.push(z);
+            } else {
+                naf.push(0);
+                e = e / 2;
+            }
+        }
+        if e != 0 {
+            assert_eq!(e, 1);
+            let mut j = idx + 1;
+            while j < exp.len() && exp[j] == u64::MAX {
+                exp[j] = 0;
+                j += 1;
+            }
+            if j < exp.len() {
+                exp[j] += 1;
+            } else {
+                exp.push(1);
+            }
+        }
+    }
+    if exp.len() != len {
+        assert_eq!(len, exp.len() + 1);
+        assert!(exp[len] == 1);
+        naf.push(1);
+    }
+    naf
+}
+
 impl<'a, 'b, F: FieldExt> Fp12Chip<'a, 'b, F> {
     // computes a ** (p ** power)
     // only works for p = 3 (mod 4) and p = 1 (mod 6)
@@ -88,51 +132,12 @@ impl<'a, 'b, F: FieldExt> Fp12Chip<'a, 'b, F> {
         &mut self,
         layouter: &mut impl Layouter<F>,
         a: &<Self as FieldChip<F>>::FieldPoint,
-        mut exp: Vec<u64>,
+        exp: Vec<u64>,
     ) -> Result<<Self as FieldChip<F>>::FieldPoint, Error> {
-        // https://en.wikipedia.org/wiki/Non-adjacent_form
-        // NAF for exp:
-        let mut naf: Vec<i8> = Vec::with_capacity(64 * exp.len());
-        let len = exp.len();
-
-        // generate the NAF for exp
-        for idx in 0..len {
-            let mut e: u64 = exp[idx];
-            for i in 0..64 {
-                if e & 1 == 1 {
-                    let z = 2i8 - (e % 4) as i8;
-                    e = e / 2;
-                    if z == -1 {
-                        e += 1;
-                    }
-                    naf.push(z);
-                } else {
-                    naf.push(0);
-                    e = e / 2;
-                }
-            }
-            if e != 0 {
-                assert_eq!(e, 1);
-                let mut j = idx + 1;
-                while j < exp.len() && exp[j] == u64::MAX {
-                    exp[j] = 0;
-                    j += 1;
-                }
-                if j < exp.len() {
-                    exp[j] += 1;
-                } else {
-                    exp.push(1);
-                }
-            }
-        }
-        if exp.len() != len {
-            assert_eq!(len, exp.len() + 1);
-            assert!(exp[len] == 1);
-            naf.push(1);
-        }
-
         let mut res = a.clone();
         let mut is_started = false;
+        let naf = get_naf(exp);
+
         for &z in naf.iter().rev() {
             if is_started {
                 res = self.mul(layouter, &res, &res)?;
@@ -339,27 +344,31 @@ impl<'a, 'b, F: FieldExt> Fp12Chip<'a, 'b, F> {
         let mut compression = self.cyclotomic_compress(a);
         let mut res = a.clone();
         let mut is_started = false;
-        let mut bit = 0;
-        for e in exp.iter().rev() {
-            for i in (0..64).rev() {
+        let naf = get_naf(exp);
+
+        for &z in naf.iter().rev() {
+            if is_started {
+                compression = self.cyclotomic_square(layouter, &compression)?;
+            }
+            if z != 0 {
+                assert!(z == 1 || z == -1);
                 if is_started {
-                    compression = self.cyclotomic_square(layouter, &compression)?;
-                }
-                bit = (*e >> i) & 1;
-                if bit == 1 {
-                    if is_started {
-                        res = self.cyclotomic_decompress(layouter, &compression)?;
-                        res = self.mul(layouter, &res, a)?;
-                        // compression is free, so it doesn't hurt (except possibly witness generation runtime) to do it
-                        // TODO: alternatively we go from small bits to large to avoid this compression
-                        compression = self.cyclotomic_compress(&res);
+                    res = self.cyclotomic_decompress(layouter, &compression)?;
+                    res = if z == 1 {
+                        self.mul(layouter, &res, a)?
                     } else {
-                        is_started = true;
-                    }
+                        self.divide(layouter, &res, a)?
+                    };
+                    // compression is free, so it doesn't hurt (except possibly witness generation runtime) to do it
+                    // TODO: alternatively we go from small bits to large to avoid this compression
+                    compression = self.cyclotomic_compress(&res);
+                } else {
+                    assert_eq!(z, 1);
+                    is_started = true;
                 }
             }
         }
-        if bit == 0 {
+        if naf[0] == 0 {
             res = self.cyclotomic_decompress(layouter, &compression)?;
         }
         Ok(res)

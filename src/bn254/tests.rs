@@ -170,8 +170,8 @@ macro_rules! create_pairing_circuit {
 #[cfg(test)]
 #[test]
 fn test_pairing() {
-    let k = 16;
-    create_pairing_circuit!(FpStrategy::Simple, 111, 16, 1, 14, 90, 3);
+    let k = 23;
+    create_pairing_circuit!(FpStrategy::Simple, 1, 0, 1, 22, 88, 3);
     let mut rng = rand::thread_rng();
 
     let P = Some(G1Affine::random(&mut rng));
