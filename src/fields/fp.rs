@@ -9,6 +9,7 @@ use halo2_proofs::{
 };
 use num_bigint::{BigInt, BigUint};
 use num_traits::Num;
+use serde::{Deserialize, Serialize};
 
 use super::{FieldChip, PrimeFieldChip, Selectable};
 use crate::{
@@ -28,7 +29,7 @@ use crate::{
     },
 };
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum FpStrategy {
     Simple,
     CustomVerticalCRT,

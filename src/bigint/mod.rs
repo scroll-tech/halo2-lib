@@ -90,6 +90,9 @@ impl<F: FieldExt> FixedOverflowInteger<F> {
         Self { limbs, max_limb_size, limb_bits }
     }
 
+    /// Input: a BigInteger `value`, Output: the `FixedOverflowInteger` that represents the same value
+    /// Can handle signs
+    /// Note the representation of the integer will be in proper (no overflow) format, if signs are interpretted correctly
     pub fn from_native(value: BigInt, num_limbs: usize, limb_bits: usize) -> Self {
         let limbs = decompose_bigint(&value, num_limbs, limb_bits);
         Self { limbs, max_limb_size: BigUint::from(1u64) << limb_bits, limb_bits }
@@ -183,6 +186,8 @@ impl<F: FieldExt> FixedCRTInteger<F> {
         Self { truncation, native, value, max_size }
     }
 
+    /// Input: a BigInteger `value`, Output: the `FixedCRTInteger` that represents the same value
+    /// Can handle signs
     pub fn from_native(value: BigInt, num_limbs: usize, limb_bits: usize) -> Self {
         let truncation = FixedOverflowInteger::from_native(value.clone(), num_limbs, limb_bits);
         Self {

@@ -37,8 +37,8 @@ use super::{ecc_add_unequal, select, select_from_bits, EccPoint};
 // this only works for curves GA with base field of prime order
 #[derive(Clone, Debug)]
 pub struct FixedEccPoint<F: FieldExt, GA: CurveAffine> {
-    x: FixedCRTInteger<F>,
-    y: FixedCRTInteger<F>,
+    pub x: FixedCRTInteger<F>,
+    pub y: FixedCRTInteger<F>,
     _marker: PhantomData<GA>,
 }
 
@@ -52,12 +52,12 @@ where
 
     pub fn from_g1(P: &GA, num_limbs: usize, limb_bits: usize) -> Self {
         let x_pt = FixedCRTInteger::from_native(
-            fe_to_bigint(P.coordinates().unwrap().x()),
+            fe_to_biguint(P.coordinates().unwrap().x()).into(),
             num_limbs,
             limb_bits,
         );
         let y_pt = FixedCRTInteger::from_native(
-            fe_to_bigint(P.coordinates().unwrap().y()),
+            fe_to_biguint(P.coordinates().unwrap().y()).into(),
             num_limbs,
             limb_bits,
         );
@@ -114,6 +114,7 @@ where
     let mut cached_points = Vec::with_capacity(num_windows);
     let base_pt = GA::from_xy(bigint_to_fe(&P.x.value), bigint_to_fe(&P.y.value)).unwrap();
     let base_pt_assigned = P.assign(chip, layouter)?;
+
     let mut increment = base_pt;
     for i in 0..num_windows {
         let mut cache_vec = Vec::with_capacity(1usize << window_bits);
