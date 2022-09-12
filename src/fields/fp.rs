@@ -435,8 +435,8 @@ pub(crate) mod tests {
         _marker: PhantomData<F>,
     }
 
-    const NUM_ADVICE: usize = 2;
-    const NUM_FIXED: usize = 2;
+    const NUM_ADVICE: usize = 1;
+    const NUM_FIXED: usize = 1;
 
     impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         type Config = FpConfig<F>;
@@ -453,9 +453,9 @@ pub(crate) mod tests {
                 NUM_ADVICE,
                 1,
                 NUM_FIXED,
-                17,
-                68,
-                4,
+                22,
+                88,
+                3,
                 modulus::<Fq>(),
             )
         }
@@ -494,7 +494,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_fp() {
-        let k = 18;
+        let k = 23;
         let a = Fq::rand();
         let b = Fq::rand();
 

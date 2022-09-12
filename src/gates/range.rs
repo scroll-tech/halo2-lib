@@ -69,7 +69,7 @@ impl<F: FieldExt> RangeConfig<F> {
         meta: &mut ConstraintSystem<F>,
         range_strategy: RangeStrategy,
         num_advice: usize,
-        num_lookup_advice: usize,
+        mut num_lookup_advice: usize,
         num_fixed: usize,
         lookup_bits: usize,
     ) -> Self {
@@ -83,9 +83,9 @@ impl<F: FieldExt> RangeConfig<F> {
         let mut q_range = HashMap::new();
 
         if range_strategy == RangeStrategy::CustomVerticalShort {
-            // we only use range length 2, 3 because range length `k` requires Rotation(0..=k)
-            // to minimize the distinct point sets we only use up to Rotation(3), since that is what is used in our basic vertical gate
-            for k in 2..4 {
+            // we only use range length 3 because range length `k` requires Rotation(0..=k)
+            // to minimize the different polynomial evaluation SETS we only use Rotation(0..=3), since that is what is used in our basic vertical gate
+            for k in 3..4 {
                 let mut selectors = Vec::with_capacity(gate_config.gates.len());
                 for gate in &gate_config.gates {
                     let q = meta.selector();
@@ -96,6 +96,9 @@ impl<F: FieldExt> RangeConfig<F> {
             }
         }
 
+        if num_advice == 1 {
+            num_lookup_advice = 0;
+        }
         let mut lookup_advice = Vec::with_capacity(num_lookup_advice);
         for _i in 0..num_lookup_advice {
             let a = meta.advice_column();
@@ -339,15 +342,20 @@ impl<F: FieldExt> RangeChip<F> {
         let rem_bits = range_bits % self.config.lookup_bits;
 
         const MAX_RANGE_POW: usize = 2;
+        assert!(
+            self.config.q_range.contains_key(&(MAX_RANGE_POW + 1)),
+            "No custom range chip of length {}",
+            MAX_RANGE_POW + 1
+        );
         let k_chunks = (k - 1 + MAX_RANGE_POW - 1) / MAX_RANGE_POW;
         let limb_base = F::from(1 << self.config.lookup_bits);
 
         // let a = a0 + a1 * X + a2 * X^2 + a3 * X^3 + a4 * X^4 + a5 * X^5 (for example)
         // with X = 2^lookup_bits
         // then take transpose of
-        // | a | a0 | x | a1 | a2 | y | a3 | a4 | a5 |
-        // and we enable q_range[2,3] on
-        // | 2 | 0  | 3 | 0  | 0  | 3 | 0  | 0  | 0  |
+        // | a | a0 | a1 | y | a2 | a3 | z | a4 | a5 | 0 |
+        // and we enable q_range[3] on
+        // | 1 | 0  | 0  | 1 | 0  | 0  | 1 | 0  | 0  | 0 |
         let assigned_limbs = layouter.assign_region(
             || format!("custom range check {} bits", range_bits),
             |mut region| {
@@ -355,29 +363,38 @@ impl<F: FieldExt> RangeChip<F> {
                 let mut rev_limb_cells = Vec::with_capacity(k);
                 let mut enable_range = Vec::with_capacity(k_chunks);
 
-                let mut start = k - 1;
+                let mut start = k_chunks * MAX_RANGE_POW;
+                rev_cells.extend(((k - 1)..start).map(|_| Constant(F::from(0))));
+                rev_limb_cells.push(rev_cells.len());
                 rev_cells.push(Witness(limbs[k - 1]));
-                rev_limb_cells.push(0);
                 let mut running_sum = limbs[k - 1];
                 while start > 0 {
-                    let len = std::cmp::min(start, MAX_RANGE_POW);
-                    start -= len;
-                    let window = [&limbs[start..(start + len)], &[running_sum]].concat();
+                    start -= MAX_RANGE_POW;
+                    let window = [
+                        &limbs[start..std::cmp::min(start + MAX_RANGE_POW, k - 1)],
+                        &[running_sum],
+                    ]
+                    .concat();
                     running_sum = window.iter().rev().fold(Some(F::from(0)), |acc, &val| {
                         acc.zip(val).map(|(a, v)| a * limb_base + v)
                     });
+                    let len = window.len() - 1;
                     rev_limb_cells.extend((0..len).map(|i| rev_cells.len() + i));
                     rev_cells.extend((0..len).rev().map(|i| Witness(limbs[start + i])));
                     rev_cells.push(Witness(running_sum));
-                    enable_range.push((rev_cells.len() - 1, len + 1));
+                    enable_range.push(rev_cells.len() - 1);
+                }
+                if k == 1 {
+                    assert_eq!(rev_cells.len(), 1);
+                    enable_range.push(0);
                 }
                 rev_cells.reverse();
                 let cells = rev_cells;
 
                 let (assigned_cells, gate_index) =
                     self.gate.assign_region(cells, vec![], 0, &mut region)?;
-                for (rev_row, range_len) in enable_range {
-                    self.config.q_range.get(&range_len).unwrap()[gate_index]
+                for rev_row in enable_range {
+                    self.config.q_range.get(&(MAX_RANGE_POW + 1)).unwrap()[gate_index]
                         .enable(&mut region, assigned_cells.len() - 1 - rev_row)?;
                 }
                 region.constrain_equal(a.cell(), assigned_cells[0].cell())?;
