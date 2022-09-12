@@ -17,8 +17,8 @@ use super::RangeInstructions;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum RangeStrategy {
-    Vertical, // vanilla implementation with vertical basic gate
-    CustomVertical, // vertical basic gate and vertical custom gate
+    Vertical, // vanilla implementation with vertical basic gate(s)
+    CustomVerticalShort, // vertical basic gate(s) and vertical custom range gates of length 2,3
               // CustomHorizontal, // vertical basic gate and dedicated horizontal custom gate
 }
 
@@ -43,6 +43,7 @@ pub struct RangeConfig<F: FieldExt> {
     strategy: RangeStrategy,
 }
 
+/// vertical gate that constraints `a[0] == a[1] + a[2] * 2^lookup_bits + ... + a[k] * 2^{lookup_bits * (k-1)}`
 fn create_vertical_range_gate<F: FieldExt>(
     meta: &mut ConstraintSystem<F>,
     k: i32,
@@ -71,7 +72,6 @@ impl<F: FieldExt> RangeConfig<F> {
         num_lookup_advice: usize,
         num_fixed: usize,
         lookup_bits: usize,
-        range_len: Vec<usize>,
     ) -> Self {
         assert!(lookup_bits <= 28);
 
@@ -82,8 +82,10 @@ impl<F: FieldExt> RangeConfig<F> {
 
         let mut q_range = HashMap::new();
 
-        if range_strategy == RangeStrategy::CustomVertical {
-            for k in range_len {
+        if range_strategy == RangeStrategy::CustomVerticalShort {
+            // we only use range length 2, 3 because range length `k` requires Rotation(0..=k)
+            // to minimize the distinct point sets we only use up to Rotation(3), since that is what is used in our basic vertical gate
+            for k in 2..4 {
                 let mut selectors = Vec::with_capacity(gate_config.gates.len());
                 for gate in &gate_config.gates {
                     let q = meta.selector();
@@ -326,36 +328,75 @@ impl<F: FieldExt> RangeChip<F> {
     }
 
     // returns the limbs
-    fn range_check_custom_vertical(
+    fn range_check_custom_vertical_short(
         &mut self,
         layouter: &mut impl Layouter<F>,
         a: &AssignedCell<F, F>,
         range_bits: usize,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
         let k = (range_bits + self.config.lookup_bits - 1) / self.config.lookup_bits;
-        if !self.config.q_range.contains_key(&k) {
-            println!("no length {} custom range gate", k);
-            panic!()
-        }
+        let limbs = decompose_option(&a.value().map(|x| *x), k, self.config.lookup_bits);
         let rem_bits = range_bits % self.config.lookup_bits;
 
-        let limbs = decompose_option(&a.value().map(|x| *x), k, self.config.lookup_bits);
+        const MAX_RANGE_POW: usize = 2;
+        let k_chunks = (k - 1 + MAX_RANGE_POW - 1) / MAX_RANGE_POW;
+        let limb_base = F::from(1 << self.config.lookup_bits);
 
-        let assigned_limbs: Vec<AssignedCell<F, F>> = layouter.assign_region(
+        // let a = a0 + a1 * X + a2 * X^2 + a3 * X^3 + a4 * X^4 + a5 * X^5 (for example)
+        // with X = 2^lookup_bits
+        // then take transpose of
+        // | a | a0 | x | a1 | a2 | y | a3 | a4 | a5 |
+        // and we enable q_range[2,3] on
+        // | 2 | 0  | 3 | 0  | 0  | 3 | 0  | 0  | 0  |
+        let assigned_limbs = layouter.assign_region(
             || format!("custom range check {} bits", range_bits),
             |mut region| {
-                let mut cells = Vec::with_capacity(k + 2);
-                cells.push(Existing(a));
-                cells.extend(limbs.iter().map(|x| Witness(x.clone())));
-                let (mut assigned_cells, gate_index) =
-                    self.gate.assign_region(cells, vec![], 0, &mut region)?;
-                self.config.q_range.get(&k).unwrap()[gate_index].enable(&mut region, 0)?;
-                for idx in 1..=k {
-                    if idx != k || rem_bits != 1 {
-                        self.enable_lookup(&mut region, assigned_cells[idx].clone(), idx)?;
-                    }
+                let mut rev_cells = Vec::with_capacity((MAX_RANGE_POW + 1) * k_chunks);
+                let mut rev_limb_cells = Vec::with_capacity(k);
+                let mut enable_range = Vec::with_capacity(k_chunks);
+
+                let mut start = k - 1;
+                rev_cells.push(Witness(limbs[k - 1]));
+                rev_limb_cells.push(0);
+                let mut running_sum = limbs[k - 1];
+                while start > 0 {
+                    let len = std::cmp::min(start, MAX_RANGE_POW);
+                    start -= len;
+                    let window = [&limbs[start..(start + len)], &[running_sum]].concat();
+                    running_sum = window.iter().rev().fold(Some(F::from(0)), |acc, &val| {
+                        acc.zip(val).map(|(a, v)| a * limb_base + v)
+                    });
+                    rev_limb_cells.extend((0..len).map(|i| rev_cells.len() + i));
+                    rev_cells.extend((0..len).rev().map(|i| Witness(limbs[start + i])));
+                    rev_cells.push(Witness(running_sum));
+                    enable_range.push((rev_cells.len() - 1, len + 1));
                 }
-                Ok(assigned_cells.drain(1..).collect())
+                rev_cells.reverse();
+                let cells = rev_cells;
+
+                let (assigned_cells, gate_index) =
+                    self.gate.assign_region(cells, vec![], 0, &mut region)?;
+                for (rev_row, range_len) in enable_range {
+                    self.config.q_range.get(&range_len).unwrap()[gate_index]
+                        .enable(&mut region, assigned_cells.len() - 1 - rev_row)?;
+                }
+                region.constrain_equal(a.cell(), assigned_cells[0].cell())?;
+                let assigned_limbs: Vec<AssignedCell<F, F>> = rev_limb_cells
+                    .iter()
+                    .rev()
+                    .enumerate()
+                    .map(|(id, &i)| {
+                        let offset = assigned_cells.len() - 1 - i;
+                        let limb = assigned_cells[offset].clone();
+                        if id != 0 || rem_bits != 1 {
+                            self.enable_lookup(&mut region, limb.clone(), offset)
+                                .expect("enable lookup should not fail");
+                        }
+                        limb
+                    })
+                    .collect();
+                assert_eq!(assigned_limbs.len(), k);
+                Ok(assigned_limbs)
             },
         )?;
         if rem_bits != 0 {
@@ -428,8 +469,8 @@ impl<F: FieldExt> RangeInstructions<F> for RangeChip<F> {
         assert_ne!(range_bits, 0);
         match self.config.strategy {
             RangeStrategy::Vertical => self.range_check_simple(layouter, a, range_bits),
-            RangeStrategy::CustomVertical => {
-                self.range_check_custom_vertical(layouter, a, range_bits)
+            RangeStrategy::CustomVerticalShort => {
+                self.range_check_custom_vertical_short(layouter, a, range_bits)
             }
         }
     }

@@ -56,22 +56,16 @@ impl<F: FieldExt> FpConfig<F> {
         num_limbs: usize,
         p: BigUint,
     ) -> Self {
-        let range_len_lo =
-            (modulus::<F>().bits() as usize - (num_limbs - 1) * limb_bits + lookup_bits - 1)
-                / lookup_bits;
-        let range_len_hi = (limb_bits + lookup_bits - 1) / lookup_bits + 1;
-
         let range_config = RangeConfig::<F>::configure(
             meta,
             match strategy {
                 FpStrategy::Simple => RangeStrategy::Vertical,
-                FpStrategy::CustomVerticalCRT => RangeStrategy::CustomVertical,
+                FpStrategy::CustomVerticalCRT => RangeStrategy::CustomVerticalShort,
             },
             num_advice,
             num_lookup_advice,
             num_fixed,
             lookup_bits,
-            (range_len_lo..=range_len_hi).collect(),
         );
         let bigint_config = BigIntConfig::<F>::configure(
             meta,

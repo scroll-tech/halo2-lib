@@ -349,6 +349,7 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
             fd.metadata().unwrap().len()
         };
 
+        let verify_start = start.elapsed();
         let params_verifier: ParamsVerifier<Bn256> = params.verifier(0).unwrap();
         let strategy = SingleVerifier::new(&params_verifier);
         let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
@@ -356,7 +357,7 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
             verify_proof(&params_verifier, pk.get_vk(), strategy, &[&[]], &mut transcript).is_ok()
         );
         let verify_duration = start.elapsed();
-        let verify_time = verify_duration - proof_duration;
+        let verify_time = verify_duration - verify_start;
         println!("Verify time: {:?}", verify_time);
 
         write!(

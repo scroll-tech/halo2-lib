@@ -122,7 +122,7 @@ impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        range::RangeConfig::configure(meta, range::RangeStrategy::Vertical, 2, 1, 1, 3, vec![])
+        range::RangeConfig::configure(meta, range::RangeStrategy::CustomVerticalShort, 2, 1, 1, 3)
     }
 
     fn synthesize(
