@@ -63,9 +63,9 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         let mut folder = std::path::PathBuf::new();
         folder.push("./src/bn254");
-        folder.push("pairing_circuit.config");
+        folder.push("configs/pairing_circuit.config");
         let params_str = std::fs::read_to_string(folder.as_path())
-            .expect("src/bn254/pairing_circuit.config file should exist");
+            .expect("src/bn254/configs/pairing_circuit.config file should exist");
         let params: PairingCircuitParams = serde_json::from_str(params_str.as_str()).unwrap();
 
         PairingChip::configure(
@@ -196,9 +196,9 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
 fn test_pairing() {
     let mut folder = std::path::PathBuf::new();
     folder.push("./src/bn254");
-    folder.push("pairing_circuit.config");
+    folder.push("configs/pairing_circuit.config");
     let params_str = std::fs::read_to_string(folder.as_path())
-        .expect("src/bn254/pairing_circuit.config file should exist");
+        .expect("src/bn254/configs/pairing_circuit.config file should exist");
     let params: PairingCircuitParams = serde_json::from_str(params_str.as_str()).unwrap();
     let k = params.degree;
 
@@ -231,12 +231,14 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
     let mut folder = std::path::PathBuf::new();
     folder.push("./src/bn254");
 
-    folder.push("bench_pairing.config");
+    folder.push("configs/bench_pairing.config");
     let bench_params_file = std::fs::File::open(folder.as_path())?;
     folder.pop();
+    folder.pop();
 
-    folder.push("pairing_bench.csv");
+    folder.push("results/pairing_bench_gpu.csv");
     let mut fs_results = std::fs::File::create(folder.as_path()).unwrap();
+    folder.pop();
     folder.pop();
     write!(fs_results, "degree,num_advice,num_lookup,num_fixed,lookup_bits,limb_bits,num_limbs,vk_size,proof_time,proof_size,verify_time\n")?;
     folder.push("data");
@@ -263,10 +265,11 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
 
         {
             folder.pop();
-            folder.push("pairing_circuit.config");
+            folder.push("configs/pairing_circuit.config");
             let mut f = std::fs::File::create(folder.as_path())?;
             write!(f, "{}", serde_json::to_string(&bench_params).unwrap())?;
             folder.pop();
+	    folder.pop();
             folder.push("data");
         }
         let params = {
@@ -379,6 +382,7 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/*
 #[cfg(feature = "dev-graph")]
 #[test]
 fn plot_pairing() {
@@ -394,3 +398,4 @@ fn plot_pairing() {
 
     halo2_proofs::dev::CircuitLayout::default().render(k, &circuit, &root).unwrap();
 }
+*/

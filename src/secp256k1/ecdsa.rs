@@ -79,9 +79,9 @@ impl<F: FieldExt> Circuit<F> for ECDSACircuit<F> {
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         let mut folder = std::path::PathBuf::new();
         folder.push("./src/secp256k1");
-        folder.push("ecdsa_circuit.config");
+        folder.push("configs/ecdsa_circuit.config");
         let params_str = std::fs::read_to_string(folder.as_path())
-            .expect("src/secp256k1/ecdsa_circuit.config file should exist");
+            .expect("src/secp256k1/configs/ecdsa_circuit.config file should exist");
         let params: CircuitParams = serde_json::from_str(params_str.as_str()).unwrap();
 
         FpConfig::<F>::configure(
@@ -311,9 +311,9 @@ impl<F: FieldExt> Circuit<F> for ECDSACircuit<F> {
 fn test_secp() {
     let mut folder = std::path::PathBuf::new();
     folder.push("./src/secp256k1");
-    folder.push("ecdsa_circuit.config");
+    folder.push("configs/ecdsa_circuit.config");
     let params_str = std::fs::read_to_string(folder.as_path())
-        .expect("src/secp256k1/ecdsa_circuit.config file should exist");
+        .expect("src/secp256k1/configs/ecdsa_circuit.config file should exist");
     let params: CircuitParams = serde_json::from_str(params_str.as_str()).unwrap();
     let K = params.degree;
 
@@ -364,12 +364,14 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
     let mut folder = std::path::PathBuf::new();
     folder.push("./src/secp256k1");
 
-    folder.push("bench_ecdsa.config");
+    folder.push("configs/bench_ecdsa.config");
     let bench_params_file = std::fs::File::open(folder.as_path())?;
     folder.pop();
+    folder.pop();
 
-    folder.push("ecdsa_bench.csv");
+    folder.push("results/ecdsa_bench.csv");
     let mut fs_results = std::fs::File::create(folder.as_path()).unwrap();
+    folder.pop();
     folder.pop();
     write!(fs_results, "degree,num_advice,num_lookup,num_fixed,lookup_bits,limb_bits,num_limbs,vk_size,proof_time,proof_size,verify_time\n")?;
     folder.push("data");
@@ -395,10 +397,11 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
 
         {
             folder.pop();
-            folder.push("ecdsa_circuit.config");
+            folder.push("configs/ecdsa_circuit.config");
             let mut f = std::fs::File::create(folder.as_path())?;
             write!(f, "{}", serde_json::to_string(&bench_params).unwrap())?;
             folder.pop();
+	    folder.pop();
             folder.push("data");
         }
         let params = {
@@ -532,6 +535,7 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/*
 #[cfg(feature = "dev-graph")]
 #[cfg(test)]
 #[test]
@@ -548,3 +552,4 @@ fn plot_secp() {
 
     halo2_proofs::dev::CircuitLayout::default().render(k, &circuit, &root).unwrap();
 }
+*/

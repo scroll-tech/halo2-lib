@@ -4,8 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [patch.crates-io]
-halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2.git", tag = "v2022_06_03" }
-#halo2_proofs = { git = "ssh://git@github.com/scroll-tech/halo2-gpu.git", branch = "common_rs_multi_gpu" }
+#halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2.git", tag = "v2022_06_03" }
+halo2_proofs = { git = "ssh://git@github.com/scroll-tech/halo2-gpu.git" }
 #halo2_proofs = { path = "../halo2-gpu/halo2_proofs" }
 
 [features]
