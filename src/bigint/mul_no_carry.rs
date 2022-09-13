@@ -2,7 +2,7 @@ use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
 use num_bigint::BigUint;
 
 use super::{BigIntConfig, CRTInteger, OverflowInteger};
-use crate::utils::modulus as native_modulus;
+use crate::utils::{fe_to_biguint, modulus as native_modulus};
 use crate::{
     bigint::BigIntStrategy,
     gates::{
@@ -95,77 +95,45 @@ pub fn truncate<F: FieldExt>(
     assert!(BigUint::from(k) * &a.max_limb_size * &b.max_limb_size <= native_modulus::<F>() / 2u32);
     let mut out_limbs = Vec::with_capacity(k);
 
-    match chip.strategy {
-        BigIntStrategy::Simple => {
-            for i in 0..k {
-                let out_cell = layouter.assign_region(
-                    || format!("mul_no_carry_{}/{}", i, k),
-                    |mut region| {
-                        let mut prod_computation: Vec<QuantumCell<F>> =
-                            Vec::with_capacity(1 + 3 * std::cmp::min(i + 1, k));
-                        prod_computation.push(Constant(F::zero()));
-                        let mut enable_gates = Vec::new();
+    for i in 0..k {
+        let out_cell = layouter.assign_region(
+            || format!("mul_no_carry_{}/{}", i, k),
+            |mut region| {
+                let mut prod_computation: Vec<QuantumCell<F>> =
+                    Vec::with_capacity(1 + 3 * std::cmp::min(i + 1, k));
+                prod_computation.push(Constant(F::zero()));
+                let mut enable_gates = Vec::new();
 
-                        let mut offset = 0;
-                        let mut prod_val = Some(F::zero());
-                        for j in 0..std::cmp::min(i + 1, k) {
-                            enable_gates.push(offset);
+                let mut offset = 0;
+                let mut prod_val = Some(F::zero());
+                for j in 0..std::cmp::min(i + 1, k) {
+                    enable_gates.push(offset);
 
-                            let a_cell = &a.limbs[j];
-                            let b_cell = &b.limbs[i - j];
-                            prod_val = prod_val
-                                .zip(a_cell.value())
-                                .zip(b_cell.value())
-                                .map(|((sum, &a), &b)| sum + a * b);
+                    let a_cell = &a.limbs[j];
+                    let b_cell = &b.limbs[i - j];
+                    prod_val = prod_val
+                        .zip(a_cell.value())
+                        .zip(b_cell.value())
+                        .map(|((sum, &a), &b)| sum + a * b);
 
-                            prod_computation.push(Existing(a_cell));
-                            prod_computation.push(Existing(b_cell));
-                            prod_computation.push(Witness(prod_val));
+                    prod_computation.push(Existing(a_cell));
+                    prod_computation.push(Existing(b_cell));
+                    prod_computation.push(Witness(prod_val));
 
-                            offset += 3;
-                        }
-                        let prod_computation_assignments = gate.assign_region_smart(
-                            prod_computation,
-                            enable_gates,
-                            vec![],
-                            vec![],
-                            0,
-                            &mut region,
-                        )?;
-                        Ok(prod_computation_assignments.last().unwrap().clone())
-                    },
+                    offset += 3;
+                }
+                let prod_computation_assignments = gate.assign_region_smart(
+                    prod_computation,
+                    enable_gates,
+                    vec![],
+                    vec![],
+                    0,
+                    &mut region,
                 )?;
-                out_limbs.push(out_cell);
-            }
-        }
-        BigIntStrategy::CustomVerticalTrunc => {
-            let out_val: Vec<Option<F>> = (0..k)
-                .map(|i| {
-                    (0..=i).fold(Some(F::from(0)), |sum, j| {
-                        sum.zip(a.limbs[j].value().zip(b.limbs[i - j].value()))
-                            .map(|(sum, (&a, &b))| sum + a * b)
-                    })
-                })
-                .collect();
-            out_limbs = layouter.assign_region(
-                || format!("mul_no_carry_{}", k),
-                |mut region| {
-                    let computation: Vec<QuantumCell<F>> = a
-                        .limbs
-                        .iter()
-                        .map(|x| Existing(x))
-                        .chain(b.limbs.iter().map(|x| Existing(x)))
-                        .chain(out_val.iter().map(|x| Witness(*x)))
-                        .collect();
-                    let (mut assignments, gate_index) =
-                        gate.assign_region(computation, vec![], 0, &mut region)?;
-                    // enable custom gate
-                    chip.q_mul_no_carry.get(&k).unwrap()[gate_index].enable(&mut region, 0)?;
-                    Ok(assignments.drain((k + k)..).collect())
-                },
-            )?;
-            assert_eq!(out_limbs.len(), k);
-        }
+                Ok(prod_computation_assignments.last().unwrap().clone())
+            },
+        )?;
+        out_limbs.push(out_cell);
     }
     Ok(OverflowInteger::construct(
         out_limbs,
@@ -189,39 +157,52 @@ pub fn crt<F: FieldExt>(
     Ok(CRTInteger::construct(out_trunc, out_native, out_val))
 }
 
-pub fn witness_by_constant<F: FieldExt>(
+use super::GATE_LEN;
+/// `a` is a witness vector, `c` is a constant vector
+/// Uses custom gates to compute and constrain dot product <a, c>
+/// Returns the computation trace (as Vec of QuantumCells) and ll
+pub fn witness_dot_constant<'a, F: FieldExt>(
     gate: &mut impl GateInstructions<F>,
     chip: &BigIntConfig<F>,
-    layouter: &mut impl Layouter<F>,
-    quot_vec: &Vec<Option<F>>,
-    mod_vec: &Vec<F>,
-    modulus: &BigUint,
-) -> Result<(Vec<AssignedCell<F, F>>, Vec<AssignedCell<F, F>>), Error> {
-    assert_eq!(quot_vec.len(), mod_vec.len());
-    let k = quot_vec.len();
-    let prod_val: Vec<Option<F>> = (0..k)
-        .map(|i| {
-            (0..=i).fold(Some(F::from(0)), |sum, j| {
-                sum.zip(quot_vec[j]).map(|(sum, a)| sum + a * mod_vec[i - j])
-            })
-        })
-        .collect();
+    a: &Vec<QuantumCell<'a, F>>,
+    c: &Vec<F>,
+) -> Result<(Vec<QuantumCell<'a, F>>, Vec<(Vec<BigUint>, usize)>), Error> {
+    assert_eq!(a.len(), c.len());
+    let k = c.len();
 
-    layouter.assign_region(
-        || format!("quot_times_mod_{}", k),
-        |mut region| {
-            let computation: Vec<QuantumCell<F>> = quot_vec
-                .iter()
-                .map(|x| Witness(*x))
-                .chain(prod_val.iter().map(|x| Witness(*x)))
-                .collect();
-            let (mut assignments, gate_index) =
-                gate.assign_region(computation, vec![], 0, &mut region)?;
-            // enable custom gate
-            chip.q_mul_no_carry_constant.get(&modulus).unwrap()[gate_index]
-                .enable(&mut region, 0)?;
-            let out = assignments.drain(k..).collect();
-            Ok((assignments, out))
-        },
-    )
+    match chip.strategy {
+        BigIntStrategy::CustomVerticalShort => {
+            const GATE_SEGMENT: usize = GATE_LEN - 2;
+            // Say a = [a0, .., a5] for example
+            // Then to compute <a, c> we use transpose of
+            // | a0 | a1 | a2 | x | a3 | a4 | y | a5 | 0 | <a,c> |
+            // while enabling relevant custom gates at
+            // | *  |    |    | * |    |    | * |    |   |       |
+            let k_chunks = if k > 1 { (k - 1 + GATE_SEGMENT - 1) / GATE_SEGMENT } else { 1 };
+            let mut cells = Vec::with_capacity((GATE_SEGMENT + 1) * k_chunks);
+            let mut enable_sel = Vec::with_capacity(k_chunks);
+            let mut running_sum = a[0].clone();
+            cells.push(a[0].clone());
+            for i in 0..k_chunks {
+                let c0 = if i == 0 { c[0] } else { F::from(1) };
+                let window = (1 + i * GATE_SEGMENT)..std::cmp::min(k, 1 + (i + 1) * GATE_SEGMENT);
+                let c_window = [&[c0], &c[window.clone()]].concat();
+                enable_sel.push((
+                    c_window.iter().map(|c| fe_to_biguint(c)).collect::<Vec<BigUint>>(),
+                    i * GATE_LEN,
+                ));
+
+                cells.extend(window.clone().map(|j| a[j].clone()));
+                cells.extend((c_window.len()..(GATE_LEN - 1)).map(|_| Constant(F::from(0))));
+                running_sum = Witness(
+                    window.into_iter().fold(running_sum.value().map(|&s| s * c0), |sum, j| {
+                        sum.zip(a[j].value()).map(|(s, &a)| s + a * c[j])
+                    }),
+                );
+                cells.push(running_sum.clone());
+            }
+            Ok((cells, enable_sel))
+        }
+        _ => panic!(),
+    }
 }

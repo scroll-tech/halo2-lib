@@ -58,6 +58,7 @@ impl<F: FieldExt> OverflowInteger<F> {
 
     pub fn evaluate(
         gate: &mut impl GateInstructions<F>,
+        chip: &BigIntConfig<F>,
         layouter: &mut impl Layouter<F>,
         limbs: &Vec<AssignedCell<F, F>>,
         limb_bits: usize,
@@ -71,10 +72,36 @@ impl<F: FieldExt> OverflowInteger<F> {
             pows.push(Constant(running_pow));
             running_pow = running_pow * &limb_base;
         }
-        // Constrain `out_native = sum_i out_assigned[i] * 2^{n*i}` in `F`
-        let (_, _, native) =
-            gate.inner_product(layouter, &limbs.iter().map(|a| Existing(a)).collect(), &pows)?;
-        Ok(native)
+        match chip.strategy {
+            BigIntStrategy::Simple => {
+                // Constrain `out_native = sum_i out_assigned[i] * 2^{n*i}` in `F`
+                let (_, _, native) = gate.inner_product(
+                    layouter,
+                    &limbs.iter().map(|a| Existing(a)).collect(),
+                    &pows,
+                )?;
+                Ok(native)
+            }
+            BigIntStrategy::CustomVerticalShort => layouter.assign_region(
+                || "",
+                |mut region| {
+                    let (cells, enable_sel) = mul_no_carry::witness_dot_constant(
+                        gate,
+                        chip,
+                        &limbs.iter().map(|a| Existing(a)).collect(),
+                        &pows.iter().map(|qc| qc.value().unwrap().clone()).collect(),
+                    )?;
+                    let (assignments, gate_index) =
+                        gate.assign_region(cells, vec![], 0, &mut region)?;
+                    for (c, row) in &enable_sel {
+                        chip.q_dot_constant.get(c).expect("should have constant for custom gate")
+                            [gate_index]
+                            .enable(&mut region, *row)?;
+                    }
+                    Ok(assignments.last().unwrap().clone())
+                },
+            ),
+        }
     }
 }
 
@@ -221,21 +248,32 @@ impl<F: FieldExt> FixedCRTInteger<F> {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum BigIntStrategy {
-    Simple,              // use existing gates
-    CustomVerticalTrunc, // vertical custom gates for truncative polynomial operations
+    // use existing gates
+    Simple,
+    // vertical custom gates of length 4 for dot product between an unknown vector and a constant vector, both of length 3
+    // we restrict to gate of length 4 since this uses the same set of evaluation points Rotation(0..=3) as our simple gate
+    CustomVerticalShort,
 }
 
-#[derive(Clone, Debug)]
+impl Default for BigIntStrategy {
+    fn default() -> Self {
+        BigIntStrategy::Simple
+    }
+}
+
+pub const GATE_LEN: usize = 4;
+
+#[derive(Clone, Debug, Default)]
 pub struct BigIntConfig<F: FieldExt> {
     // everything is empty if strategy is `Simple`
 
-    // selector for custom gate for `mul_no_carry`
-    // `q_mul_no_carry[k][i]` stores the selector for a custom gate to multiply two degree `k - 1` polynomials using index `i` vertical gate
-    // gate implementation depends on the strategy
-    pub q_mul_no_carry: HashMap<usize, Vec<Selector>>,
-    // selector for custom gate that multiplies bigint with `num_limbs` limbs with a constant bigint with `num_limbs` limbs
-    // `q_mul_no_carry_constant[p][i]` stores the selector for gate to multiply by constant `p` using index `i` vertical gate
-    pub q_mul_no_carry_constant: HashMap<BigUint, Vec<Selector>>,
+    // selector for custom gate
+    // | a0 | a1 | a2 | a3 |
+    // that constraints a3 = <[a0, a1, a2], [c0, c1, c2]> (dot product) = a0 * c0 + a1 * c1 + a2 * c2
+    // for a constant vector `c = [c0, c1, c2]`
+    // `q_dot_constant[c][i]` stores the selector for gate to dot product with `c` using index `i` vertical gate
+    // Using BigUint for max flexibility (FieldExt does not impl Hashable); TODO: can be optimized if speed is a concern
+    pub q_dot_constant: HashMap<Vec<BigUint>, Vec<Selector>>,
     strategy: BigIntStrategy,
     _marker: PhantomData<F>,
 }
@@ -247,44 +285,23 @@ impl<F: FieldExt> BigIntConfig<F> {
         limb_bits: usize,
         num_limbs: usize,
         gate_config: &FlexGateConfig<F>,
-        constants: Vec<BigUint>,
+        constants: Vec<Vec<BigUint>>, // collection of the constant vectors we want custom dot product gates for
     ) -> Self {
-        let mut q_mul_no_carry = HashMap::new();
-        let mut q_mul_no_carry_constant = HashMap::new();
+        let mut q_dot_constant = HashMap::new();
         match strategy {
-            BigIntStrategy::CustomVerticalTrunc => {
-                q_mul_no_carry.insert(
-                    num_limbs,
-                    gate_config
-                        .gates
-                        .iter()
-                        .map(|gate| {
-                            let q = meta.selector();
-                            create_vertical_mul_no_carry_gate(
-                                meta,
-                                &strategy,
-                                num_limbs,
-                                gate.value.clone(),
-                                q,
-                            );
-                            q
-                        })
-                        .collect(),
-                );
+            BigIntStrategy::CustomVerticalShort => {
                 for constant in &constants {
-                    q_mul_no_carry_constant.insert(
+                    assert!(constant.len() < GATE_LEN);
+                    q_dot_constant.insert(
                         constant.clone(),
                         gate_config
                             .gates
                             .iter()
                             .map(|gate| {
                                 let q = meta.selector();
-                                create_vertical_mul_no_carry_constant_gate(
+                                create_vertical_dot_constant_gate(
                                     meta,
-                                    &strategy,
-                                    limb_bits,
-                                    num_limbs,
-                                    constant,
+                                    constant.iter().map(|c| biguint_to_fe::<F>(c)).collect(),
                                     gate.value.clone(),
                                     q,
                                 );
@@ -296,75 +313,31 @@ impl<F: FieldExt> BigIntConfig<F> {
             }
             _ => {}
         }
-        Self { q_mul_no_carry, q_mul_no_carry_constant, strategy, _marker: PhantomData }
+        Self { q_dot_constant, strategy, _marker: PhantomData }
     }
 }
 
-fn create_vertical_mul_no_carry_gate<F: FieldExt>(
+/// Takes transpose of | a0 | a1 | .. | a_{k-1} | a_k |
+/// and constrains a0 * c0 + ... + a_{k-1} * c_{k-1} = a_k
+/// where c is constant vector of length k
+fn create_vertical_dot_constant_gate<F: FieldExt>(
     meta: &mut ConstraintSystem<F>,
-    strategy: &BigIntStrategy,
-    k: usize,
+    mut constant: Vec<F>,
     value: Column<Advice>,
     selector: Selector,
 ) {
-    if *strategy == BigIntStrategy::CustomVerticalTrunc {
-        meta.create_gate("custom vertical mul_no_carry gate", |meta| {
-            let q = meta.query_selector(selector);
-            let a: Vec<Expression<F>> =
-                (0..k).map(|i| meta.query_advice(value.clone(), Rotation(i as i32))).collect();
-            let b: Vec<Expression<F>> = (0..k)
-                .map(|i| meta.query_advice(value.clone(), Rotation((k + i) as i32)))
-                .collect();
-            let out: Vec<Expression<F>> =
-                (0..k).map(|i| meta.query_advice(value, Rotation((k + k + i) as i32))).collect();
-            let ab: Vec<Expression<F>> = (0..k)
-                .map(|i| {
-                    (0..=i).fold(Expression::Constant(F::from(0)), |sum, j| {
-                        sum + a[j].clone() * b[i - j].clone()
-                    })
-                })
-                .collect();
-            out.iter()
-                .zip(ab.iter())
-                .map(|(out, ab)| q.clone() * (ab.clone() - out.clone()))
-                .collect::<Vec<Expression<F>>>()
-        })
-    }
-}
+    constant.extend((constant.len()..(GATE_LEN - 1)).map(|_| F::from(0)));
+    assert_eq!(constant.len(), GATE_LEN - 1);
+    meta.create_gate("custom vertical dot constant gate", |meta| {
+        let q = meta.query_selector(selector);
+        let a: Vec<Expression<F>> = (0..constant.len())
+            .map(|i| meta.query_advice(value.clone(), Rotation(i as i32)))
+            .collect();
+        let out = meta.query_advice(value, Rotation(constant.len() as i32));
+        let a_dot_c = (0..constant.len()).fold(Expression::Constant(F::from(0)), |sum, j| {
+            sum + a[j].clone() * Expression::Constant(constant[j])
+        });
 
-fn create_vertical_mul_no_carry_constant_gate<F: FieldExt>(
-    meta: &mut ConstraintSystem<F>,
-    strategy: &BigIntStrategy,
-    limb_bits: usize,
-    num_limbs: usize,
-    constant: &BigUint,
-    value: Column<Advice>,
-    selector: Selector,
-) {
-    if *strategy == BigIntStrategy::CustomVerticalTrunc {
-        meta.create_gate("custom vertical mul_no_carry_with_p gate", |meta| {
-            let q = meta.query_selector(selector);
-            let a: Vec<Expression<F>> = (0..num_limbs)
-                .map(|i| meta.query_advice(value.clone(), Rotation(i as i32)))
-                .collect();
-            let b: Vec<Expression<F>> = decompose_biguint(constant, num_limbs, limb_bits)
-                .iter()
-                .map(|x| Expression::Constant(*x))
-                .collect();
-            let out: Vec<Expression<F>> = (0..num_limbs)
-                .map(|i| meta.query_advice(value, Rotation((num_limbs + i) as i32)))
-                .collect();
-            let ab: Vec<Expression<F>> = (0..num_limbs)
-                .map(|i| {
-                    (0..=i).fold(Expression::Constant(F::from(0)), |sum, j| {
-                        sum + a[j].clone() * b[i - j].clone()
-                    })
-                })
-                .collect();
-            out.iter()
-                .zip(ab.iter())
-                .map(|(out, ab)| q.clone() * (ab.clone() - out.clone()))
-                .collect::<Vec<Expression<F>>>()
-        })
-    }
+        vec![q * (a_dot_c - out)]
+    })
 }

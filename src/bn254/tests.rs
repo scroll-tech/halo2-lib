@@ -236,7 +236,7 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
     folder.pop();
     folder.pop();
 
-    folder.push("results/pairing_bench_gpu.csv");
+    folder.push("results/pairing_bench.csv");
     let mut fs_results = std::fs::File::create(folder.as_path()).unwrap();
     folder.pop();
     folder.pop();
@@ -269,7 +269,7 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
             let mut f = std::fs::File::create(folder.as_path())?;
             write!(f, "{}", serde_json::to_string(&bench_params).unwrap())?;
             folder.pop();
-	    folder.pop();
+            folder.pop();
             folder.push("data");
         }
         let params = {

@@ -362,24 +362,63 @@ pub fn crt<F: FieldExt>(
                 check_assigned.push(check_cell);
             }
         }
-        BigIntStrategy::CustomVerticalTrunc => {
-            let (assigned, prod_assigned) = mul_no_carry::witness_by_constant(
-                range.gate(),
-                chip,
-                layouter,
-                &quot_vec,
-                &mod_vec,
-                modulus,
-            )?;
-            check_assigned.extend(prod_assigned.iter().zip(a.truncation.limbs.iter()).map(
-                |(prod, a)| {
-                    range
-                        .gate()
-                        .sub(layouter, &Existing(prod), &Existing(a))
-                        .expect("subtraction should not fail")
-                },
-            ));
-            quot_assigned = assigned;
+        BigIntStrategy::CustomVerticalShort => {
+            for i in 0..k {
+                let (quot_cell, check_cell) = layouter.assign_region(
+                    || format!("custom_vs_carry_mod_crt{}/{}", i, k),
+                    |mut region| {
+                        let (mut cells, enable_sel) = mul_no_carry::witness_dot_constant(
+                            range.gate(),
+                            chip,
+                            &(0..std::cmp::min(i + 1, k))
+                                .map(|j| {
+                                    if j != 0 {
+                                        Existing(&quot_assigned[i - j])
+                                    } else {
+                                        Witness(quot_vec[i])
+                                    }
+                                })
+                                .collect(),
+                            &(0..std::cmp::min(i + 1, k)).map(|j| mod_vec[j]).collect(),
+                        )?;
+                        let offset = cells.len() - 1;
+
+                        // perform step 2: compute prod - a + out
+                        // transpose of:
+                        // | prod | -1 | a | prod - a | 1 | out | prod - a + out
+                        // where prod is at relative row `offset`
+                        let prod_val = cells.last().unwrap().value();
+                        let check_val =
+                            prod_val.zip(a.truncation.limbs[i].value()).map(|(&prod, &a)| prod - a);
+
+                        cells.append(&mut vec![
+                            Constant(-F::from(1)),
+                            Existing(&a.truncation.limbs[i]),
+                            Witness(check_val),
+                        ]);
+
+                        // assign all the cells above
+                        let (assignments, gate_index) =
+                            range.gate().assign_region(cells, vec![offset], 0, &mut region)?;
+                        // enable custom gates
+                        for (c, row) in &enable_sel {
+                            chip.q_dot_constant.get(c).expect(
+                                format!("should have custom dot product for {:?}", *c).as_str(),
+                            )[gate_index]
+                                .enable(&mut region, *row)?;
+                        }
+
+                        Ok((
+                            // new quot_assigned is at offset 0
+                            assignments[0].clone(),
+                            // check_assigned
+                            assignments[offset + 3].clone(),
+                        ))
+                    },
+                )?;
+                quot_assigned.push(quot_cell);
+                check_assigned.push(check_cell);
+            }
         }
     }
 
@@ -461,7 +500,7 @@ pub fn crt<F: FieldExt>(
     }
     // Constrain `quot_native = sum_i out_assigned[i] * 2^{n*i}` in `F`
     let quot_native_consistency =
-        OverflowInteger::evaluate(range.gate(), layouter, &quot_assigned, n)?;
+        OverflowInteger::evaluate(range.gate(), chip, layouter, &quot_assigned, n)?;
     layouter.assign_region(
         || "native consistency equals",
         |mut region| {

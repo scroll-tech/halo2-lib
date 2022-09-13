@@ -24,15 +24,15 @@ use crate::{
         GateInstructions, QuantumCell, RangeInstructions,
     },
     utils::{
-        bigint_to_fe, decompose_bigint, decompose_bigint_option, decompose_biguint, fe_to_biguint,
-        modulus,
+        bigint_to_fe, decompose_bigint, decompose_bigint_option, decompose_biguint,
+        decompose_biguint_to_biguints, fe_to_biguint, modulus,
     },
 };
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum FpStrategy {
     Simple,
-    CustomVerticalCRT,
+    CustomVerticalShort,
 }
 
 #[derive(Clone, Debug)]
@@ -43,6 +43,8 @@ pub struct FpConfig<F: FieldExt> {
     pub num_limbs: usize,
     pub p: BigUint,
 }
+
+use crate::bigint::GATE_LEN;
 
 impl<F: FieldExt> FpConfig<F> {
     pub fn configure(
@@ -60,23 +62,55 @@ impl<F: FieldExt> FpConfig<F> {
             meta,
             match strategy {
                 FpStrategy::Simple => RangeStrategy::Vertical,
-                FpStrategy::CustomVerticalCRT => RangeStrategy::CustomVerticalShort,
+                FpStrategy::CustomVerticalShort => RangeStrategy::CustomVerticalShort,
             },
             num_advice,
             num_lookup_advice,
             num_fixed,
             lookup_bits,
         );
+        let mut constant_vecs = Vec::new();
+        let p_limbs = decompose_biguint_to_biguints(&p, num_limbs, limb_bits);
+        for i in 0..num_limbs {
+            if i < GATE_LEN {
+                constant_vecs.push(p_limbs[0..=i].into());
+            } else {
+                let shift = (i - 1) % (GATE_LEN - 2);
+                constant_vecs.push([&[BigUint::from(1u64)], &p_limbs[(i - shift)..=i]].concat());
+            }
+        }
+        let k_chunks = (num_limbs - 1 + GATE_LEN - 3) / (GATE_LEN - 2);
+        for i in 0..k_chunks {
+            if i == 0 {
+                constant_vecs.push(
+                    (0..std::cmp::min(num_limbs, GATE_LEN - 1))
+                        .map(|j| BigUint::from(1u64) << (j * limb_bits))
+                        .collect(),
+                );
+            } else {
+                constant_vecs.push(
+                    [
+                        &[BigUint::from(1u64)],
+                        &((1 + i * (GATE_LEN - 2))
+                            ..std::cmp::min(1 + (i + 1) * (GATE_LEN - 2), num_limbs))
+                            .map(|j| BigUint::from(1u64) << (j * limb_bits))
+                            .collect::<Vec<BigUint>>()[..],
+                    ]
+                    .concat(),
+                );
+            }
+        }
+
         let bigint_config = BigIntConfig::<F>::configure(
             meta,
             match strategy {
                 FpStrategy::Simple => BigIntStrategy::Simple,
-                FpStrategy::CustomVerticalCRT => BigIntStrategy::CustomVerticalTrunc,
+                FpStrategy::CustomVerticalShort => BigIntStrategy::CustomVerticalShort,
             },
             limb_bits,
             num_limbs,
             &range_config.gate_config,
-            vec![p.clone()],
+            constant_vecs,
         );
         FpConfig { range_config, bigint_config, limb_bits, num_limbs, p }
     }
@@ -158,8 +192,13 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpChip<'_, F, Fp> {
             },
         )?;
 
-        let a_native =
-            OverflowInteger::evaluate(self.range.gate(), layouter, &limbs, self.limb_bits)?;
+        let a_native = OverflowInteger::evaluate(
+            self.range.gate(),
+            &self.bigint_config,
+            layouter,
+            &limbs,
+            self.limb_bits,
+        )?;
 
         Ok(CRTInteger::construct(
             OverflowInteger::construct(
@@ -449,7 +488,7 @@ pub(crate) mod tests {
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
             FpConfig::configure(
                 meta,
-                FpStrategy::Simple,
+                FpStrategy::CustomVerticalShort,
                 NUM_ADVICE,
                 1,
                 NUM_FIXED,

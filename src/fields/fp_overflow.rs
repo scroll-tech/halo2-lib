@@ -13,7 +13,7 @@ use super::{FieldChip, PrimeFieldChip, Selectable};
 use crate::bigint::{
     add_no_carry, big_is_equal, big_is_zero, carry_mod, check_carry_mod_to_zero, inner_product,
     mul_no_carry, scalar_mul_and_add_no_carry, scalar_mul_no_carry, select, sub, sub_no_carry,
-    CRTInteger, FixedCRTInteger, OverflowInteger,
+    BigIntConfig, CRTInteger, FixedCRTInteger, OverflowInteger,
 };
 use crate::fields::fp::{FpChip, FpConfig};
 use crate::gates::range::{RangeChip, RangeConfig};
@@ -46,8 +46,13 @@ impl<'a, F: FieldExt, Fp: PrimeField> FpOverflowChip<'a, F, Fp> {
         layouter: &mut impl Layouter<F>,
         a: &OverflowInteger<F>,
     ) -> Result<CRTInteger<F>, Error> {
-        let a_native =
-            OverflowInteger::evaluate(self.range.gate(), layouter, &a.limbs, a.limb_bits)?;
+        let a_native = OverflowInteger::evaluate(
+            self.range.gate(),
+            &BigIntConfig::default(),
+            layouter,
+            &a.limbs,
+            a.limb_bits,
+        )?;
         let a_bigint = a.to_bigint();
 
         Ok(CRTInteger::construct(a.clone(), a_native, a_bigint))

@@ -1,5 +1,4 @@
 #![allow(non_snake_case)]
-use seq_macro::seq;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::marker::PhantomData;
@@ -401,7 +400,7 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
             let mut f = std::fs::File::create(folder.as_path())?;
             write!(f, "{}", serde_json::to_string(&bench_params).unwrap())?;
             folder.pop();
-	    folder.pop();
+            folder.pop();
             folder.push("data");
         }
         let params = {

@@ -51,6 +51,7 @@ fn create_vertical_range_gate<F: FieldExt>(
     value: Column<Advice>,
     selector: Selector,
 ) {
+    assert_eq!(k as usize, crate::bigint::GATE_LEN - 1);
     meta.create_gate("custom vertical range gate", |meta| {
         let q = meta.query_selector(selector);
         let out = meta.query_advice(value, Rotation::cur());
