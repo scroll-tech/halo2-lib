@@ -30,16 +30,20 @@ pub trait GateInstructions<F: FieldExt> {
     fn assign_region(
         &mut self,
         inputs: Vec<QuantumCell<F>>,
+        gate_offsets: Vec<usize>,
         offset: usize,
         region: &mut Region<'_, F>,
     ) -> Result<(Vec<AssignedCell<F, F>>, usize), Error>;
 
-    fn enable(
-        &self,
-        region: &mut Region<'_, F>,
-        gate_index: usize,
+    fn assign_region_smart(
+        &mut self,
+        inputs: Vec<QuantumCell<F>>,
+        gate_offsets: Vec<usize>,
+        equality_offsets: Vec<(usize, usize)>,
+        external_equality: Vec<(&AssignedCell<F, F>, usize)>,
         offset: usize,
-    ) -> Result<(), Error>;
+        region: &mut Region<'_, F>,
+    ) -> Result<Vec<AssignedCell<F, F>>, Error>;
 
     fn add(
         &mut self,
@@ -127,12 +131,14 @@ pub trait RangeInstructions<F: FieldExt> {
 
     fn lookup_bits(&self) -> usize;
 
+    /*
     fn enable_lookup(
-        &self,
+        &mut self,
         region: &mut Region<'_, F>,
-        column_index: usize,
+        acell: AssignedCell<F, F>,
         offset: usize,
     ) -> Result<(), Error>;
+    */
 
     fn range_check(
         &mut self,

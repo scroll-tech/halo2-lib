@@ -2,7 +2,8 @@ use halo2_proofs::arithmetic::FieldExt;
 use halo2curves::bn254::{Fq, Fq12, Fq2, Fq6};
 
 use crate::{
-    fields::{fp, fp12, fp2, FieldExtConstructor},
+    bigint::{CRTInteger, OverflowInteger},
+    fields::{fp, fp12, fp2, fp_overflow, FieldExtConstructor, FieldExtPoint},
     utils::{biguint_to_fe, fe_to_biguint},
 };
 
@@ -11,8 +12,12 @@ pub mod pairing;
 
 type FpConfig<F> = fp::FpConfig<F>;
 type FpChip<'a, F> = fp::FpChip<'a, F, Fq>;
+type FpPoint<F> = CRTInteger<F>;
+// type FpChip<'a, F> = fp_overflow::FpOverflowChip<'a, F, Fq>;
+// type FpPoint<F> = OverflowInteger<F>;
+type FqPoint<F> = FieldExtPoint<FpPoint<F>>;
 type Fp2Chip<'a, 'b, F> = fp2::Fp2Chip<'a, 'b, F, FpChip<'b, F>, Fq2>;
-type Fp12Chip<'a, 'b, F> = fp12::Fp12Chip<'a, 'b, F, FpChip<'b, F>, Fq12>;
+type Fp12Chip<'a, 'b, F> = fp12::Fp12Chip<'a, 'b, F, FpChip<'b, F>, Fq12, 9>;
 
 impl FieldExtConstructor<Fq, 2> for Fq2 {
     fn new(c: [Fq; 2]) -> Self {

@@ -36,6 +36,7 @@ pub fn assign<F: FieldExt>(
         out_limbs,
         a.max_limb_size.clone() + b.max_limb_size.clone(),
         a.limb_bits,
+        &a.max_size + &b.max_size,
     ))
 }
 
@@ -49,5 +50,5 @@ pub fn crt<F: FieldExt>(
     let out_trunc = assign(gate, layouter, &a.truncation, &b.truncation)?;
     let out_native = gate.add(layouter, &Existing(&a.native), &Existing(&b.native))?;
     let out_val = a.value.as_ref().zip(b.value.as_ref()).map(|(a, b)| a + b);
-    Ok(CRTInteger::construct(out_trunc, out_native, out_val, &a.max_size + &b.max_size))
+    Ok(CRTInteger::construct(out_trunc, out_native, out_val))
 }

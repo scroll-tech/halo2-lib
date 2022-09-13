@@ -4,59 +4,122 @@ use ff::PrimeField;
 use halo2_proofs::{
     arithmetic::{BaseExt, Field, FieldExt},
     circuit::{AssignedCell, Layouter},
-    plonk::{Advice, Column, ConstraintSystem, Error, Fixed, Selector, TableColumn},
+    plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed, Selector, TableColumn},
+    poly::Rotation,
 };
 use num_bigint::{BigInt, BigUint};
 use num_traits::Num;
+use serde::{Deserialize, Serialize};
 
 use super::{FieldChip, PrimeFieldChip, Selectable};
 use crate::{
     bigint::{
         add_no_carry, big_is_equal, big_is_zero, big_less_than, carry_mod, check_carry_mod_to_zero,
-        inner_product, mul_no_carry, scalar_mul_no_carry, select, sub, sub_no_carry, CRTInteger,
-        FixedCRTInteger, OverflowInteger,
+        inner_product, mul_no_carry, scalar_mul_and_add_no_carry, scalar_mul_no_carry, select, sub,
+        sub_no_carry, BigIntConfig, BigIntStrategy, CRTInteger, FixedCRTInteger, OverflowInteger,
     },
     gates::QuantumCell::{Constant, Existing, Witness},
     gates::{
-        range::{RangeChip, RangeConfig},
+        range::{RangeChip, RangeConfig, RangeStrategy},
         GateInstructions, QuantumCell, RangeInstructions,
     },
     utils::{
-        bigint_to_fe, decompose_bigint, decompose_bigint_option, decompose_biguint, fe_to_biguint,
-        modulus,
+        bigint_to_fe, decompose_bigint, decompose_bigint_option, decompose_biguint,
+        decompose_biguint_to_biguints, fe_to_biguint, modulus,
     },
 };
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub enum FpStrategy {
+    Simple,
+    CustomVerticalShort,
+}
 
 #[derive(Clone, Debug)]
 pub struct FpConfig<F: FieldExt> {
     pub range_config: RangeConfig<F>,
+    pub bigint_config: BigIntConfig<F>,
     pub limb_bits: usize,
     pub num_limbs: usize,
     pub p: BigUint,
 }
 
+use crate::bigint::GATE_LEN;
+
 impl<F: FieldExt> FpConfig<F> {
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
+        strategy: FpStrategy,
         num_advice: usize,
+        num_lookup_advice: usize,
         num_fixed: usize,
         lookup_bits: usize,
         limb_bits: usize,
         num_limbs: usize,
         p: BigUint,
     ) -> Self {
-        FpConfig {
-            range_config: RangeConfig::<F>::configure(meta, num_advice, num_fixed, lookup_bits),
+        let range_config = RangeConfig::<F>::configure(
+            meta,
+            match strategy {
+                FpStrategy::Simple => RangeStrategy::Vertical,
+                FpStrategy::CustomVerticalShort => RangeStrategy::CustomVerticalShort,
+            },
+            num_advice,
+            num_lookup_advice,
+            num_fixed,
+            lookup_bits,
+        );
+        let mut constant_vecs = Vec::new();
+        let p_limbs = decompose_biguint_to_biguints(&p, num_limbs, limb_bits);
+        for i in 0..num_limbs {
+            if i < GATE_LEN {
+                constant_vecs.push(p_limbs[0..=i].into());
+            } else {
+                let shift = (i - 1) % (GATE_LEN - 2);
+                constant_vecs.push([&[BigUint::from(1u64)], &p_limbs[(i - shift)..=i]].concat());
+            }
+        }
+        let k_chunks = (num_limbs - 1 + GATE_LEN - 3) / (GATE_LEN - 2);
+        for i in 0..k_chunks {
+            if i == 0 {
+                constant_vecs.push(
+                    (0..std::cmp::min(num_limbs, GATE_LEN - 1))
+                        .map(|j| BigUint::from(1u64) << (j * limb_bits))
+                        .collect(),
+                );
+            } else {
+                constant_vecs.push(
+                    [
+                        &[BigUint::from(1u64)],
+                        &((1 + i * (GATE_LEN - 2))
+                            ..std::cmp::min(1 + (i + 1) * (GATE_LEN - 2), num_limbs))
+                            .map(|j| BigUint::from(1u64) << (j * limb_bits))
+                            .collect::<Vec<BigUint>>()[..],
+                    ]
+                    .concat(),
+                );
+            }
+        }
+
+        let bigint_config = BigIntConfig::<F>::configure(
+            meta,
+            match strategy {
+                FpStrategy::Simple => BigIntStrategy::Simple,
+                FpStrategy::CustomVerticalShort => BigIntStrategy::CustomVerticalShort,
+            },
             limb_bits,
             num_limbs,
-            p,
-        }
+            &range_config.gate_config,
+            constant_vecs,
+        );
+        FpConfig { range_config, bigint_config, limb_bits, num_limbs, p }
     }
 }
 
 #[derive(Debug)]
 pub struct FpChip<'a, F: FieldExt, Fp: PrimeField> {
     pub range: &'a mut RangeChip<F>,
+    pub bigint_config: BigIntConfig<F>,
     pub limb_bits: usize,
     pub num_limbs: usize,
     pub p: BigUint,
@@ -80,6 +143,7 @@ impl<'a, F: FieldExt, Fp: PrimeField> PrimeFieldChip<'a, F> for FpChip<'a, F, Fp
     ) -> Self {
         Self {
             range: range_chip,
+            bigint_config: config.bigint_config,
             limb_bits: config.limb_bits,
             num_limbs: config.num_limbs,
             p: config.p,
@@ -116,8 +180,11 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpChip<'_, F, Fp> {
         let limbs = layouter.assign_region(
             || "load private",
             |mut region| {
-                let (limbs, _) = self.range.gate().assign_region(
+                let limbs = self.range.gate().assign_region_smart(
                     a_vec.iter().map(|x| Witness(x.clone())).collect(),
+                    vec![],
+                    vec![],
+                    vec![],
                     0,
                     &mut region,
                 )?;
@@ -125,18 +192,23 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpChip<'_, F, Fp> {
             },
         )?;
 
-        let a_native =
-            OverflowInteger::evaluate(self.range.gate(), layouter, &limbs, self.limb_bits)?;
+        let a_native = OverflowInteger::evaluate(
+            self.range.gate(),
+            &self.bigint_config,
+            layouter,
+            &limbs,
+            self.limb_bits,
+        )?;
 
         Ok(CRTInteger::construct(
             OverflowInteger::construct(
                 limbs,
                 BigUint::from(1u64) << self.limb_bits,
                 self.limb_bits,
+                &self.p - 1usize,
             ),
             a_native,
             a,
-            (BigUint::from(1u64) << self.p.bits()) - 1usize,
         ))
     }
 
@@ -152,7 +224,14 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpChip<'_, F, Fp> {
                 let mut a_vec: Vec<QuantumCell<F>> =
                     a_vec.iter().map(|v| Constant(v.clone())).collect();
                 a_vec.push(Constant(bigint_to_fe(&a)));
-                let (mut a_cells, _) = self.range.gate().assign_region(a_vec, 0, &mut region)?;
+                let mut a_cells = self.range.gate().assign_region_smart(
+                    a_vec,
+                    vec![],
+                    vec![],
+                    vec![],
+                    0,
+                    &mut region,
+                )?;
                 let a_native = a_cells.pop().unwrap();
                 Ok((a_cells, a_native))
             },
@@ -163,10 +242,10 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpChip<'_, F, Fp> {
                 a_limbs,
                 BigUint::from(1u64) << self.limb_bits,
                 self.limb_bits,
+                &self.p - 1usize,
             ),
             a_native,
             Some(a),
-            (BigUint::from(1u64) << self.p.bits()) - 1usize,
         ))
     }
 
@@ -217,13 +296,23 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpChip<'_, F, Fp> {
         scalar_mul_no_carry::crt(self.range.gate(), layouter, a, b)
     }
 
+    fn scalar_mul_and_add_no_carry(
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        a: &CRTInteger<F>,
+        b: &CRTInteger<F>,
+        c: F,
+    ) -> Result<CRTInteger<F>, Error> {
+        scalar_mul_and_add_no_carry::crt(self.range.gate(), layouter, a, b, c)
+    }
+
     fn mul_no_carry(
         &mut self,
         layouter: &mut impl Layouter<F>,
         a: &CRTInteger<F>,
         b: &CRTInteger<F>,
     ) -> Result<CRTInteger<F>, Error> {
-        mul_no_carry::crt(self.range.gate(), layouter, a, b)
+        mul_no_carry::crt(self.range.gate(), &self.bigint_config, layouter, a, b)
     }
 
     fn check_carry_mod_to_zero(
@@ -231,7 +320,7 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpChip<'_, F, Fp> {
         layouter: &mut impl Layouter<F>,
         a: &CRTInteger<F>,
     ) -> Result<(), Error> {
-        check_carry_mod_to_zero::crt(self.range, layouter, a, &self.p)
+        check_carry_mod_to_zero::crt(self.range, &self.bigint_config, layouter, a, &self.p)
     }
 
     fn carry_mod(
@@ -239,7 +328,7 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpChip<'_, F, Fp> {
         layouter: &mut impl Layouter<F>,
         a: &CRTInteger<F>,
     ) -> Result<CRTInteger<F>, Error> {
-        carry_mod::crt(self.range, layouter, a, &self.p)
+        carry_mod::crt(self.range, &self.bigint_config, layouter, a, &self.p)
     }
 
     fn range_check(
@@ -249,12 +338,12 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpChip<'_, F, Fp> {
     ) -> Result<(), Error> {
         let n = a.truncation.limb_bits;
         let k = a.truncation.limbs.len();
-        assert!(a.max_size.bits() as usize <= n * k);
-        let last_limb_bits = a.max_size.bits() as usize - n * (k - 1);
+        assert!(a.truncation.max_size.bits() as usize <= n * k);
+        let last_limb_bits = a.truncation.max_size.bits() as usize - n * (k - 1);
         assert!(last_limb_bits > 0);
 
         if a.value != None {
-            assert!(a.value.clone().unwrap().bits() <= a.max_size.bits());
+            assert!(a.value.clone().unwrap().bits() <= a.truncation.max_size.bits());
         }
 
         // range check limbs of `a` are in [0, 2^n) except last limb should be in [0, 2^last_limb_bits)
@@ -302,6 +391,35 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpChip<'_, F, Fp> {
             self.range.gate().and(layouter, &Existing(&is_nonzero), &Existing(&range_check))?;
         Ok(res)
     }
+
+    // constrain the witness `a` to be `< p`
+    // then check if `a` is 0
+    fn is_zero(
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        a: &CRTInteger<F>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        // underflow != 0 iff carry < p
+        let p = self.load_constant(layouter, BigInt::from(self.p.clone()))?;
+        let (diff, underflow) = sub::crt(self.range, layouter, a, &p)?;
+        let is_underflow_zero = self.range.is_zero(layouter, &underflow)?;
+        layouter.assign_region(
+            || "",
+            |mut region| {
+                self.range.gate.assign_region_smart(
+                    vec![Constant(F::from(0))],
+                    vec![],
+                    vec![],
+                    vec![(&is_underflow_zero, 0)],
+                    0,
+                    &mut region,
+                )?;
+                Ok(())
+            },
+        )?;
+
+        big_is_zero::crt(self.range, layouter, a)
+    }
 }
 
 impl<F: FieldExt, Fp: PrimeField> Selectable<F> for FpChip<'_, F, Fp> {
@@ -341,10 +459,13 @@ pub(crate) mod tests {
 
     use crate::fields::fp::{FpChip, FpConfig};
     use crate::fields::{FieldChip, PrimeFieldChip};
+    use crate::gates::flex_gate::GateStrategy;
     use crate::gates::range::RangeChip;
     use crate::gates::RangeInstructions;
     use crate::utils::{fe_to_bigint, modulus};
     use num_bigint::{BigInt, BigUint};
+
+    use super::FpStrategy;
 
     #[derive(Default)]
     struct MyCircuit<F> {
@@ -353,8 +474,8 @@ pub(crate) mod tests {
         _marker: PhantomData<F>,
     }
 
-    const NUM_ADVICE: usize = 2;
-    const NUM_FIXED: usize = 2;
+    const NUM_ADVICE: usize = 1;
+    const NUM_FIXED: usize = 1;
 
     impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         type Config = FpConfig<F>;
@@ -365,7 +486,17 @@ pub(crate) mod tests {
         }
 
         fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-            FpConfig::configure(meta, NUM_ADVICE, NUM_FIXED, 17, 68, 4, modulus::<Fq>())
+            FpConfig::configure(
+                meta,
+                FpStrategy::CustomVerticalShort,
+                NUM_ADVICE,
+                1,
+                NUM_FIXED,
+                22,
+                88,
+                3,
+                modulus::<Fq>(),
+            )
         }
 
         fn synthesize(
@@ -402,7 +533,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_fp() {
-        let k = 18;
+        let k = 23;
         let a = Fq::rand();
         let b = Fq::rand();
 

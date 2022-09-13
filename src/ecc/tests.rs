@@ -1,9 +1,9 @@
 #![allow(unused_assignments, unused_imports, unused_variables)]
 use std::marker::PhantomData;
 
-use crate::fields::fp::{FpChip, FpConfig};
+use crate::fields::fp::{FpChip, FpConfig, FpStrategy};
 use crate::fields::fp2::Fp2Chip;
-use crate::gates::range::RangeChip;
+use crate::gates::range::{RangeChip, RangeStrategy};
 
 use super::*;
 use halo2_proofs::arithmetic::BaseExt;
@@ -38,7 +38,17 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
         let value = meta.advice_column();
         let constant = meta.fixed_column();
-        FpConfig::configure(meta, NUM_ADVICE, NUM_FIXED, 22, 88, 3, modulus::<Fq>())
+        FpConfig::configure(
+            meta,
+            FpStrategy::Simple,
+            NUM_ADVICE,
+            1,
+            NUM_FIXED,
+            22,
+            88,
+            3,
+            modulus::<Fq>(),
+        )
     }
 
     fn synthesize(

@@ -59,22 +59,32 @@ pub fn decompose<F: PrimeField>(e: &F, number_of_limbs: usize, bit_len: usize) -
     decompose_bigint(&fe_to_bigint(e), number_of_limbs, bit_len)
 }
 
+pub fn decompose_biguint_to_biguints(
+    e: &BigUint,
+    number_of_limbs: usize,
+    bit_len: usize,
+) -> Vec<BigUint> {
+    let mut e = e.clone();
+    let mask = BigUint::from(1usize).shl(bit_len) - 1usize;
+    let limbs = (0..number_of_limbs)
+        .map(|_| {
+            let limb = &mask & &e;
+            e = &e >> bit_len;
+            limb
+        })
+        .collect();
+    // assert_eq!(e, BigUint::zero());
+    limbs
+}
 pub fn decompose_biguint<F: PrimeField>(
     e: &BigUint,
     number_of_limbs: usize,
     bit_len: usize,
 ) -> Vec<F> {
-    let mut e = e.clone();
-    let mask = BigUint::from(1usize).shl(bit_len) - 1usize;
-    let limbs: Vec<F> = (0..number_of_limbs)
-        .map(|_| {
-            let limb = &mask & &e;
-            e = &e >> bit_len;
-            biguint_to_fe(&limb)
-        })
-        .collect();
-    // assert_eq!(e, BigUint::zero());
-    limbs
+    decompose_biguint_to_biguints(e, number_of_limbs, bit_len)
+        .iter()
+        .map(|x| biguint_to_fe(x))
+        .collect()
 }
 
 pub fn decompose_bigint<F: PrimeField>(
@@ -83,11 +93,8 @@ pub fn decompose_bigint<F: PrimeField>(
     bit_len: usize,
 ) -> Vec<F> {
     let sgn = e.sign();
-    let mut e: BigUint = if e.is_negative() {
-        e.neg().to_biguint().unwrap()
-    } else {
-        e.to_biguint().unwrap()
-    };
+    let mut e: BigUint =
+        if e.is_negative() { e.neg().to_biguint().unwrap() } else { e.to_biguint().unwrap() };
     let mask = (BigUint::one() << bit_len) - 1usize;
     let limbs: Vec<F> = (0..number_of_limbs)
         .map(|_| {
@@ -164,18 +171,12 @@ pub fn decompose_biguint_option<F: PrimeField>(
 /// passing as input its limb values and the bit length used.
 /// Returns the sum of all limbs scaled by 2^(bit_len * i)
 pub fn compose(input: Vec<BigUint>, bit_len: usize) -> BigUint {
-    input
-        .iter()
-        .rev()
-        .fold(BigUint::zero(), |acc, val| (acc << bit_len) + val)
+    input.iter().rev().fold(BigUint::zero(), |acc, val| (acc << bit_len) + val)
 }
 
 #[cfg(test)]
 #[test]
 fn test_signed_roundtrip() {
     use halo2_proofs::pairing::bn256::Fr as F;
-    assert_eq!(
-        fe_to_bigint(&bigint_to_fe::<F>(&-BigInt::one())),
-        -BigInt::one()
-    );
+    assert_eq!(fe_to_bigint(&bigint_to_fe::<F>(&-BigInt::one())), -BigInt::one());
 }

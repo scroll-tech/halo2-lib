@@ -1,10 +1,12 @@
 [package]
-name = "halo2-pairing"
-version = "0.1.0"
+name = "halo2_ecc"
+version = "0.0.1"
 edition = "2021"
 
 [patch.crates-io]
 halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2.git", tag = "v2022_06_03" }
+#halo2_proofs = { git = "ssh://git@github.com/scroll-tech/halo2-gpu.git" }
+#halo2_proofs = { path = "../halo2-gpu/halo2_proofs" }
 
 [features]
 dev-graph = ["halo2_proofs/dev-graph", "plotters"]
@@ -24,4 +26,5 @@ tabbycat = { version = "0.1", features = ["attributes"], optional = true }
 lazy_static = "1.4.0"
 rand_core = { version = "0.6", default-features = false }
 rand = "0.8"
-seq-macro = "0.3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"

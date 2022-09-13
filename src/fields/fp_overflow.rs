@@ -12,8 +12,8 @@ use num_traits::Num;
 use super::{FieldChip, PrimeFieldChip, Selectable};
 use crate::bigint::{
     add_no_carry, big_is_equal, big_is_zero, carry_mod, check_carry_mod_to_zero, inner_product,
-    mul_no_carry, scalar_mul_no_carry, select, sub, sub_no_carry, CRTInteger, FixedCRTInteger,
-    OverflowInteger,
+    mul_no_carry, scalar_mul_and_add_no_carry, scalar_mul_no_carry, select, sub, sub_no_carry,
+    BigIntConfig, CRTInteger, FixedCRTInteger, OverflowInteger,
 };
 use crate::fields::fp::{FpChip, FpConfig};
 use crate::gates::range::{RangeChip, RangeConfig};
@@ -46,16 +46,16 @@ impl<'a, F: FieldExt, Fp: PrimeField> FpOverflowChip<'a, F, Fp> {
         layouter: &mut impl Layouter<F>,
         a: &OverflowInteger<F>,
     ) -> Result<CRTInteger<F>, Error> {
-        let a_native =
-            OverflowInteger::evaluate(self.range.gate(), layouter, &a.limbs, a.limb_bits)?;
+        let a_native = OverflowInteger::evaluate(
+            self.range.gate(),
+            &BigIntConfig::default(),
+            layouter,
+            &a.limbs,
+            a.limb_bits,
+        )?;
         let a_bigint = a.to_bigint();
 
-        Ok(CRTInteger::construct(
-            a.clone(),
-            a_native,
-            a_bigint,
-            (BigUint::from(1u64) << self.p.bits()) - 1usize,
-        ))
+        Ok(CRTInteger::construct(a.clone(), a_native, a_bigint))
     }
 
     pub fn from_fp_chip(
@@ -115,8 +115,11 @@ impl<'a, F: FieldExt, Fp: PrimeField> FieldChip<F> for FpOverflowChip<'a, F, Fp>
         let limbs = layouter.assign_region(
             || "load private",
             |mut region| {
-                let (limbs, _) = self.range.gate().assign_region(
+                let limbs = self.range.gate().assign_region_smart(
                     a_vec.iter().map(|x| Witness(x.clone())).collect(),
+                    vec![],
+                    vec![],
+                    vec![],
                     0,
                     &mut region,
                 )?;
@@ -124,7 +127,12 @@ impl<'a, F: FieldExt, Fp: PrimeField> FieldChip<F> for FpOverflowChip<'a, F, Fp>
             },
         )?;
 
-        Ok(OverflowInteger::construct(limbs, BigUint::from(1u64) << self.limb_bits, self.limb_bits))
+        Ok(OverflowInteger::construct(
+            limbs,
+            BigUint::from(1u64) << self.limb_bits,
+            self.limb_bits,
+            &self.p - 1usize,
+        ))
     }
 
     fn load_constant(
@@ -136,8 +144,11 @@ impl<'a, F: FieldExt, Fp: PrimeField> FieldChip<F> for FpOverflowChip<'a, F, Fp>
         let a_limbs = layouter.assign_region(
             || "load constant",
             |mut region| {
-                let (a_limbs, _) = self.range.gate().assign_region(
+                let a_limbs = self.range.gate().assign_region_smart(
                     a_vec.iter().map(|v| Constant(v.clone())).collect(),
+                    vec![],
+                    vec![],
+                    vec![],
                     0,
                     &mut region,
                 )?;
@@ -149,6 +160,7 @@ impl<'a, F: FieldExt, Fp: PrimeField> FieldChip<F> for FpOverflowChip<'a, F, Fp>
             a_limbs,
             BigUint::from(1u64) << self.limb_bits,
             self.limb_bits,
+            &self.p - 1usize,
         ))
     }
 
@@ -186,9 +198,14 @@ impl<'a, F: FieldExt, Fp: PrimeField> FieldChip<F> for FpOverflowChip<'a, F, Fp>
         layouter.assign_region(
             || "fp negate no underflow",
             |mut region| {
-                let (zero, _) =
-                    self.range.gate().assign_region(vec![Constant(F::from(0))], 0, &mut region)?;
-                region.constrain_equal(zero[0].cell(), underflow.cell())?;
+                let zero = self.range.gate().assign_region_smart(
+                    vec![Constant(F::from(0))],
+                    vec![],
+                    vec![],
+                    vec![(&underflow, 0)],
+                    0,
+                    &mut region,
+                )?;
                 Ok(())
             },
         )?;
@@ -204,6 +221,16 @@ impl<'a, F: FieldExt, Fp: PrimeField> FieldChip<F> for FpOverflowChip<'a, F, Fp>
         b: F,
     ) -> Result<OverflowInteger<F>, Error> {
         scalar_mul_no_carry::assign(self.range.gate(), layouter, a, b)
+    }
+
+    fn scalar_mul_and_add_no_carry(
+        &mut self,
+        layouter: &mut impl Layouter<F>,
+        a: &OverflowInteger<F>,
+        b: &OverflowInteger<F>,
+        c: F,
+    ) -> Result<OverflowInteger<F>, Error> {
+        scalar_mul_and_add_no_carry::assign(self.range.gate(), layouter, a, b, c)
     }
 
     fn mul_no_carry(
@@ -228,7 +255,7 @@ impl<'a, F: FieldExt, Fp: PrimeField> FieldChip<F> for FpOverflowChip<'a, F, Fp>
         layouter: &mut impl Layouter<F>,
         a: &OverflowInteger<F>,
     ) -> Result<OverflowInteger<F>, Error> {
-        carry_mod::assign(self.range, layouter, a, &self.p)
+        carry_mod::assign(self.range, layouter, a, &self.p, self.num_limbs)
     }
 
     fn range_check(

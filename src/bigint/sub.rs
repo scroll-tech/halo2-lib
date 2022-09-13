@@ -43,7 +43,7 @@ pub fn assign<F: FieldExt>(
                 let a_with_borrow_val =
                     a.limbs[i].value().zip(lt.value()).map(|(&a, &lt)| a + lt * limb_base);
                 let out_val = a_with_borrow_val.zip(bottom.value()).map(|(ac, &b)| ac - b);
-                let (assignments, column_index) = range.gate().assign_region(
+                let assignments = range.gate().assign_region_smart(
                     vec![
                         Existing(&a.limbs[i]),
                         Existing(&lt),
@@ -53,11 +53,12 @@ pub fn assign<F: FieldExt>(
                         Existing(&bottom),
                         Witness(out_val),
                     ],
+                    vec![0, 3],
+                    vec![],
+                    vec![],
                     0,
                     &mut region,
                 )?;
-                range.gate().enable(&mut region, column_index, 0)?;
-                range.gate().enable(&mut region, column_index, 3)?;
                 Ok(assignments.last().unwrap().clone())
             },
         )?;
@@ -65,7 +66,12 @@ pub fn assign<F: FieldExt>(
         borrow = Some(lt);
     }
     Ok((
-        OverflowInteger::construct(out_limbs, a.max_limb_size.clone(), a.limb_bits),
+        OverflowInteger::construct(
+            out_limbs,
+            a.max_limb_size.clone(),
+            a.limb_bits,
+            a.max_size.clone(),
+        ),
         borrow.unwrap(),
     ))
 }
@@ -81,5 +87,5 @@ pub fn crt<F: FieldExt>(
     let (out_trunc, underflow) = assign(range, layouter, &a.truncation, &b.truncation)?;
     let out_native = range.gate().sub(layouter, &Existing(&a.native), &Existing(&b.native))?;
     let out_val = a.value.as_ref().zip(b.value.as_ref()).map(|(a, b)| a - b);
-    Ok((CRTInteger::construct(out_trunc, out_native, out_val, a.max_size.clone()), underflow))
+    Ok((CRTInteger::construct(out_trunc, out_native, out_val), underflow))
 }
