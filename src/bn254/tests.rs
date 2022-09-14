@@ -9,8 +9,10 @@ use super::*;
 use crate::bigint::FixedOverflowInteger;
 use crate::ecc::EccChip;
 use crate::fields::{fp::FpStrategy, PrimeFieldChip};
+use crate::gates::QuantumCell::Witness;
+use crate::gates::{GateInstructions, RangeInstructions};
 use crate::gates::range::{RangeChip, RangeStrategy};
-use crate::utils::fe_to_bigint;
+use crate::utils::{decompose_bigint_option, fe_to_bigint};
 use ff::{Field, PrimeField};
 use group::Curve;
 use halo2_proofs::pairing::group::Group;
@@ -245,12 +247,13 @@ impl<F: FieldExt> MSMConfig<F> {
 struct MSMCircuit<F: FieldExt> {
     bases: Vec<Option<G1Affine>>,
     scalars: Vec<Option<Fr>>,
+    batch_size: usize,
     _marker: PhantomData<F>,
 }
 
 impl<F: FieldExt> Default for MSMCircuit<F> {
     fn default() -> Self {
-        Self { bases: vec![None; 10], scalars: vec![None; 10], _marker: PhantomData }
+        Self { bases: vec![None; 10], scalars: vec![None; 10], batch_size: 10, _marker: PhantomData }
     }
 }
 
@@ -259,7 +262,12 @@ impl<F: FieldExt> Circuit<F> for MSMCircuit<F> {
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
-        Self::default()
+	Self {
+	    bases: vec![None; self.batch_size],
+	    scalars: vec![None; self.batch_size],
+	    batch_size: self.batch_size,
+	    _marker: PhantomData,
+	}
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
@@ -294,23 +302,33 @@ impl<F: FieldExt> Circuit<F> for MSMCircuit<F> {
         assert_eq!(config.batch_size, self.bases.len());
 
         let mut range_chip = RangeChip::construct(config.fp_config.range_config.clone(), true);
-        let mut fp_chip = FpChip::construct(config.fp_config.clone(), &mut range_chip, true);
-        fp_chip.load_lookup_table(&mut layouter)?;
-
         let mut scalars_assigned = Vec::new();
         for scalar in &self.scalars {
-            let scalar_biguint = match scalar {
-                Some(x) => fe_to_biguint(x),
-                None => fe_to_biguint(&F::from(1)),
-            };
-            let scalar_fixed_oi = FixedOverflowInteger::from_native(
-                scalar_biguint.to_bigint().unwrap(),
-                config.fp_config.num_limbs,
-                config.fp_config.limb_bits,
-            );
-            let assigned_scalar = scalar_fixed_oi.assign(&mut fp_chip.range.gate, &mut layouter)?;
-            scalars_assigned.push(assigned_scalar.limbs);
+	    let decomposed = decompose_bigint_option(
+		&scalar.map(|x| fe_to_biguint(&x).to_bigint().unwrap()),
+		config.fp_config.num_limbs,
+                config.fp_config.limb_bits
+	    );
+	    let limbs = layouter.assign_region(
+		|| "load scalar",
+		|mut region| {
+		    let limbs = range_chip.gate().assign_region_smart(
+			decomposed.iter().map(|x| Witness(x.clone())).collect(),
+			vec![],
+			vec![],
+			vec![],
+			0,
+			&mut region,
+		    )?;
+		    Ok(limbs)
+		},
+	    )?;
+            scalars_assigned.push(limbs);
         }
+
+	let mut fp_chip = FpChip::construct(config.fp_config.clone(), &mut range_chip, true);
+        fp_chip.load_lookup_table(&mut layouter)?;
+
 
         let mut ecc_chip = EccChip::construct(&mut fp_chip);
         let mut bases_assigned = Vec::new();
@@ -345,7 +363,6 @@ impl<F: FieldExt> Circuit<F> for MSMCircuit<F> {
             println!("circuit: {:?} {:?}", msm_x, msm_y);
             println!("correct: {:?}", msm_answer);
         }
-        // TODO: Add tests
 
         let const_rows = fp_chip.range.gate.assign_and_constrain_constants(&mut layouter)?;
         fp_chip.range.copy_and_lookup_cells(&mut layouter)?;
@@ -424,10 +441,15 @@ fn test_msm() {
 
     println!("bases {:?}", bases);
     println!("scalars {:?}", scalars);
-    let circuit = MSMCircuit::<Fr> { bases, scalars, _marker: PhantomData };
+    let circuit = MSMCircuit::<Fr> {
+	bases,
+	scalars,
+	batch_size: params.batch_size,
+	_marker: PhantomData
+    };
 
     let prover = MockProver::run(k, &circuit, vec![]).unwrap();
-    //prover.assert_satisfied();
+//    prover.assert_satisfied();
     assert_eq!(prover.verify(), Ok(()));
 }
 
@@ -498,6 +520,7 @@ fn bench_msm() -> Result<(), Box<dyn std::error::Error>> {
         let circuit = MSMCircuit::<Fr> {
             bases: vec![None; bench_params.batch_size],
             scalars: vec![None; bench_params.batch_size],
+	    batch_size: bench_params.batch_size,
             _marker: PhantomData,
         };
         let circuit_duration = start.elapsed();
@@ -539,7 +562,12 @@ fn bench_msm() -> Result<(), Box<dyn std::error::Error>> {
 	}
 
 	println!("{:?}", bench_params);
-        let proof_circuit = MSMCircuit::<Fr> { bases, scalars, _marker: PhantomData };
+        let proof_circuit = MSMCircuit::<Fr> {
+	    bases,
+	    scalars,
+	    batch_size: bench_params.batch_size,
+	    _marker: PhantomData
+	};
         let fill_duration = start.elapsed();
         println!("Time elapsed in filling circuit: {:?}", fill_duration - pk_duration);
 
