@@ -439,8 +439,6 @@ fn test_msm() {
         scalars.push(new_scalar);
     }
 
-    println!("bases {:?}", bases);
-    println!("scalars {:?}", scalars);
     let circuit = MSMCircuit::<Fr> {
 	bases,
 	scalars,
