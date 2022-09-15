@@ -5,7 +5,7 @@ use num_traits::One;
 
 use super::OverflowInteger;
 use crate::gates::{
-    GateInstructions,
+    Context, GateInstructions,
     QuantumCell::{self, Constant, Existing, Witness},
     RangeInstructions,
 };
@@ -31,8 +31,8 @@ use crate::utils::{bigint_to_fe, modulus as native_modulus};
 // which is valid as long as `(m - n + EPSILON) + n * (w+1) < native_modulus::<F>().bits() - 1`
 // so we only need to range check `c_i` every `w + 1` steps, starting with `i = w`
 pub fn assign<F: FieldExt>(
-    range: &mut impl RangeInstructions<F>,
-    layouter: &mut impl Layouter<F>,
+    range: &impl RangeInstructions<F>,
+    ctx: &mut Context<'_, F>,
     a: &OverflowInteger<F>,
 ) -> Result<(), Error> {
     let k = a.limbs.len();
@@ -60,40 +60,36 @@ pub fn assign<F: FieldExt>(
         carries.push(carry);
     }
 
-    let neg_carry_assignments = layouter.assign_region(
-        || "carry consistency",
-        |mut region| {
-            let mut neg_carry_assignments = Vec::with_capacity(k - 1);
-            let mut cells = Vec::with_capacity(4 * k);
-            let mut enable_gates = Vec::with_capacity(k - 1);
-            for idx in 0..k - 1 {
-                enable_gates.push(4 * idx);
+    let neg_carry_assignments = {
+        let mut neg_carry_assignments = Vec::with_capacity(k - 1);
+        let mut cells = Vec::with_capacity(4 * k);
+        let mut enable_gates = Vec::with_capacity(k - 1);
+        for idx in 0..k - 1 {
+            enable_gates.push(4 * idx);
 
-                cells.push(Existing(&a.limbs[idx]));
-                cells.push(Witness(carries[idx].as_ref().map(|c| bigint_to_fe::<F>(&-c))));
-                cells.push(Constant(limb_base));
-                if idx == 0 {
-                    cells.push(Constant(F::from(0)));
-                } else {
-                    cells.push(cells[4 * idx - 3].clone());
-                }
+            cells.push(Existing(&a.limbs[idx]));
+            cells.push(Witness(carries[idx].as_ref().map(|c| bigint_to_fe::<F>(&-c))));
+            cells.push(Constant(limb_base));
+            if idx == 0 {
+                cells.push(Constant(F::from(0)));
+            } else {
+                cells.push(cells[4 * idx - 3].clone());
             }
-            let assigned_cells = range.gate().assign_region_smart(
-                cells,
-                enable_gates,
-                vec![],
-                vec![(&a.limbs[k - 1], 4 * (k - 2) + 1)],
-                0,
-                &mut region,
-            )?;
+        }
+        let assigned_cells = range.gate().assign_region_smart(
+            ctx,
+            cells,
+            enable_gates,
+            vec![],
+            vec![(&a.limbs[k - 1], 4 * (k - 2) + 1)],
+        )?;
 
-            for idx in 0..k - 1 {
-                neg_carry_assignments.push(assigned_cells[4 * idx + 1].clone());
-            }
-            region.constrain_equal(a.limbs[k - 1].cell(), neg_carry_assignments[k - 2].cell())?;
-            Ok(neg_carry_assignments)
-        },
-    )?;
+        for idx in 0..k - 1 {
+            neg_carry_assignments.push(assigned_cells[4 * idx + 1].clone());
+        }
+        ctx.region.constrain_equal(a.limbs[k - 1].cell(), neg_carry_assignments[k - 2].cell())?;
+        neg_carry_assignments
+    };
 
     // round `max_limb_bits - limb_bits + EPSILON + 1` up to the next multiple of range.lookup_bits
     const EPSILON: usize = 1;
@@ -108,33 +104,24 @@ pub fn assign<F: FieldExt>(
     let mut idx = window - 1;
     let mut shifted_carry_assignments = Vec::new();
     while idx < k - 2 {
-        let shifted_carry_cell = layouter.assign_region(
-            || "shift carries",
-            |mut region| {
-                let carry_cell = &neg_carry_assignments[idx];
-                let shift_carry_val = Some(shift_val).zip(carry_cell.value()).map(|(s, c)| s + c);
-                let cells = vec![
-                    Existing(&carry_cell),
-                    Constant(F::from(1)),
-                    Constant(shift_val),
-                    Witness(shift_carry_val),
-                ];
-                let assigned_cells = range.gate().assign_region_smart(
-                    cells,
-                    vec![0],
-                    vec![],
-                    vec![],
-                    0,
-                    &mut region,
-                )?;
-                Ok(assigned_cells.last().unwrap().clone())
-            },
-        )?;
+        let shifted_carry_cell = {
+            let carry_cell = &neg_carry_assignments[idx];
+            let shift_carry_val = Some(shift_val).zip(carry_cell.value()).map(|(s, c)| s + c);
+            let cells = vec![
+                Existing(&carry_cell),
+                Constant(F::from(1)),
+                Constant(shift_val),
+                Witness(shift_carry_val),
+            ];
+            let assigned_cells =
+                range.gate().assign_region_smart(ctx, cells, vec![0], vec![], vec![])?;
+            assigned_cells.last().unwrap().clone()
+        };
         shifted_carry_assignments.push(shifted_carry_cell);
         idx += window;
     }
     for shifted_carry in shifted_carry_assignments.iter() {
-        range.range_check(layouter, shifted_carry, range_bits + 1)?;
+        range.range_check(ctx, shifted_carry, range_bits + 1)?;
     }
     Ok(())
 }
@@ -157,8 +144,8 @@ pub fn assign<F: FieldExt>(
 // which is valid as long as `(m - n + EPSILON) + n * (w+1) < native_modulus::<F>().bits() - 1`
 // so we only need to range check `c_i` every `w + 1` steps, starting with `i = w`
 pub fn truncate<F: FieldExt>(
-    range: &mut impl RangeInstructions<F>,
-    layouter: &mut impl Layouter<F>,
+    range: &impl RangeInstructions<F>,
+    ctx: &mut Context<'_, F>,
     a: &OverflowInteger<F>,
 ) -> Result<(), Error> {
     let k = a.limbs.len();
@@ -186,39 +173,30 @@ pub fn truncate<F: FieldExt>(
         carries.push(carry);
     }
 
-    let neg_carry_assignments = layouter.assign_region(
-        || "carry consistency",
-        |mut region| {
-            let mut neg_carry_assignments = Vec::with_capacity(k);
-            let mut cells = Vec::with_capacity(4 * k);
-            let mut enable_gates = Vec::with_capacity(k);
-            for idx in 0..k {
-                enable_gates.push(4 * idx);
+    let neg_carry_assignments = {
+        let mut neg_carry_assignments = Vec::with_capacity(k);
+        let mut cells = Vec::with_capacity(4 * k);
+        let mut enable_gates = Vec::with_capacity(k);
+        for idx in 0..k {
+            enable_gates.push(4 * idx);
 
-                cells.push(Existing(&a.limbs[idx]));
-                cells.push(Witness(carries[idx].as_ref().map(|c| bigint_to_fe::<F>(&-c))));
-                cells.push(Constant(limb_base));
-                if idx == 0 {
-                    cells.push(Constant(F::from(0)));
-                } else {
-                    cells.push(cells[4 * idx - 3].clone());
-                }
+            cells.push(Existing(&a.limbs[idx]));
+            cells.push(Witness(carries[idx].as_ref().map(|c| bigint_to_fe::<F>(&-c))));
+            cells.push(Constant(limb_base));
+            if idx == 0 {
+                cells.push(Constant(F::from(0)));
+            } else {
+                cells.push(cells[4 * idx - 3].clone());
             }
-            let assigned_cells = range.gate().assign_region_smart(
-                cells,
-                enable_gates,
-                vec![],
-                vec![],
-                0,
-                &mut region,
-            )?;
+        }
+        let assigned_cells =
+            range.gate().assign_region_smart(ctx, cells, enable_gates, vec![], vec![])?;
 
-            for idx in 0..k {
-                neg_carry_assignments.push(assigned_cells[4 * idx + 1].clone());
-            }
-            Ok(neg_carry_assignments)
-        },
-    )?;
+        for idx in 0..k {
+            neg_carry_assignments.push(assigned_cells[4 * idx + 1].clone());
+        }
+        neg_carry_assignments
+    };
 
     // round `max_limb_bits - limb_bits + EPSILON + 1` up to the next multiple of range.lookup_bits
     const EPSILON: usize = 1;
@@ -235,32 +213,23 @@ pub fn truncate<F: FieldExt>(
     for i in 0..num_windows {
         let idx = std::cmp::min(window * i + window - 1, k - 1);
         let carry_cell = &neg_carry_assignments[idx];
-        let shift_cell = layouter.assign_region(
-            || "shift carries",
-            |mut region| {
-                let shift_carry_val = Some(shift_val).zip(carry_cell.value()).map(|(s, c)| s + c);
-                let cells = vec![
-                    Existing(&carry_cell),
-                    Constant(F::from(1)),
-                    Constant(shift_val),
-                    Witness(shift_carry_val),
-                ];
-                let assigned_cells = range.gate().assign_region_smart(
-                    cells,
-                    vec![0],
-                    vec![],
-                    vec![],
-                    0,
-                    &mut region,
-                )?;
-                Ok(assigned_cells.last().unwrap().clone())
-            },
-        )?;
+        let shift_cell = {
+            let shift_carry_val = Some(shift_val).zip(carry_cell.value()).map(|(s, c)| s + c);
+            let cells = vec![
+                Existing(&carry_cell),
+                Constant(F::from(1)),
+                Constant(shift_val),
+                Witness(shift_carry_val),
+            ];
+            let assigned_cells =
+                range.gate().assign_region_smart(ctx, cells, vec![0], vec![], vec![])?;
+            assigned_cells.last().unwrap().clone()
+        };
         shifted_carry_assignments.push(shift_cell);
     }
 
     for shifted_carry in shifted_carry_assignments.iter() {
-        range.range_check(layouter, shifted_carry, range_bits + 1)?;
+        range.range_check(ctx, shifted_carry, range_bits + 1)?;
     }
 
     Ok(())

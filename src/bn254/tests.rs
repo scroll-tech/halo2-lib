@@ -8,7 +8,7 @@ use super::pairing::PairingChip;
 use super::*;
 use crate::ecc::EccChip;
 use crate::fields::{fp::FpStrategy, PrimeFieldChip};
-use crate::gates::range::{RangeChip, RangeStrategy};
+use crate::gates::{Context, ContextParams};
 use ff::PrimeField;
 use halo2_proofs::arithmetic::BaseExt;
 use halo2_proofs::circuit::floor_planner::V1;
@@ -53,7 +53,7 @@ impl<F: FieldExt> Default for PairingCircuit<F> {
 }
 
 impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
-    type Config = FpConfig<F>;
+    type Config = FpChip<F>;
     type FloorPlanner = SimpleFloorPlanner; // V1;
 
     fn without_witnesses(&self) -> Self {
@@ -85,109 +85,120 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
-        let mut range_chip = RangeChip::construct(config.range_config.clone(), true);
-        let mut chip = PairingChip::construct(config, &mut range_chip, true);
-        chip.fp_chip.load_lookup_table(&mut layouter)?;
+        config.range.load_lookup_table(&mut layouter)?;
+        let chip = PairingChip::construct(&config);
 
-        let P_assigned = chip.load_private_g1(&mut layouter, self.P.clone())?;
-        let Q_assigned = chip.load_private_g2(&mut layouter, self.Q.clone())?;
+        let using_simple_floor_planner = true;
+        let mut first_pass = true;
 
-        /*
-        // test miller loop without final exp
-        {
-            let f = chip.miller_loop(&mut layouter, &Q_assigned, &P_assigned)?;
-            for fc in &f.coeffs {
-                assert_eq!(fc.value, fc.truncation.to_bigint());
+        layouter.assign_region(
+            || "ecc",
+            |region| {
+                if first_pass && using_simple_floor_planner {
+                    first_pass = false;
+                    return Ok(());
+                }
+
+                let mut aux = Context::new(
+                    region,
+                    ContextParams {
+                        num_advice: config.range.gate.num_advice,
+                        using_simple_floor_planner,
+                        first_pass,
+                    },
+                );
+                let ctx = &mut aux;
+
+                let P_assigned = chip.load_private_g1(ctx, self.P.clone())?;
+                let Q_assigned = chip.load_private_g2(ctx, self.Q.clone())?;
+
+                /*
+                // test miller loop without final exp
+                {
+                    let f = chip.miller_loop(ctx, &Q_assigned, &P_assigned)?;
+                    for fc in &f.coeffs {
+                        assert_eq!(fc.value, fc.truncation.to_bigint());
+                    }
+                    if self.P != None {
+                        let actual_f = multi_miller_loop(&[(
+                            &self.P.unwrap(),
+                            &G2Prepared::from_affine(self.Q.unwrap()),
+                        )]);
+                        let f_val: Vec<String> =
+                            f.coeffs.iter().map(|x| x.value.clone().unwrap().to_str_radix(16)).collect();
+                        println!("single miller loop:");
+                        println!("actual f: {:#?}", actual_f);
+                        println!("circuit f: {:#?}", f_val);
+                    }
+                } 
+                */
+
+                // test optimal ate pairing
+                {
+                    let f = chip.pairing(ctx, &Q_assigned, &P_assigned)?;
+                    for fc in &f.coeffs {
+                        assert_eq!(fc.value, fc.truncation.to_bigint());
+                    }
+                    if self.P != None {
+                        let actual_f = pairing(&self.P.unwrap(), &self.Q.unwrap());
+                        let f_val: Vec<String> = f
+                            .coeffs
+                            .iter()
+                            .map(|x| x.value.clone().unwrap().to_str_radix(16))
+                            //.map(|x| x.to_bigint().clone().unwrap().to_str_radix(16))
+                            .collect();
+                        println!("optimal ate pairing:");
+                        println!("actual f: {:#?}", actual_f);
+                        println!("circuit f: {:#?}", f_val);
+                    }
+                }
+
+                // IMPORTANT: this assigns all constants to the fixed columns
+                // IMPORTANT: this copies cells to the lookup advice column to perform range check lookups
+                // This is not optional.
+                let (const_rows, total_fixed, lookup_rows) = config.finalize(ctx)?;
+
+                if self.P != None {
+                    let num_advice = config.range.gate.num_advice;
+                    let num_lookup_advice = config.range.lookup_advice.len();
+                    let num_fixed = config.range.gate.constants.len();
+                    let lookup_bits = config.range.lookup_bits;
+                    let limb_bits = config.limb_bits;
+                    let num_limbs = config.num_limbs;
+
+                    println!("Using:\nadvice columns: {}\nspecial lookup advice columns: {}\nfixed columns: {}\nlookup bits: {}\nlimb bits: {}\nnum limbs: {}", num_advice, num_lookup_advice, num_fixed, lookup_bits, limb_bits, num_limbs);
+                    let advice_rows = ctx.advice_rows.iter();
+                    println!(
+                        "maximum rows used by an advice column: {}",
+                            advice_rows.clone().max().or(Some(&0)).unwrap(),
+                    );
+                    println!(
+                        "minimum rows used by an advice column: {}",
+                            advice_rows.clone().min().or(Some(&usize::MAX)).unwrap(),
+                    );
+                    let total_cells = advice_rows.sum::<usize>();
+                    println!("total cells used: {}", total_cells);
+                    println!("cells used in special lookup columns: {}", ctx.cells_to_lookup.len());
+                    println!("maximum rows used by a fixed column: {}", const_rows);
+
+                    println!("Suggestions:");
+                    let degree = lookup_bits + 1;
+                    println!(
+                        "Have you tried using {} advice columns?",
+                        (total_cells + (1 << degree) - 1) / (1 << degree)
+                    );
+                    println!(
+                        "Have you tried using {} lookup columns?",
+                        (ctx.cells_to_lookup.len() + (1 << degree) - 1) / (1 << degree)
+                    );
+                    println!(
+                        "Have you tried using {} fixed columns?",
+                        (total_fixed + (1 << degree) - 1) / (1 << degree)
+                    );
+                }
+                Ok(())
             }
-            if self.P != None {
-                let actual_f = multi_miller_loop(&[(
-                    &self.P.unwrap(),
-                    &G2Prepared::from_affine(self.Q.unwrap()),
-                )]);
-                let f_val: Vec<String> =
-                    f.coeffs.iter().map(|x| x.value.clone().unwrap().to_str_radix(16)).collect();
-                println!("single miller loop:");
-                println!("actual f: {:#?}", actual_f);
-                println!("circuit f: {:#?}", f_val);
-            }
-        }
-        */
-
-        // test optimal ate pairing
-        {
-            let f = chip.pairing(&mut layouter, &Q_assigned, &P_assigned)?;
-            for fc in &f.coeffs {
-                assert_eq!(fc.value, fc.truncation.to_bigint());
-            }
-            if self.P != None {
-                let actual_f = pairing(&self.P.unwrap(), &self.Q.unwrap());
-                let f_val: Vec<String> = f
-                    .coeffs
-                    .iter()
-                    .map(|x| x.value.clone().unwrap().to_str_radix(16))
-                    //.map(|x| x.to_bigint().clone().unwrap().to_str_radix(16))
-                    .collect();
-                println!("optimal ate pairing:");
-                println!("actual f: {:#?}", actual_f);
-                println!("circuit f: {:#?}", f_val);
-            }
-        }
-
-        // IMPORTANT: this assigns all constants to the fixed columns
-        // This is not optional.
-        let const_rows = chip.fp_chip.range.gate.assign_and_constrain_constants(&mut layouter)?;
-
-        // IMPORTANT: this copies cells to the lookup advice column to perform range check lookups
-        // This is not optional when there is more than 1 advice column.
-        chip.fp_chip.range.copy_and_lookup_cells(&mut layouter)?;
-
-        if self.P != None {
-            let num_advice = chip.fp_chip.range.gate.config.num_advice;
-            let num_lookup_advice = chip.fp_chip.range.config.lookup_advice.len();
-            let num_fixed = chip.fp_chip.range.gate.config.constants.len();
-            let lookup_bits = chip.fp_chip.range.config.lookup_bits;
-            let limb_bits = chip.fp_chip.limb_bits;
-            let num_limbs = chip.fp_chip.num_limbs;
-
-            println!("Using:\nadvice columns: {}\nspecial lookup advice columns: {}\nfixed columns: {}\nlookup bits: {}\nlimb bits: {}\nnum limbs: {}", num_advice, num_lookup_advice, num_fixed, lookup_bits, limb_bits, num_limbs);
-            let advice_rows = chip.fp_chip.range.gate.advice_rows.iter();
-            let horizontal_advice_rows = chip.fp_chip.range.gate.horizontal_advice_rows.iter();
-            println!(
-                "maximum rows used by an advice column: {}",
-                std::cmp::max(
-                    advice_rows.clone().max().or(Some(&0u64)).unwrap(),
-                    horizontal_advice_rows.clone().max().or(Some(&0u64)).unwrap()
-                )
-            );
-            println!(
-                "minimum rows used by an advice column: {}",
-                std::cmp::min(
-                    advice_rows.clone().min().or(Some(&u64::MAX)).unwrap(),
-                    horizontal_advice_rows.clone().min().or(Some(&u64::MAX)).unwrap()
-                )
-            );
-            let total_cells = advice_rows.sum::<u64>() + horizontal_advice_rows.sum::<u64>() * 4;
-            println!("total cells used: {}", total_cells);
-            println!("cells used in special lookup column: {}", range_chip.cells_to_lookup.len());
-            let total_fixed = const_rows * num_fixed;
-            println!("maximum rows used by a fixed column: {}", const_rows);
-
-            println!("Suggestions:");
-            let degree = lookup_bits + 1;
-            println!(
-                "Have you tried using {} advice columns?",
-                (total_cells + (1 << degree) - 1) / (1 << degree)
-            );
-            println!(
-                "Have you tried using {} lookup columns?",
-                (range_chip.cells_to_lookup.len() + (1 << degree) - 1) / (1 << degree)
-            );
-            println!(
-                "Have you tried using {} fixed columns?",
-                (total_fixed + (1 << degree) - 1) / (1 << degree)
-            );
-        }
-        Ok(())
+        )
     }
 }
 
@@ -217,16 +228,6 @@ fn test_pairing() {
 #[cfg(test)]
 #[test]
 fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
-    /*
-    // Parameters for FpStrategy::CustomVerticalCRT
-    const DEGREE: [u32; 10] = [22, 21, 20, 19, 18, 17, 16, 15, 14, 13];
-    const NUM_ADVICE: [usize; 10] = [1, 2, 3, 5, 10, 19, 37, 75, 149, 307];
-    const NUM_LOOKUP: [usize; 10] = [0, 1, 1, 1, 2, 4, 7, 16, 32, 74];
-    const NUM_FIXED: [usize; 10] = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
-    const LOOKUP_BITS: [usize; 10] = [21, 20, 19, 18, 17, 16, 15, 14, 13, 12];
-    const LIMB_BITS: [usize; 10] = [88, 88, 88, 88, 88, 88, 88, 88, 88, 88];
-    */
-
     use std::io::BufRead;
     let mut folder = std::path::PathBuf::new();
     folder.push("./src/bn254");

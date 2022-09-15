@@ -2,7 +2,7 @@ use std::{collections::HashMap, io::ErrorKind, marker::PhantomData};
 
 use crate::gates::{
     flex_gate::FlexGateConfig,
-    GateInstructions,
+    Context, GateInstructions,
     QuantumCell::{self, Constant, Existing},
 };
 use crate::utils::*;
@@ -57,9 +57,9 @@ impl<F: FieldExt> OverflowInteger<F> {
     }
 
     pub fn evaluate(
-        gate: &mut impl GateInstructions<F>,
+        gate: &impl GateInstructions<F>,
         chip: &BigIntConfig<F>,
-        layouter: &mut impl Layouter<F>,
+        ctx: &mut Context<'_, F>,
         limbs: &Vec<AssignedCell<F, F>>,
         limb_bits: usize,
     ) -> Result<AssignedCell<F, F>, Error> {
@@ -75,32 +75,27 @@ impl<F: FieldExt> OverflowInteger<F> {
         match chip.strategy {
             BigIntStrategy::Simple => {
                 // Constrain `out_native = sum_i out_assigned[i] * 2^{n*i}` in `F`
-                let (_, _, native) = gate.inner_product(
-                    layouter,
-                    &limbs.iter().map(|a| Existing(a)).collect(),
-                    &pows,
-                )?;
+                let (_, _, native) =
+                    gate.inner_product(ctx, &limbs.iter().map(|a| Existing(a)).collect(), &pows)?;
                 Ok(native)
             }
-            BigIntStrategy::CustomVerticalShort => layouter.assign_region(
-                || "",
-                |mut region| {
-                    let (cells, enable_sel) = mul_no_carry::witness_dot_constant(
-                        gate,
-                        chip,
-                        &limbs.iter().map(|a| Existing(a)).collect(),
-                        &pows.iter().map(|qc| qc.value().unwrap().clone()).collect(),
-                    )?;
-                    let (assignments, gate_index) =
-                        gate.assign_region(cells, vec![], 0, &mut region)?;
-                    for (c, row) in &enable_sel {
-                        chip.q_dot_constant.get(c).expect("should have constant for custom gate")
-                            [gate_index]
-                            .enable(&mut region, *row)?;
-                    }
-                    Ok(assignments.last().unwrap().clone())
-                },
-            ),
+            BigIntStrategy::CustomVerticalShort => {
+                let (cells, enable_sel) = mul_no_carry::witness_dot_constant(
+                    chip,
+                    &limbs.iter().map(|a| Existing(a)).collect(),
+                    &pows.iter().map(|qc| qc.value().unwrap().clone()).collect(),
+                )?;
+                let (assignments, gate_index) = gate.assign_region(ctx, cells, vec![])?;
+                for (c, row) in &enable_sel {
+                    chip.q_dot_constant.get(c).expect("should have constant for custom gate")
+                        [gate_index]
+                        .enable(
+                            &mut ctx.region,
+                            ctx.advice_rows[gate_index] - assignments.len() + *row,
+                        )?;
+                }
+                Ok(assignments.last().unwrap().clone())
+            }
         }
     }
 }
@@ -134,18 +129,13 @@ impl<F: FieldExt> FixedOverflowInteger<F> {
 
     pub fn assign(
         &self,
-        gate: &mut impl GateInstructions<F>,
-        layouter: &mut impl Layouter<F>,
+        gate: &impl GateInstructions<F>,
+        ctx: &mut Context<'_, F>,
     ) -> Result<OverflowInteger<F>, Error> {
-        let assigned_limbs = layouter.assign_region(
-            || "assign limbs",
-            |mut region| {
-                let limb_cells = self.limbs.iter().map(|x| Constant(*x)).collect();
-                let limb_cells_assigned =
-                    gate.assign_region_smart(limb_cells, vec![], vec![], vec![], 0, &mut region)?;
-                Ok(limb_cells_assigned)
-            },
-        )?;
+        let assigned_limbs = {
+            let limb_cells = self.limbs.iter().map(|x| Constant(*x)).collect();
+            gate.assign_region_smart(ctx, limb_cells, vec![], vec![], vec![])?
+        };
         let assigned = OverflowInteger::construct(
             assigned_limbs,
             self.max_limb_size.clone(),
@@ -227,19 +217,16 @@ impl<F: FieldExt> FixedCRTInteger<F> {
 
     pub fn assign(
         &self,
-        gate: &mut impl GateInstructions<F>,
-        layouter: &mut impl Layouter<F>,
+        gate: &impl GateInstructions<F>,
+        ctx: &mut Context<'_, F>,
     ) -> Result<CRTInteger<F>, Error> {
-        let assigned_truncation = self.truncation.assign(gate, layouter)?;
-        let assigned_native = layouter.assign_region(
-            || "assign native",
-            |mut region| {
-                let native_cells = vec![Constant(self.native)];
-                let native_cells_assigned =
-                    gate.assign_region_smart(native_cells, vec![], vec![], vec![], 0, &mut region)?;
-                Ok(native_cells_assigned[0].clone())
-            },
-        )?;
+        let assigned_truncation = self.truncation.assign(gate, ctx)?;
+        let assigned_native = {
+            let native_cells = vec![Constant(self.native)];
+            let native_cells_assigned =
+                gate.assign_region_smart(ctx, native_cells, vec![], vec![], vec![])?;
+            native_cells_assigned[0].clone()
+        };
         let assigned =
             CRTInteger::construct(assigned_truncation, assigned_native, Some(self.value.clone()));
         Ok(assigned)
@@ -284,7 +271,7 @@ impl<F: FieldExt> BigIntConfig<F> {
         strategy: BigIntStrategy,
         limb_bits: usize,
         num_limbs: usize,
-        gate_config: &FlexGateConfig<F>,
+        gate: &FlexGateConfig<F>,
         constants: Vec<Vec<BigUint>>, // collection of the constant vectors we want custom dot product gates for
     ) -> Self {
         let mut q_dot_constant = HashMap::new();
@@ -294,8 +281,7 @@ impl<F: FieldExt> BigIntConfig<F> {
                     assert!(constant.len() < GATE_LEN);
                     q_dot_constant.insert(
                         constant.clone(),
-                        gate_config
-                            .gates
+                        gate.basic_gates
                             .iter()
                             .map(|gate| {
                                 let q = meta.selector();

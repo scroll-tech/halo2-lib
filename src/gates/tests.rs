@@ -6,10 +6,13 @@ use halo2_proofs::{
 };
 
 use super::{
-    flex_gate::{FlexGateChip, FlexGateConfig, GateStrategy},
+    flex_gate::{FlexGateConfig, GateStrategy},
     range, GateInstructions, RangeInstructions,
 };
-use crate::gates::QuantumCell::{self, Constant, Existing, Witness};
+use crate::gates::{
+    Context, ContextParams,
+    QuantumCell::{self, Constant, Existing, Witness},
+};
 
 #[derive(Default)]
 struct MyCircuit<F> {
@@ -17,6 +20,8 @@ struct MyCircuit<F> {
     b: Option<F>,
     c: Option<F>,
 }
+
+const NUM_ADVICE: usize = 1;
 
 impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
     type Config = FlexGateConfig<F>;
@@ -27,7 +32,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        FlexGateConfig::configure(meta, GateStrategy::Horizontal, 2, 1)
+        FlexGateConfig::configure(meta, GateStrategy::Vertical, NUM_ADVICE, 1)
     }
 
     fn synthesize(
@@ -35,48 +40,63 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
-        let mut chip = FlexGateChip::construct(config, true);
-        let (a_cell, b_cell, c_cell) = layouter.assign_region(
-            || "inputs",
-            |mut region| {
-                let cells = chip.assign_region_smart(
-                    vec![Witness(self.a), Witness(self.b), Witness(self.c)],
-                    vec![],
-                    vec![],
-                    vec![],
-                    0,
-                    &mut region,
-                )?;
-                Ok((cells[0].clone(), cells[1].clone(), cells[2].clone()))
+        let using_simple_floor_planner = true;
+        let mut first_pass = true;
+
+        layouter.assign_region(
+            || "gate",
+            |region| {
+                if first_pass && using_simple_floor_planner {
+                    first_pass = false;
+                    return Ok(());
+                }
+
+                let mut aux = Context::new(
+                    region,
+                    ContextParams {
+                        num_advice: NUM_ADVICE,
+                        using_simple_floor_planner,
+                        first_pass,
+                    },
+                );
+                let ctx = &mut aux;
+
+                let (a_cell, b_cell, c_cell) = {
+                    let cells = config.assign_region_smart(
+                        ctx,
+                        vec![Witness(self.a), Witness(self.b), Witness(self.c)],
+                        vec![],
+                        vec![],
+                        vec![],
+                    )?;
+                    (cells[0].clone(), cells[1].clone(), cells[2].clone())
+                };
+
+                // test add
+                {
+                    config.add(ctx, &Existing(&a_cell), &Existing(&b_cell))?;
+                }
+
+                // test sub
+                {
+                    config.sub(ctx, &Existing(&a_cell), &Existing(&b_cell))?;
+                }
+
+                // test multiply
+                {
+                    config.mul(ctx, &Existing(&c_cell), &Existing(&b_cell))?;
+                }
+
+                println!(
+                    "maximum rows used by an advice column: {}",
+                    ctx.advice_rows.iter().max().or(Some(&0)).unwrap(),
+                );
+                let (const_rows, _) = config.finalize(ctx)?;
+                println!("maximum rows used by a fixed column: {}", const_rows);
+
+                Ok(())
             },
-        )?;
-
-        // test add
-        {
-            chip.add(&mut layouter, &Existing(&a_cell), &Existing(&b_cell))?;
-        }
-
-        // test sub
-        {
-            chip.sub(&mut layouter, &Existing(&a_cell), &Existing(&b_cell))?;
-        }
-
-        // test multiply
-        {
-            chip.mul(&mut layouter, &Existing(&c_cell), &Existing(&b_cell))?;
-        }
-
-        println!(
-            "maximum rows used by an advice column: {}",
-            max(
-                chip.advice_rows.iter().max().or(Some(&0u64)).unwrap(),
-                chip.horizontal_advice_rows.iter().max().or(Some(&0u64)).unwrap()
-            )
-        );
-        let const_rows = chip.assign_and_constrain_constants(&mut layouter)?;
-        println!("maximum rows used by a fixed column: {}", const_rows);
-
-        Ok(())
+        )
     }
 }
 
@@ -122,7 +142,14 @@ impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        range::RangeConfig::configure(meta, range::RangeStrategy::CustomVerticalShort, 2, 1, 1, 3)
+        range::RangeConfig::configure(
+            meta,
+            range::RangeStrategy::CustomVerticalShort,
+            NUM_ADVICE,
+            1,
+            1,
+            3,
+        )
     }
 
     fn synthesize(
@@ -130,53 +157,91 @@ impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
-        let mut chip = range::RangeChip::construct(config.clone(), true);
-        chip.load_lookup_table(&mut layouter)?;
+        config.load_lookup_table(&mut layouter)?;
 
+        let using_simple_floor_planner = true;
+        let mut first_pass = true;
+
+        // let's try a separate layouter for loading private inputs
         let (a, b) = layouter.assign_region(
-            || "inputs",
-            |mut region| {
-                let cells = chip.gate.assign_region_smart(
+            || "load private inputs",
+            |region| {
+                let mut aux = Context::new(
+                    region,
+                    ContextParams {
+                        num_advice: NUM_ADVICE,
+                        using_simple_floor_planner,
+                        first_pass,
+                    },
+                );
+                if using_simple_floor_planner {
+                    first_pass = !first_pass;
+                }
+                let cells = config.gate.assign_region_smart(
+                    &mut aux,
                     vec![Witness(self.a), Witness(self.b)],
                     vec![],
                     vec![],
                     vec![],
-                    0,
-                    &mut region,
                 )?;
                 Ok((cells[0].clone(), cells[1].clone()))
             },
         )?;
 
-        {
-            chip.range_check(&mut layouter, &a, self.range_bits)?;
-        }
-        {
-            chip.check_less_than(&mut layouter, &a, &b, self.lt_bits)?;
-        }
-        {
-            chip.is_less_than(&mut layouter, &a, &b, self.lt_bits)?;
-        }
-        {
-            chip.is_less_than(&mut layouter, &b, &a, self.lt_bits)?;
-        }
-        {
-            chip.is_equal(&mut layouter, &b, &a)?;
-        }
-        {
-            chip.is_zero(&mut layouter, &a)?;
-        }
+        layouter.assign_region(
+            || "range",
+            |region| {
+                // If we uncomment out the line below, get_shape will be empty and the layouter will try to assign at row 0, but "load private inputs" has already assigned to row 0, so this will panic and fail
+                /*
+                if first_pass && using_simple_floor_planner {
+                    first_pass = false;
+                    return Ok(());
+                }
+                */
 
-        println!(
-            "maximum rows used by an advice column: {}",
-            chip.gate.advice_rows.iter().max().unwrap()
-        );
+                let mut aux = Context::new(
+                    region,
+                    ContextParams {
+                        num_advice: NUM_ADVICE,
+                        using_simple_floor_planner,
+                        first_pass,
+                    },
+                );
+                if using_simple_floor_planner {
+                    first_pass = !first_pass;
+                }
+                let ctx = &mut aux;
 
-        let const_rows = chip.gate.assign_and_constrain_constants(&mut layouter)?;
-        println!("maximum rows used by a fixed column: {}", const_rows);
-        chip.copy_and_lookup_cells(&mut layouter)?;
-        println!("lookup cells used: {}", chip.cells_to_lookup.len());
-        Ok(())
+                {
+                    config.range_check(ctx, &a, self.range_bits)?;
+                }
+                {
+                    config.check_less_than(ctx, &a, &b, self.lt_bits)?;
+                }
+                {
+                    config.is_less_than(ctx, &a, &b, self.lt_bits)?;
+                }
+                {
+                    config.is_less_than(ctx, &b, &a, self.lt_bits)?;
+                }
+                {
+                    config.is_equal(ctx, &b, &a)?;
+                }
+                {
+                    config.is_zero(ctx, &a)?;
+                }
+
+                println!(
+                    "maximum rows used by an advice column: {}",
+                    ctx.advice_rows.iter().max().unwrap()
+                );
+
+                let (const_rows, _, _) = config.finalize(ctx)?;
+                println!("maximum rows used by a fixed column: {}", const_rows);
+                println!("lookup cells used: {}", ctx.cells_to_lookup.len());
+                Ok(())
+            },
+        )
     }
 }
 
@@ -202,7 +267,7 @@ fn plot_range() {
 
     let root = BitMapBackend::new("layout.png", (1024, 1024)).into_drawing_area();
     root.fill(&WHITE).unwrap();
-    let root = root.titled("Gates Layout", ("sans-serif", 60)).unwrap();
+    let root = root.titled("Range Layout", ("sans-serif", 60)).unwrap();
 
     let circuit = RangeTestCircuit::<Fr> {
         range_bits: 8,

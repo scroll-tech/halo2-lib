@@ -25,11 +25,8 @@ use crate::{
 };
 use crate::{fields::FieldChip, gates::RangeInstructions};
 use crate::{
-    fields::{
-        fp::{FpChip, FpConfig},
-        Selectable,
-    },
-    gates::GateInstructions,
+    fields::{fp::FpConfig, Selectable},
+    gates::{Context, GateInstructions},
 };
 
 use super::{ecc_add_unequal, select, select_from_bits, EccPoint};
@@ -66,14 +63,14 @@ where
 
     pub fn assign<FC>(
         &self,
-        chip: &mut FC,
-        layouter: &mut impl Layouter<F>,
+        chip: &FC,
+        ctx: &mut Context<'_, F>,
     ) -> Result<EccPoint<F, FC::FieldPoint>, Error>
     where
-        FC: PrimeFieldChip<'a, F, FieldType = GA::Base, FieldPoint = CRTInteger<F>>,
+        FC: PrimeFieldChip<F, FieldType = GA::Base, FieldPoint = CRTInteger<F>>,
     {
-        let assigned_x = self.x.assign(chip.range().gate(), layouter)?;
-        let assigned_y = self.y.assign(chip.range().gate(), layouter)?;
+        let assigned_x = self.x.assign(chip.range().gate(), ctx)?;
+        let assigned_y = self.y.assign(chip.range().gate(), ctx)?;
         let point = EccPoint::construct(assigned_x, assigned_y);
         Ok(point)
     }
@@ -88,8 +85,8 @@ where
 // - `max_bits <= modulus::<F>.bits()`
 
 pub fn fixed_base_scalar_multiply<'a, F, FC, GA>(
-    chip: &mut FC,
-    layouter: &mut impl Layouter<F>,
+    chip: &FC,
+    ctx: &mut Context<'_, F>,
     P: &FixedEccPoint<F, GA>,
     scalar: &Vec<AssignedCell<F, F>>,
     b: F,
@@ -100,7 +97,7 @@ where
     F: FieldExt,
     GA: CurveAffine,
     GA::Base: PrimeField,
-    FC: PrimeFieldChip<'a, F, FieldType = GA::Base, FieldPoint = CRTInteger<F>>
+    FC: PrimeFieldChip<F, FieldType = GA::Base, FieldPoint = CRTInteger<F>>
         + Selectable<F, Point = FC::FieldPoint>,
 {
     assert!(scalar.len() > 0);
@@ -113,7 +110,7 @@ where
     // cached_points[i][j] holds j * 2^(i * w) for j in {0, ..., 2^w - 1}
     let mut cached_points = Vec::with_capacity(num_windows);
     let base_pt = GA::from_xy(bigint_to_fe(&P.x.value), bigint_to_fe(&P.y.value)).unwrap();
-    let base_pt_assigned = P.assign(chip, layouter)?;
+    let base_pt_assigned = P.assign(chip, ctx)?;
 
     let mut increment = base_pt;
     for i in 0..num_windows {
@@ -125,14 +122,14 @@ where
             P.x.truncation.limbs.len(),
             P.x.truncation.limb_bits,
         );
-        let increment_assigned = increment_fixed.assign(chip, layouter)?;
+        let increment_assigned = increment_fixed.assign(chip, ctx)?;
         cache_vec.push(increment_assigned.clone());
         cache_vec.push(increment_assigned.clone());
         for j in 2..(1usize << window_bits) {
             curr = GA::from(curr + increment);
             let curr_fixed =
                 FixedEccPoint::from_g1(&curr, P.x.truncation.limbs.len(), P.x.truncation.limb_bits);
-            let curr_assigned = curr_fixed.assign(chip, layouter)?;
+            let curr_assigned = curr_fixed.assign(chip, ctx)?;
             cache_vec.push(curr_assigned);
         }
         increment = GA::from(curr + increment);
@@ -141,25 +138,11 @@ where
 
     let mut bits = Vec::with_capacity(rounded_bitlen);
     for x in scalar {
-        let mut new_bits = chip.range().num_to_bits(layouter, x, max_bits)?;
+        let mut new_bits = chip.range().num_to_bits(ctx, x, max_bits)?;
         bits.append(&mut new_bits);
     }
     let mut rounded_bits = bits;
-    let zero_cell = layouter.assign_region(
-        || "constant 0",
-        |mut region| {
-            let zero_cells = vec![Constant(F::from(0))];
-            let zero_cells_assigned = chip.range().gate().assign_region_smart(
-                zero_cells,
-                vec![],
-                vec![],
-                vec![],
-                0,
-                &mut region,
-            )?;
-            Ok(zero_cells_assigned[0].clone())
-        },
-    )?;
+    let zero_cell = chip.range().gate().load_zero(ctx)?;
     for idx in 0..(rounded_bitlen - total_bits) {
         rounded_bits.push(zero_cell.clone());
     }
@@ -169,7 +152,7 @@ where
     is_started.push(zero_cell.clone());
     for idx in 1..rounded_bitlen {
         let or = chip.range().gate().or(
-            layouter,
+            ctx,
             &Existing(&is_started[idx - 1]),
             &Existing(&rounded_bits[rounded_bitlen - idx]),
         )?;
@@ -188,30 +171,30 @@ where
             .iter()
             .map(|x| Existing(&x))
             .collect();
-        let bit_sum = chip.range().gate().inner_product(layouter, &ones_vec, &temp_bits)?;
-        let is_zero = chip.range().is_zero(layouter, &bit_sum.2)?;
+        let bit_sum = chip.range().gate().inner_product(ctx, &ones_vec, &temp_bits)?;
+        let is_zero = chip.range().is_zero(ctx, &bit_sum.2)?;
         is_zero_window.push(is_zero.clone());
     }
 
     // if all the starting window bits are 0, get start_point = P
     let mut curr_point = select_from_bits(
         chip,
-        layouter,
+        ctx,
         &cached_points[num_windows - 1],
         &rounded_bits[rounded_bitlen - window_bits..rounded_bitlen].to_vec(),
     )?;
     for idx in 1..num_windows {
         let add_point = select_from_bits(
             chip,
-            layouter,
+            ctx,
             &cached_points[num_windows - idx - 1],
             &rounded_bits
                 [rounded_bitlen - window_bits * (idx + 1)..rounded_bitlen - window_bits * idx]
                 .to_vec(),
         )?;
-        let sum = ecc_add_unequal(chip, layouter, &curr_point, &add_point)?;
-        let zero_sum = select(chip, layouter, &curr_point, &sum, &is_zero_window[idx])?;
-        curr_point = select(chip, layouter, &zero_sum, &add_point, &is_started[window_bits * idx])?;
+        let sum = ecc_add_unequal(chip, ctx, &curr_point, &add_point)?;
+        let zero_sum = select(chip, ctx, &curr_point, &sum, &is_zero_window[idx])?;
+        curr_point = select(chip, ctx, &zero_sum, &add_point, &is_started[window_bits * idx])?;
     }
     Ok(curr_point.clone())
 }

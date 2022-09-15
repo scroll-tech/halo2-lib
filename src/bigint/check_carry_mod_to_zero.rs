@@ -12,7 +12,7 @@ use crate::bigint::carry_mod::get_carry_witness;
 use crate::bigint::mul_no_carry;
 use crate::bigint::BigIntStrategy;
 use crate::gates::{
-    GateInstructions,
+    Context, GateInstructions,
     QuantumCell::{self, Constant, Existing, Witness},
     RangeInstructions,
 };
@@ -26,8 +26,8 @@ use crate::utils::modulus as native_modulus;
 // Check that `a = 0 (mod modulus)`
 // We constrain `a = modulus * quotient` and range check `quotient`
 pub fn assign<F: FieldExt>(
-    range: &mut impl RangeInstructions<F>,
-    layouter: &mut impl Layouter<F>,
+    range: &impl RangeInstructions<F>,
+    ctx: &mut Context<'_, F>,
     a: &OverflowInteger<F>,
     modulus: &BigUint,
 ) -> Result<(), Error> {
@@ -83,87 +83,82 @@ pub fn assign<F: FieldExt>(
     let mut check_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(k_prod);
 
     for i in 0..k_prod {
-        let (mod_cell, quot_cell, check_cell) = layouter.assign_region(
-            || format!("check_carry_mod_to_zero_assign_{}", i),
-            |mut region| {
-                let mut offset = 0;
+        let (mod_cell, quot_cell, check_cell) = {
+            let mut offset = 0;
 
-                let startj = if i >= m { i - m + 1 } else { 0 };
-                let mut prod_computation: Vec<QuantumCell<F>> =
-                    Vec::with_capacity(1 + 3 * std::cmp::min(i + 1, mod_vec.len()) - startj);
-                let mut prod_val = Some(F::zero());
-                prod_computation.push(Constant(F::zero()));
-                let mut enable_gates = Vec::new();
+            let startj = if i >= m { i - m + 1 } else { 0 };
+            let mut prod_computation: Vec<QuantumCell<F>> =
+                Vec::with_capacity(1 + 3 * std::cmp::min(i + 1, mod_vec.len()) - startj);
+            let mut prod_val = Some(F::zero());
+            prod_computation.push(Constant(F::zero()));
+            let mut enable_gates = Vec::new();
 
-                for j in startj..=i {
-                    if j >= mod_vec.len() {
-                        break;
-                    }
-                    enable_gates.push(offset);
+            for j in startj..=i {
+                if j >= mod_vec.len() {
+                    break;
+                }
+                enable_gates.push(offset);
 
-                    if j < mod_assigned.len() {
-                        // does it matter whether we are enabling equality from advice column or fixed column for constants?
-                        prod_computation.push(Existing(&mod_assigned[j]));
-                    } else {
-                        // Implies j == i && i < mod_vec.len()
-                        prod_computation.push(Constant(mod_vec[j]));
-                    }
-
-                    if i - j < quot_assigned.len() {
-                        prod_computation.push(Existing(&quot_assigned[i - j]));
-                    } else {
-                        // Implies j == 0 && i < m
-                        prod_computation.push(Witness(quotient_vec[i - j]));
-                    };
-
-                    prod_val =
-                        prod_val.zip(quotient_vec[i - j]).map(|(sum, b)| sum + mod_vec[j] * b);
-                    prod_computation.push(Witness(prod_val));
-
-                    offset += 3;
+                if j < mod_assigned.len() {
+                    // does it matter whether we are enabling equality from advice column or fixed column for constants?
+                    prod_computation.push(Existing(&mod_assigned[j]));
+                } else {
+                    // Implies j == i && i < mod_vec.len()
+                    prod_computation.push(Constant(mod_vec[j]));
                 }
 
-                if i < k {
-                    // perform step 2: compute prod - a
-                    // transpose of:
-                    // | prod | -1 | a | prod - a
-                    // where prod is at relative row `offset`
-                    let check_val = prod_val.zip(a.limbs[i].value()).map(|(prod, &a)| prod - a);
-                    prod_computation.append(&mut vec![
-                        Constant(-F::from(1)),
-                        Existing(&a.limbs[i]),
-                        Witness(check_val),
-                    ]);
-                    enable_gates.push(offset);
-                }
+                if i - j < quot_assigned.len() {
+                    prod_computation.push(Existing(&quot_assigned[i - j]));
+                } else {
+                    // Implies j == 0 && i < m
+                    prod_computation.push(Witness(quotient_vec[i - j]));
+                };
 
-                // assign all the cells above
-                let prod_computation_assignments = range.gate().assign_region_smart(
-                    prod_computation,
-                    enable_gates,
-                    vec![],
-                    vec![],
-                    0,
-                    &mut region,
-                )?;
+                prod_val = prod_val.zip(quotient_vec[i - j]).map(|(sum, b)| sum + mod_vec[j] * b);
+                prod_computation.push(Witness(prod_val));
 
-                let mut mod_cell = None;
-                let mut quot_cell = None;
-                // get new assigned cells and store them
-                if i < mod_vec.len() {
-                    // offset at j = i
-                    mod_cell = Some(prod_computation_assignments[3 * (i - startj) + 1].clone());
-                }
-                if i < m {
-                    // offset at j = 0
-                    quot_cell = Some(prod_computation_assignments[2].clone());
-                }
+                offset += 3;
+            }
 
-                let check_cell = Some(prod_computation_assignments.last().unwrap().clone());
+            if i < k {
+                // perform step 2: compute prod - a
+                // transpose of:
+                // | prod | -1 | a | prod - a
+                // where prod is at relative row `offset`
+                let check_val = prod_val.zip(a.limbs[i].value()).map(|(prod, &a)| prod - a);
+                prod_computation.append(&mut vec![
+                    Constant(-F::from(1)),
+                    Existing(&a.limbs[i]),
+                    Witness(check_val),
+                ]);
+                enable_gates.push(offset);
+            }
 
-                Ok((mod_cell, quot_cell, check_cell))
-            },
-        )?;
+            // assign all the cells above
+            let prod_computation_assignments = range.gate().assign_region_smart(
+                ctx,
+                prod_computation,
+                enable_gates,
+                vec![],
+                vec![],
+            )?;
+
+            let mut mod_cell = None;
+            let mut quot_cell = None;
+            // get new assigned cells and store them
+            if i < mod_vec.len() {
+                // offset at j = i
+                mod_cell = Some(prod_computation_assignments[3 * (i - startj) + 1].clone());
+            }
+            if i < m {
+                // offset at j = 0
+                quot_cell = Some(prod_computation_assignments[2].clone());
+            }
+
+            let check_cell = Some(prod_computation_assignments.last().unwrap().clone());
+
+            (mod_cell, quot_cell, check_cell)
+        };
         if let Some(mc) = mod_cell {
             mod_assigned.push(mc);
         }
@@ -181,29 +176,25 @@ pub fn assign<F: FieldExt>(
     // range check that quot_cell in quot_assigned is in [-2^n, 2^n)
     for quot_cell in quot_assigned.iter() {
         // compute quot_cell + 2^n and range check with n + 1 bits
-        let quot_shift = layouter.assign_region(
-            || format!("quot + 2^{}", n),
-            |mut region| {
-                let out_val = quot_cell.value().map(|&a| a + limb_base);
-                // | quot_cell | 2^n | 1 | quot_cell + 2^n |
-                let shift_computation = range.gate().assign_region_smart(
-                    vec![
-                        Existing(quot_cell),
-                        Constant(limb_base),
-                        Constant(F::one()),
-                        Witness(out_val),
-                    ],
-                    vec![0],
-                    vec![],
-                    vec![],
-                    0,
-                    &mut region,
-                )?;
-                Ok(shift_computation[3].clone())
-            },
-        )?;
+        let quot_shift = {
+            let out_val = quot_cell.value().map(|&a| a + limb_base);
+            // | quot_cell | 2^n | 1 | quot_cell + 2^n |
+            let shift_computation = range.gate().assign_region_smart(
+                ctx,
+                vec![
+                    Existing(quot_cell),
+                    Constant(limb_base),
+                    Constant(F::one()),
+                    Witness(out_val),
+                ],
+                vec![0],
+                vec![],
+                vec![],
+            )?;
+            shift_computation[3].clone()
+        };
 
-        range.range_check(layouter, &quot_shift, n + 1)?;
+        range.range_check(ctx, &quot_shift, n + 1)?;
     }
 
     let check_overflow_int = &OverflowInteger::construct(
@@ -213,16 +204,16 @@ pub fn assign<F: FieldExt>(
         BigUint::zero(),
     );
     // check that `- a + modulus * quotient == 0` after carry
-    check_carry_to_zero::assign(range, layouter, check_overflow_int)?;
+    check_carry_to_zero::assign(range, ctx, check_overflow_int)?;
 
     Ok(())
 }
 
 // same as carry_mod::crt but `out = 0` so no need to range check
 pub fn crt<F: FieldExt>(
-    range: &mut impl RangeInstructions<F>,
+    range: &impl RangeInstructions<F>,
     chip: &BigIntConfig<F>,
-    layouter: &mut impl Layouter<F>,
+    ctx: &mut Context<'_, F>,
     a: &CRTInteger<F>,
     modulus: &BigUint,
 ) -> Result<(), Error> {
@@ -262,7 +253,7 @@ pub fn crt<F: FieldExt>(
         (None, vec![None; k])
     };
 
-    let quot_native = quot_val.map(|a| bigint_to_fe(&a));
+    let quot_native = quot_val.map(|a| bigint_to_fe::<F>(&a));
 
     assert!(modulus < &(BigUint::one() << (n * k)));
     let mod_vec = decompose_biguint(modulus, k, n);
@@ -287,76 +278,72 @@ pub fn crt<F: FieldExt>(
     match chip.strategy {
         BigIntStrategy::Simple => {
             for i in 0..k {
-                let (mod_cell, quot_cell, check_cell) = layouter.assign_region(
-                    || format!("check_carry_mod_to_zero_crt_{}", i),
-                    |mut region| {
-                        let mut offset = 0;
+                let (mod_cell, quot_cell, check_cell) = {
+                    let mut offset = 0;
 
-                        let mut prod_computation: Vec<QuantumCell<F>> =
-                            Vec::with_capacity(4 + 3 * std::cmp::min(i + 1, k));
-                        let mut prod_val = Some(F::zero());
-                        prod_computation.push(Constant(F::zero()));
-                        let mut enable_gates = Vec::new();
+                    let mut prod_computation: Vec<QuantumCell<F>> =
+                        Vec::with_capacity(4 + 3 * std::cmp::min(i + 1, k));
+                    let mut prod_val = Some(F::zero());
+                    prod_computation.push(Constant(F::zero()));
+                    let mut enable_gates = Vec::new();
 
-                        for j in 0..std::cmp::min(i + 1, k) {
-                            enable_gates.push(offset);
-
-                            if j != i {
-                                // does it matter whether we are enabling equality from advice column or fixed column for constants?
-                                prod_computation.push(Existing(&mod_assigned[j]));
-                            } else {
-                                prod_computation.push(Constant(mod_vec[j]));
-                            }
-
-                            if j != 0 {
-                                prod_computation.push(Existing(&quot_assigned[i - j]));
-                            } else {
-                                prod_computation.push(Witness(quot_vec[i - j]));
-                            };
-
-                            prod_val =
-                                prod_val.zip(quot_vec[i - j]).map(|(sum, b)| sum + mod_vec[j] * b);
-                            prod_computation.push(Witness(prod_val));
-
-                            offset += 3;
-                        }
-
-                        // perform step 2: compute prod - a + out
-                        // transpose of:
-                        // | prod | -1 | a | prod - a |
-                        // where prod is at relative row `offset`
+                    for j in 0..std::cmp::min(i + 1, k) {
                         enable_gates.push(offset);
 
-                        let check_val =
-                            prod_val.zip(a.truncation.limbs[i].value()).map(|(prod, &a)| prod - a);
+                        if j != i {
+                            // does it matter whether we are enabling equality from advice column or fixed column for constants?
+                            prod_computation.push(Existing(&mod_assigned[j]));
+                        } else {
+                            prod_computation.push(Constant(mod_vec[j]));
+                        }
 
-                        prod_computation.append(&mut vec![
-                            Constant(-F::from(1)),
-                            Existing(&a.truncation.limbs[i]),
-                            Witness(check_val),
-                        ]);
-                        // assign all the cells above
-                        let prod_computation_assignments = range.gate().assign_region_smart(
-                            prod_computation,
-                            enable_gates,
-                            vec![],
-                            vec![],
-                            0,
-                            &mut region,
-                        )?;
+                        if j != 0 {
+                            prod_computation.push(Existing(&quot_assigned[i - j]));
+                        } else {
+                            prod_computation.push(Witness(quot_vec[i - j]));
+                        };
 
-                        Ok((
-                            // new mod_assigned at
-                            // offset at j = i
-                            prod_computation_assignments[3 * i + 1].clone(),
-                            // new quot_assigned at
-                            // offset at j = 0
-                            prod_computation_assignments[2].clone(),
-                            // new check_assigned
-                            prod_computation_assignments[offset + 3].clone(),
-                        ))
-                    },
-                )?;
+                        prod_val =
+                            prod_val.zip(quot_vec[i - j]).map(|(sum, b)| sum + mod_vec[j] * b);
+                        prod_computation.push(Witness(prod_val));
+
+                        offset += 3;
+                    }
+
+                    // perform step 2: compute prod - a + out
+                    // transpose of:
+                    // | prod | -1 | a | prod - a |
+                    // where prod is at relative row `offset`
+                    enable_gates.push(offset);
+
+                    let check_val =
+                        prod_val.zip(a.truncation.limbs[i].value()).map(|(prod, &a)| prod - a);
+
+                    prod_computation.append(&mut vec![
+                        Constant(-F::from(1)),
+                        Existing(&a.truncation.limbs[i]),
+                        Witness(check_val),
+                    ]);
+                    // assign all the cells above
+                    let prod_computation_assignments = range.gate().assign_region_smart(
+                        ctx,
+                        prod_computation,
+                        enable_gates,
+                        vec![],
+                        vec![],
+                    )?;
+
+                    (
+                        // new mod_assigned at
+                        // offset at j = i
+                        prod_computation_assignments[3 * i + 1].clone(),
+                        // new quot_assigned at
+                        // offset at j = 0
+                        prod_computation_assignments[2].clone(),
+                        // new check_assigned
+                        prod_computation_assignments[offset + 3].clone(),
+                    )
+                };
                 mod_assigned.push(mod_cell);
                 quot_assigned.push(quot_cell);
                 check_assigned.push(check_cell);
@@ -364,58 +351,57 @@ pub fn crt<F: FieldExt>(
         }
         BigIntStrategy::CustomVerticalShort => {
             for i in 0..k {
-                let (quot_cell, check_cell) = layouter.assign_region(
-                    || format!("custom_vs_carry_mod_crt{}/{}", i, k),
-                    |mut region| {
-                        let (mut cells, enable_sel) = mul_no_carry::witness_dot_constant(
-                            range.gate(),
-                            chip,
-                            &(0..std::cmp::min(i + 1, k))
-                                .map(|j| {
-                                    if j != 0 {
-                                        Existing(&quot_assigned[i - j])
-                                    } else {
-                                        Witness(quot_vec[i])
-                                    }
-                                })
-                                .collect(),
-                            &(0..std::cmp::min(i + 1, k)).map(|j| mod_vec[j]).collect(),
-                        )?;
-                        let offset = cells.len() - 1;
+                let (quot_cell, check_cell) = {
+                    let (mut cells, enable_sel) = mul_no_carry::witness_dot_constant(
+                        chip,
+                        &(0..std::cmp::min(i + 1, k))
+                            .map(|j| {
+                                if j != 0 {
+                                    Existing(&quot_assigned[i - j])
+                                } else {
+                                    Witness(quot_vec[i])
+                                }
+                            })
+                            .collect(),
+                        &(0..std::cmp::min(i + 1, k)).map(|j| mod_vec[j]).collect(),
+                    )?;
+                    let offset = cells.len() - 1;
 
-                        // perform step 2: compute prod - a + out
-                        // transpose of:
-                        // | prod | -1 | a | prod - a | 1 | out | prod - a + out
-                        // where prod is at relative row `offset`
-                        let prod_val = cells.last().unwrap().value();
-                        let check_val =
-                            prod_val.zip(a.truncation.limbs[i].value()).map(|(&prod, &a)| prod - a);
+                    // perform step 2: compute prod - a + out
+                    // transpose of:
+                    // | prod | -1 | a | prod - a | 1 | out | prod - a + out
+                    // where prod is at relative row `offset`
+                    let prod_val = cells.last().unwrap().value();
+                    let check_val =
+                        prod_val.zip(a.truncation.limbs[i].value()).map(|(&prod, &a)| prod - a);
 
-                        cells.append(&mut vec![
-                            Constant(-F::from(1)),
-                            Existing(&a.truncation.limbs[i]),
-                            Witness(check_val),
-                        ]);
+                    cells.append(&mut vec![
+                        Constant(-F::from(1)),
+                        Existing(&a.truncation.limbs[i]),
+                        Witness(check_val),
+                    ]);
 
-                        // assign all the cells above
-                        let (assignments, gate_index) =
-                            range.gate().assign_region(cells, vec![offset], 0, &mut region)?;
-                        // enable custom gates
-                        for (c, row) in &enable_sel {
-                            chip.q_dot_constant.get(c).expect(
-                                format!("should have custom dot product for {:?}", *c).as_str(),
-                            )[gate_index]
-                                .enable(&mut region, *row)?;
-                        }
+                    // assign all the cells above
+                    let (assignments, gate_index) =
+                        range.gate().assign_region(ctx, cells, vec![offset])?;
+                    // enable custom gates
+                    for (c, row) in &enable_sel {
+                        chip.q_dot_constant.get(c).expect(
+                            format!("should have custom dot product for {:?}", *c).as_str(),
+                        )[gate_index]
+                            .enable(
+                                &mut ctx.region,
+                                ctx.advice_rows[gate_index] - assignments.len() + *row,
+                            )?;
+                    }
 
-                        Ok((
-                            // new quot_assigned is at offset 0
-                            assignments[0].clone(),
-                            // check_assigned
-                            assignments[offset + 3].clone(),
-                        ))
-                    },
-                )?;
+                    (
+                        // new quot_assigned is at offset 0
+                        assignments[0].clone(),
+                        // check_assigned
+                        assignments[offset + 3].clone(),
+                    )
+                };
                 quot_assigned.push(quot_cell);
                 check_assigned.push(check_cell);
             }
@@ -434,29 +420,25 @@ pub fn crt<F: FieldExt>(
         };
 
         // compute quot_cell + 2^n and range check with n + 1 bits
-        let quot_shift = layouter.assign_region(
-            || format!("quot + 2^{}", limb_bits),
-            |mut region| {
-                let out_val = quot_cell.value().map(|&a| a + limb_base);
-                // | quot_cell | 2^n | 1 | quot_cell + 2^n |
-                let shift_computation = range.gate().assign_region_smart(
-                    vec![
-                        Existing(quot_cell),
-                        Constant(limb_base),
-                        Constant(F::one()),
-                        Witness(out_val),
-                    ],
-                    vec![0],
-                    vec![],
-                    vec![],
-                    0,
-                    &mut region,
-                )?;
-                Ok(shift_computation[3].clone())
-            },
-        )?;
+        let quot_shift = {
+            let out_val = quot_cell.value().map(|&a| a + limb_base);
+            // | quot_cell | 2^n | 1 | quot_cell + 2^n |
+            let shift_computation = range.gate().assign_region_smart(
+                ctx,
+                vec![
+                    Existing(quot_cell),
+                    Constant(limb_base),
+                    Constant(F::one()),
+                    Witness(out_val),
+                ],
+                vec![0],
+                vec![],
+                vec![],
+            )?;
+            shift_computation[3].clone()
+        };
 
-        range.range_check(layouter, &quot_shift, limb_bits + 1)?;
+        range.range_check(ctx, &quot_shift, limb_bits + 1)?;
         q_index = q_index + 1;
     }
 
@@ -467,46 +449,25 @@ pub fn crt<F: FieldExt>(
         BigUint::zero(),
     );
     // check that `modulus * quotient - a == 0 mod 2^{trunc_len}` after carry
-    check_carry_to_zero::truncate(range, layouter, check_overflow_int)?;
+    check_carry_to_zero::truncate(range, ctx, check_overflow_int)?;
+
+    // Constrain `quot_native = sum_i out_assigned[i] * 2^{n*i}` in `F`
+    let quot_native_assigned =
+        OverflowInteger::evaluate(range.gate(), chip, ctx, &quot_assigned, n)?;
 
     // Check `0 + modulus * quotient - a = 0` in native field
-    // ----------------------------------------------------
-    let quot_native_assigned = layouter.assign_region(
-        || "native carry mod",
-        |mut region| {
-            // | 0 | modulus | quotient | a |
-            let native_computation = range.gate().assign_region_smart(
-                vec![
-                    Constant(F::from(0)),
-                    Constant(mod_native),
-                    Witness(quot_native),
-                    Existing(&a.native),
-                ],
-                vec![0],
-                vec![],
-                vec![],
-                0,
-                &mut region,
-            )?;
-            Ok(native_computation[2].clone())
-        },
-    )?;
-
-    let mut pows = Vec::with_capacity(k);
-    let mut running_pow = F::from(1);
-    for i in 0..k {
-        pows.push(Constant(running_pow));
-        running_pow = running_pow * &limb_base;
-    }
-    // Constrain `quot_native = sum_i out_assigned[i] * 2^{n*i}` in `F`
-    let quot_native_consistency =
-        OverflowInteger::evaluate(range.gate(), chip, layouter, &quot_assigned, n)?;
-    layouter.assign_region(
-        || "native consistency equals",
-        |mut region| {
-            region.constrain_equal(quot_native_consistency.cell(), quot_native_assigned.cell())?;
-            Ok(())
-        },
+    // | 0 | modulus | quotient | a |
+    let native_computation = range.gate().assign_region_smart(
+        ctx,
+        vec![
+            Constant(F::from(0)),
+            Constant(mod_native),
+            Existing(&quot_native_assigned),
+            Existing(&a.native),
+        ],
+        vec![0],
+        vec![],
+        vec![],
     )?;
 
     Ok(())
