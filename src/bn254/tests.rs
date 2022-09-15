@@ -92,7 +92,7 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
         let mut first_pass = true;
 
         layouter.assign_region(
-            || "ecc",
+            || "pairing",
             |region| {
                 if first_pass && using_simple_floor_planner {
                     first_pass = false;
