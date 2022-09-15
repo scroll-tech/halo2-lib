@@ -438,6 +438,15 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
         range_bits: usize,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
         assert_ne!(range_bits, 0);
+        #[cfg(feature = "display")]
+        {
+            let key = format!(
+                "range check length {}",
+                (range_bits + self.lookup_bits - 1) / self.lookup_bits
+            );
+            let count = ctx.op_count.entry(key).or_insert(0);
+            *count += 1;
+        }
         match self.strategy {
             RangeStrategy::Vertical => self.range_check_simple(ctx, a, range_bits),
             RangeStrategy::CustomVerticalShort => {

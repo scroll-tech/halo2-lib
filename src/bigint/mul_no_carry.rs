@@ -84,6 +84,13 @@ pub fn truncate<F: FieldExt>(
     assert!(k > 0);
     assert_eq!(k, b.limbs.len());
 
+    #[cfg(feature = "display")]
+    {
+        let key = format!("mul_no_carry(truncate) length {}", k);
+        let count = ctx.op_count.entry(key).or_insert(0);
+        *count += 1;
+    }
+
     assert!(BigUint::from(k) * &a.max_limb_size * &b.max_limb_size <= native_modulus::<F>() / 2u32);
     let mut out_limbs = Vec::with_capacity(k);
 

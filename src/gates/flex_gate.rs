@@ -98,6 +98,7 @@ impl<F: FieldExt> FlexGateConfig<F> {
     /// allocates constants to fixed columns
     /// returns (max rows used by a fixed column, total number of constants assigned)
     pub fn finalize(&self, ctx: &mut Context<'_, F>) -> Result<(usize, usize), Error> {
+        println!("{:#?}", ctx.op_count);
         ctx.assign_and_constrain_constants(&self.constants)
     }
 

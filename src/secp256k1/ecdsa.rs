@@ -516,9 +516,9 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
             bench_params.limb_bits,
             bench_params.num_limbs,
             vk_size,
-            proof_time.time,
+            proof_time.time.elapsed(),
             proof_size,
-            verify_time.time
+            verify_time.time.elapsed()
         )?;
     }
     Ok(())

@@ -14,4 +14,4 @@ type Secp256k1Chip<'a, F> = ecc::EccChip<'a, F, FpChip<F>>;
 const SECP_B: u64 = 7;
 
 #[cfg(test)]
-pub mod ecdsa;
+pub(crate) mod ecdsa;

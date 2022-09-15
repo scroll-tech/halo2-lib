@@ -152,6 +152,13 @@ pub fn truncate<F: FieldExt>(
     let limb_bits = a.limb_bits;
     let max_limb_bits = a.max_limb_size.bits();
 
+    #[cfg(feature = "display")]
+    {
+        let key = format!("check_carry_to_zero(trunc) length {}", k);
+        let count = ctx.op_count.entry(key).or_insert(0);
+        *count += 1;
+    }
+
     let mut carries: Vec<Option<BigInt>> = Vec::with_capacity(k);
     let limb_val = BigInt::from(1) << limb_bits;
     let limb_base = bigint_to_fe(&limb_val);

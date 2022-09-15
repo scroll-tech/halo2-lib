@@ -221,6 +221,13 @@ pub fn crt<F: FieldExt>(
     let k = a.truncation.limbs.len();
     let trunc_len = n * k;
 
+    #[cfg(feature = "display")]
+    {
+        let key = format!("check_carry_mod(crt) length {}", k);
+        let count = ctx.op_count.entry(key).or_insert(0);
+        *count += 1;
+    }
+
     // in order for CRT method to work, we need `abs(modulus * quotient - a) < 2^{trunc_len - 1} * native_modulus::<F>`
     // this is ensured if
     // `modulus * quotient` < 2^{trunc_len - 1} * native_modulus::<F> - a.max_size

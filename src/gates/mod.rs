@@ -49,10 +49,13 @@ pub struct Context<'a, F: FieldExt> {
     pub cells_to_lookup: Vec<AssignedCell<F, F>>,
     // SimpleFloorPlanner calls the assignments in `layouter.assign_region` twice:
     // https://github.com/privacy-scaling-explorations/halo2/blob/f586922d19c3c96ffcec4adbe1790132565ffba6/halo2_proofs/src/circuit/floor_planner/single_pass.rs#L91
-    // EDIT: we now do this in the `synthesis` function to skip the get shape step completely
     // The following is a hack to get around this for row counting purposes
+    // EDIT: we now do this in the `synthesis` function to skip the get shape step completely
     pub using_simple_floor_planner: bool,
     pub first_pass: bool, // AKA `in_shape_mode`
+
+    #[cfg(feature = "display")]
+    pub op_count: HashMap<String, usize>,
 }
 
 // a single struct to package any configuration parameters we will need for constructing a new `Context`
@@ -73,6 +76,8 @@ impl<'a, F: FieldExt> Context<'a, F> {
             cells_to_lookup: Vec::new(),
             using_simple_floor_planner: params.using_simple_floor_planner,
             first_pass: params.first_pass,
+            #[cfg(feature = "display")]
+            op_count: HashMap::new(),
         }
     }
 
