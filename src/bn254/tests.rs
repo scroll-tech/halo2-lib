@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
+use ark_std::{end_timer, start_timer};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::marker::PhantomData;
-use std::time::{Duration, Instant};
 
 use super::pairing::PairingChip;
 use super::*;
@@ -139,6 +139,7 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
                     for fc in &f.coeffs {
                         assert_eq!(fc.value, fc.truncation.to_bigint());
                     }
+                    #[cfg(feature = "display")]
                     if self.P != None {
                         let actual_f = pairing(&self.P.unwrap(), &self.Q.unwrap());
                         let f_val: Vec<String> = f
@@ -158,6 +159,7 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
                 // This is not optional.
                 let (const_rows, total_fixed, lookup_rows) = config.finalize(ctx)?;
 
+                #[cfg(feature = "display")]
                 if self.P != None {
                     let num_advice = config.range.gate.num_advice;
                     let num_lookup_advice = config.range.lookup_advice.len();
@@ -261,8 +263,6 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
             "---------------------- degree = {} ------------------------------",
             bench_params.degree
         );
-        let mut rng = rand::thread_rng();
-        let start = Instant::now();
 
         {
             folder.pop();
@@ -273,6 +273,7 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
             folder.pop();
             folder.push("data");
         }
+        let params_time = start_timer!(|| "Time elapsed in circuit & params construction");
         let params = {
             params_folder.push(format!("bn254_{}.params", bench_params.degree));
             let fd = std::fs::File::open(params_folder.as_path());
@@ -291,12 +292,12 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let circuit = PairingCircuit::<Fr>::default();
-        let circuit_duration = start.elapsed();
-        println!("Time elapsed in circuit & params construction: {:?}", circuit_duration);
+        end_timer!(params_time);
 
+        let vk_time = start_timer!(|| "Time elapsed in generating vkey");
         let vk = keygen_vk(&params, &circuit)?;
-        let vk_duration = start.elapsed();
-        println!("Time elapsed in generating vkey: {:?}", vk_duration - circuit_duration);
+        end_timer!(vk_time);
+
         let vk_size = {
             folder.push(format!(
                 "pairing_circuit_{}_{}_{}_{}_{}_{}_{}.vkey",
@@ -313,28 +314,22 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
             vk.write(&mut fd).unwrap();
             fd.metadata().unwrap().len()
         };
-        let pk = keygen_pk(&params, vk, &circuit)?;
-        let pk_duration = start.elapsed();
-        println!("Time elapsed in generating pkey: {:?}", pk_duration - vk_duration);
-        /*{
-            folder.push(format!("pairing_circuit_{}_{}_{}_{}_{}_{}_{}.pkey", DEGREE[I], NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3));
-            let mut fd = std::fs::File::create(folder.as_path()).unwrap();
-            folder.pop();
-        }*/
 
+        let pk_time = start_timer!(|| "Time elapsed in generating pkey");
+        let pk = keygen_pk(&params, vk, &circuit)?;
+        end_timer!(pk_time);
+
+        let mut rng = rand::thread_rng();
         let P = Some(G1Affine::random(&mut rng));
         let Q = Some(G2Affine::random(&mut rng));
         let proof_circuit = PairingCircuit::<Fr> { P, Q, _marker: PhantomData };
-        let fill_duration = start.elapsed();
-        println!("Time elapsed in filling circuit: {:?}", fill_duration - pk_duration);
 
         // create a proof
+        let proof_time = start_timer!(|| "Proving time");
         let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
         create_proof(&params, &pk, &[proof_circuit], &[&[]], rng, &mut transcript)?;
         let proof = transcript.finalize();
-        let proof_duration = start.elapsed();
-        let proof_time = proof_duration - fill_duration;
-        println!("Proving time: {:?}", proof_time);
+        end_timer!(proof_time);
 
         let proof_size = {
             folder.push(format!(
@@ -353,16 +348,14 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
             fd.metadata().unwrap().len()
         };
 
-        let verify_start = start.elapsed();
+        let verify_time = start_timer!(|| "Verify time");
         let params_verifier: ParamsVerifier<Bn256> = params.verifier(0).unwrap();
         let strategy = SingleVerifier::new(&params_verifier);
         let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
         assert!(
             verify_proof(&params_verifier, pk.get_vk(), strategy, &[&[]], &mut transcript).is_ok()
         );
-        let verify_duration = start.elapsed();
-        let verify_time = verify_duration - verify_start;
-        println!("Verify time: {:?}", verify_time);
+        end_timer!(verify_time);
 
         write!(
             fs_results,
@@ -375,9 +368,9 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
             bench_params.limb_bits,
             bench_params.num_limbs,
             vk_size,
-            proof_time,
+            proof_time.time,
             proof_size,
-            verify_time
+            verify_time.time
         )?;
     }
     Ok(())

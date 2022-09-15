@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
+use ark_std::{end_timer, start_timer};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::marker::PhantomData;
-use std::time::{Duration, Instant};
 
 use ff::{Field, PrimeField};
 use halo2_proofs::circuit::floor_planner::*;
@@ -22,11 +22,12 @@ use num_bigint::{BigInt, BigUint};
 use rand_core::OsRng;
 
 use super::{FpChip, FqOverflowChip, Secp256k1Chip, SECP_B};
+use crate::gates::{Context, ContextParams};
 use crate::{
     ecc::{ecdsa_verify_no_pubkey_check, fixed::FixedEccPoint, EccChip},
     fields::{fp::FpConfig, fp::FpStrategy, FieldChip, PrimeFieldChip},
     gates::{
-        range::{RangeChip, RangeConfig, RangeStrategy},
+        range::{RangeConfig, RangeStrategy},
         GateInstructions,
         QuantumCell::Witness,
         RangeInstructions,
@@ -68,7 +69,7 @@ impl<F: FieldExt> Default for ECDSACircuit<F> {
 }
 
 impl<F: FieldExt> Circuit<F> for ECDSACircuit<F> {
-    type Config = FpConfig<F>;
+    type Config = FpChip<F>;
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
@@ -83,7 +84,7 @@ impl<F: FieldExt> Circuit<F> for ECDSACircuit<F> {
             .expect("src/secp256k1/configs/ecdsa_circuit.config file should exist");
         let params: CircuitParams = serde_json::from_str(params_str.as_str()).unwrap();
 
-        FpConfig::<F>::configure(
+        FpChip::<F>::configure(
             meta,
             params.strategy,
             params.num_advice,
@@ -98,51 +99,60 @@ impl<F: FieldExt> Circuit<F> for ECDSACircuit<F> {
 
     fn synthesize(
         &self,
-        config: Self::Config,
+        fp_chip: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
-        let fp_config = config;
-        let mut range_chip = RangeChip::<F>::construct(fp_config.range_config.clone(), true);
-        range_chip.load_lookup_table(&mut layouter)?;
+        fp_chip.range.load_lookup_table(&mut layouter)?;
 
-        let limb_bits = fp_config.limb_bits;
-        let num_limbs = fp_config.num_limbs;
-        let num_fixed = fp_config.range_config.gate_config.constants.len();
-        let lookup_bits = fp_config.range_config.lookup_bits;
+        let limb_bits = fp_chip.limb_bits;
+        let num_limbs = fp_chip.num_limbs;
+        let num_fixed = fp_chip.range.gate.constants.len();
+        let lookup_bits = fp_chip.range.lookup_bits;
+        let num_advice =  fp_chip.range.gate.num_advice;
 
+        let using_simple_floor_planner = true;
+        let mut first_pass = true;
         // ECDSA verify
-        {
+        layouter.assign_region(
+            || "ECDSA",
+            |region| {
+                if first_pass && using_simple_floor_planner {
+                    first_pass = false;
+                    return Ok(());
+                }
+
+                let mut aux = Context::new(
+                    region,
+                    ContextParams {
+                        num_advice,
+                        using_simple_floor_planner,
+                        first_pass,
+                    },
+                );
+                let ctx = &mut aux;
+
             let (r_assigned, s_assigned, m_assigned) = {
-                let fq_config = FpConfig {
-                    range_config: fp_config.range_config.clone(),
-                    bigint_config: fp_config.bigint_config.clone(),
-                    limb_bits: limb_bits,
-                    num_limbs: num_limbs,
-                    p: modulus::<Fq>(),
-                };
-                let mut fq_chip = FqOverflowChip::construct(fq_config, &mut range_chip, true);
+                let fq_chip = FqOverflowChip::construct(fp_chip.range(), limb_bits, num_limbs, modulus::<Fq>());
 
                 let m_assigned = fq_chip.load_private(
-                    &mut layouter,
+                    ctx,
                     FqOverflowChip::<F>::fe_to_witness(&self.msghash),
                 )?;
 
                 let r_assigned = fq_chip
-                    .load_private(&mut layouter, FqOverflowChip::<F>::fe_to_witness(&self.r))?;
+                    .load_private(ctx, FqOverflowChip::<F>::fe_to_witness(&self.r))?;
                 let s_assigned = fq_chip
-                    .load_private(&mut layouter, FqOverflowChip::<F>::fe_to_witness(&self.s))?;
+                    .load_private(ctx, FqOverflowChip::<F>::fe_to_witness(&self.s))?;
                 (r_assigned, s_assigned, m_assigned)
             };
-            // end of fq_chip mutably borrowing range_chip
-            // now fp_chip will mutably borrow range_chip
-            let mut fp_chip = FpChip::<F>::construct(fp_config, &mut range_chip, true);
-            let mut ecc_chip = EccChip::<F, FpChip<F>>::construct(&mut fp_chip);
+
+            let ecc_chip = EccChip::<F, FpChip<F>>::construct(&fp_chip);
             let pk_assigned = ecc_chip
-                .load_private(&mut layouter, (self.pk.map(|pt| pt.x), self.pk.map(|pt| pt.y)))?;
+                .load_private(ctx, (self.pk.map(|pt| pt.x), self.pk.map(|pt| pt.y)))?;
             // test ECDSA
             let ecdsa = ecdsa_verify_no_pubkey_check::<F, Fp, Fq, Secp256k1Affine>(
-                &mut fp_chip,
-                &mut layouter.namespace(|| "ecdsa"),
+                &fp_chip,
+                ctx,
                 &pk_assigned,
                 &r_assigned,
                 &s_assigned,
@@ -153,44 +163,34 @@ impl<F: FieldExt> Circuit<F> for ECDSACircuit<F> {
             )?;
 
             // IMPORTANT: this assigns all constants to the fixed columns
-            // This is not optional.
-            let const_rows = range_chip.gate.assign_and_constrain_constants(&mut layouter)?;
             // IMPORTANT: this copies cells to the lookup advice column to perform range check lookups
-            // This is not optional when there is more than 1 advice column.
-            range_chip.copy_and_lookup_cells(&mut layouter)?;
+            // This is not optional.
+            let (const_rows, total_fixed, lookup_rows) = fp_chip.finalize(ctx)?;
 
+            #[cfg(feature = "display")]
             if self.r != None {
                 println!("ECDSA res {:?}", ecdsa);
 
-                let num_advice = range_chip.config.gate_config.num_advice;
-                let num_lookup_advice = range_chip.config.lookup_advice.len();
+                let num_lookup_advice = fp_chip.range.lookup_advice.len();
 
                 println!("Using:\nadvice columns: {}\nspecial lookup advice columns: {}\nfixed columns: {}\nlookup bits: {}\nlimb bits: {}\nnum limbs: {}", num_advice, num_lookup_advice, num_fixed, lookup_bits, limb_bits, num_limbs);
-                let advice_rows = range_chip.gate.advice_rows.iter();
-                let horizontal_advice_rows = range_chip.gate.horizontal_advice_rows.iter();
+                let advice_rows = ctx.advice_rows.iter();
                 println!(
                     "maximum rows used by an advice column: {}",
-                    std::cmp::max(
-                        advice_rows.clone().max().or(Some(&0u64)).unwrap(),
-                        horizontal_advice_rows.clone().max().or(Some(&0u64)).unwrap()
-                    )
+                        advice_rows.clone().max().or(Some(&0)).unwrap(),
                 );
                 println!(
                     "minimum rows used by an advice column: {}",
-                    std::cmp::min(
-                        advice_rows.clone().min().or(Some(&u64::MAX)).unwrap(),
-                        horizontal_advice_rows.clone().min().or(Some(&u64::MAX)).unwrap()
-                    )
+                        advice_rows.clone().min().or(Some(&usize::MAX)).unwrap(),
                 );
 
                 let total_cells =
-                    advice_rows.sum::<u64>() + horizontal_advice_rows.sum::<u64>() * 4;
+                    advice_rows.sum::<usize>();
                 println!("total cells used: {}", total_cells);
                 println!(
                     "cells used in special lookup column: {}",
-                    range_chip.cells_to_lookup.len()
+                    ctx.cells_to_lookup.len()
                 );
-                let total_fixed = const_rows * num_fixed;
                 println!("maximum rows used by a fixed column: {}", const_rows);
 
                 println!("Suggestions:");
@@ -201,15 +201,14 @@ impl<F: FieldExt> Circuit<F> for ECDSACircuit<F> {
                 );
                 println!(
                     "Have you tried using {} lookup columns?",
-                    (range_chip.cells_to_lookup.len() + (1 << degree) - 1) / (1 << degree)
+                    (ctx.cells_to_lookup.len() + (1 << degree) - 1) / (1 << degree)
                 );
                 println!(
                     "Have you tried using {} fixed columns?",
                     (total_fixed + (1 << degree) - 1) / (1 << degree)
                 );
             }
-        }
-        println!("ecdsa done");
+        
         /*
         let fp_config = FpConfig {
             range_config: config.clone(),
@@ -302,7 +301,8 @@ impl<F: FieldExt> Circuit<F> for ECDSACircuit<F> {
         */
 
         Ok(())
-    }
+    })
+}
 }
 
 #[cfg(test)]
@@ -391,8 +391,6 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
             "---------------------- degree = {} ------------------------------",
             bench_params.degree
         );
-        let rng = rand::thread_rng();
-        let start = Instant::now();
 
         {
             folder.pop();
@@ -403,6 +401,7 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
             folder.pop();
             folder.push("data");
         }
+        let params_time = start_timer!(|| "Time elapsed in circuit & params construction");
         let params = {
             params_folder.push(format!("bn254_{}.params", bench_params.degree));
             let fd = std::fs::File::open(params_folder.as_path());
@@ -421,12 +420,12 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let circuit = ECDSACircuit::<Fr>::default();
-        let circuit_duration = start.elapsed();
-        println!("Time elapsed in circuit & params construction: {:?}", circuit_duration);
+        end_timer!(params_time);
 
+        let vk_time = start_timer!(|| "Time elapsed in generating vkey");
         let vk = keygen_vk(&params, &circuit)?;
-        let vk_duration = start.elapsed();
-        println!("Time elapsed in generating vkey: {:?}", vk_duration - circuit_duration);
+        end_timer!(vk_time);
+
         let vk_size = {
             folder.push(format!(
                 "ecdsa_circuit_{}_{}_{}_{}_{}_{}_{}.vkey",
@@ -443,16 +442,10 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
             vk.write(&mut fd).unwrap();
             fd.metadata().unwrap().len()
         };
-        let vk_duration = start.elapsed();
+
+        let pk_time = start_timer!(|| "Time elapsed in generating pkey");
         let pk = keygen_pk(&params, vk, &circuit)?;
-        let pk_duration = start.elapsed();
-        println!("Time elapsed in generating pkey: {:?}", pk_duration - vk_duration);
-        /*{
-            folder.push(format!("ecdsa_circuit_{}_{}_{}_{}_{}_{}_{}.pkey", DEGREE[I], NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3));
-            let mut fd = std::fs::File::create(folder.as_path()).unwrap();
-            folder.pop();
-        }*/
-        let pk_duration = start.elapsed();
+        end_timer!(pk_time);
 
         // generate random pub key and sign random message
         let G = Secp256k1Affine::generator();
@@ -477,16 +470,14 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
             G,
             _marker: PhantomData,
         };
-        let fill_duration = start.elapsed();
-        println!("Time elapsed in filling circuit: {:?}", fill_duration - pk_duration);
+        let rng = rand::thread_rng();
 
         // create a proof
+        let proof_time = start_timer!(|| "Proving time");
         let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
         create_proof(&params, &pk, &[proof_circuit], &[&[]], rng, &mut transcript)?;
         let proof = transcript.finalize();
-        let proof_duration = start.elapsed();
-        let proof_time = proof_duration - fill_duration;
-        println!("Proving time: {:?}", proof_time);
+        end_timer!(proof_time);
 
         let proof_size = {
             folder.push(format!(
@@ -505,15 +496,14 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
             fd.metadata().unwrap().len()
         };
 
+        let verify_time = start_timer!(|| "Verify time");
         let params_verifier: ParamsVerifier<Bn256> = params.verifier(0).unwrap();
         let strategy = SingleVerifier::new(&params_verifier);
         let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
         assert!(
             verify_proof(&params_verifier, pk.get_vk(), strategy, &[&[]], &mut transcript).is_ok()
         );
-        let verify_duration = start.elapsed();
-        let verify_time = verify_duration - proof_duration;
-        println!("Verify time: {:?}", verify_time);
+        end_timer!(verify_time);
 
         write!(
             fs_results,
@@ -526,9 +516,9 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
             bench_params.limb_bits,
             bench_params.num_limbs,
             vk_size,
-            proof_time,
+            proof_time.time,
             proof_size,
-            verify_time
+            verify_time.time
         )?;
     }
     Ok(())

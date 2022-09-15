@@ -58,7 +58,7 @@ impl<'a, F: FieldExt, Fp: PrimeField> FpOverflowChip<'a, F, Fp> {
         Ok(CRTInteger::construct(a.clone(), a_native, a_bigint))
     }
 
-    pub fn from_fp_chip(
+    pub fn construct(
         range: &'a RangeConfig<F>,
         limb_bits: usize,
         num_limbs: usize,

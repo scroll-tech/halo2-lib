@@ -478,7 +478,7 @@ where
         pubkey.x.truncation.limb_bits,
     );
 
-    let scalar_chip = FpOverflowChip::<F, SF>::from_fp_chip(
+    let scalar_chip = FpOverflowChip::<F, SF>::construct(
         &base_chip.range,
         base_chip.limb_bits,
         base_chip.num_limbs,
