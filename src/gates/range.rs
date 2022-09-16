@@ -417,6 +417,35 @@ impl<F: FieldExt> RangeConfig<F> {
 
         Ok(assigned_limbs)
     }
+
+    /// assume `a` has been range checked already to `limb_bits` bits
+    pub fn get_last_bit(
+        &self,
+        ctx: &mut Context<'_, F>,
+        a: &AssignedCell<F, F>,
+        limb_bits: usize,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        let a_v = a.value();
+        let bit_v = a_v.map(|a| {
+            let a_big = fe_to_biguint(a);
+            if a_big % 2u64 == BigUint::from(0u64) {
+                F::zero()
+            } else {
+                F::one()
+            }
+        });
+        let h_v = a.value().zip(bit_v).map(|(&a, b)| (a - b) * F::from(2).invert().unwrap());
+        let assignments = self.gate.assign_region_smart(
+            ctx,
+            vec![Witness(bit_v), Witness(h_v), Constant(F::from(2)), Existing(a)],
+            vec![0],
+            vec![],
+            vec![],
+        )?;
+
+        self.range_check(ctx, &assignments[1], limb_bits - 1)?;
+        Ok(assignments[0].clone())
+    }
 }
 
 impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
