@@ -10,14 +10,13 @@ use crate::{
 pub mod final_exp;
 pub mod pairing;
 
-type FpConfig<F> = fp::FpConfig<F>;
-type FpChip<'a, F> = fp::FpChip<'a, F, Fq>;
+type FpChip<F> = fp::FpConfig<F, Fq>;
 type FpPoint<F> = CRTInteger<F>;
 // type FpChip<'a, F> = fp_overflow::FpOverflowChip<'a, F, Fq>;
 // type FpPoint<F> = OverflowInteger<F>;
 type FqPoint<F> = FieldExtPoint<FpPoint<F>>;
-type Fp2Chip<'a, 'b, F> = fp2::Fp2Chip<'a, 'b, F, FpChip<'b, F>, Fq2>;
-type Fp12Chip<'a, 'b, F> = fp12::Fp12Chip<'a, 'b, F, FpChip<'b, F>, Fq12, 9>;
+type Fp2Chip<'a, F> = fp2::Fp2Chip<'a, F, FpChip<F>, Fq2>;
+type Fp12Chip<'a, F> = fp12::Fp12Chip<'a, F, FpChip<F>, Fq12, 9>;
 
 impl FieldExtConstructor<Fq, 2> for Fq2 {
     fn new(c: [Fq; 2]) -> Self {
@@ -56,4 +55,5 @@ impl FieldExtConstructor<Fq, 12> for Fq12 {
     }
 }
 
+#[cfg(test)]
 pub(crate) mod tests;

@@ -1,9 +1,10 @@
 #![allow(unused_assignments, unused_imports, unused_variables)]
 use std::marker::PhantomData;
 
-use crate::fields::fp::{FpChip, FpConfig, FpStrategy};
+use crate::fields::fp::{FpConfig, FpStrategy};
 use crate::fields::fp2::Fp2Chip;
-use crate::gates::range::{RangeChip, RangeStrategy};
+use crate::gates::range::RangeStrategy;
+use crate::gates::ContextParams;
 
 use super::*;
 use halo2_proofs::arithmetic::BaseExt;
@@ -28,7 +29,7 @@ const NUM_ADVICE: usize = 2;
 const NUM_FIXED: usize = 2;
 
 impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
-    type Config = FpConfig<F>;
+    type Config = FpConfig<F, Fq>;
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
@@ -36,8 +37,6 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        let value = meta.advice_column();
-        let constant = meta.fixed_column();
         FpConfig::configure(
             meta,
             FpStrategy::Simple,
@@ -56,80 +55,80 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
-        let mut range_chip = RangeChip::<F>::construct(config.range_config.clone(), true);
-        let mut fp_chip = FpChip::<F, Fq>::construct(config, &mut range_chip, true);
-        fp_chip.load_lookup_table(&mut layouter)?;
-        let mut chip = EccChip::construct(&mut fp_chip);
+        config.load_lookup_table(&mut layouter)?;
+        let chip = EccChip::construct(&config);
 
-        let P_assigned = chip.load_private(
-            &mut layouter,
-            match self.P {
-                Some(P) => (Some(P.x), Some(P.y)),
-                None => (None, None),
+        let using_simple_floor_planner = true;
+        let mut first_pass = true;
+
+        layouter.assign_region(
+            || "ecc",
+            |region| {
+                if first_pass && using_simple_floor_planner {
+                    first_pass = false;
+                    return Ok(());
+                }
+
+                let mut aux = Context::new(
+                    region,
+                    ContextParams {
+                        num_advice: NUM_ADVICE,
+                        using_simple_floor_planner,
+                        first_pass,
+                    },
+                );
+                let ctx = &mut aux;
+
+                let P_assigned = chip.load_private(
+                    ctx,
+                    match self.P {
+                        Some(P) => (Some(P.x), Some(P.y)),
+                        None => (None, None),
+                    },
+                )?;
+                let Q_assigned = chip.load_private(
+                    ctx,
+                    match self.Q {
+                        Some(Q) => (Some(Q.x), Some(Q.y)),
+                        None => (None, None),
+                    },
+                )?;
+
+                // test add_unequal
+                {
+                    let sum = chip.add_unequal(ctx, &P_assigned, &Q_assigned)?;
+                    assert_eq!(sum.x.truncation.to_bigint(), sum.x.value);
+                    assert_eq!(sum.y.truncation.to_bigint(), sum.y.value);
+                    if self.P != None {
+                        let actual_sum = G1Affine::from(self.P.unwrap() + self.Q.unwrap());
+                        assert_eq!(bigint_to_fe::<Fq>(&sum.x.value.unwrap()), actual_sum.x);
+                        assert_eq!(bigint_to_fe::<Fq>(&sum.y.value.unwrap()), actual_sum.y);
+                    }
+                    println!("add unequal witness OK");
+                }
+
+                // test double
+                {
+                    let doub = chip.double(ctx, &P_assigned)?;
+                    if self.P != None {
+                        let actual_doub = G1Affine::from(self.P.unwrap() * Fr::from(2));
+                        assert_eq!(bigint_to_fe::<Fq>(&doub.x.value.unwrap()), actual_doub.x);
+                        assert_eq!(bigint_to_fe::<Fq>(&doub.y.value.unwrap()), actual_doub.y);
+                    }
+                    println!("double witness OK");
+                }
+
+                println!("Using {} advice columns and {} fixed columns", NUM_ADVICE, NUM_FIXED);
+                println!(
+                    "maximum rows used by an advice column: {}",
+                    ctx.advice_rows.iter().max().unwrap()
+                );
+                let (const_rows, _, _) = chip.field_chip.finalize(ctx)?;
+                println!("maximum rows used by a fixed column: {}", const_rows);
+
+                Ok(())
             },
-        )?;
-        let Q_assigned = chip.load_private(
-            &mut layouter,
-            match self.Q {
-                Some(Q) => (Some(Q.x), Some(Q.y)),
-                None => (None, None),
-            },
-        )?;
-
-        /*
-        // test fp mul
-        {
-            let prod = chip
-                .fp_chip
-                .mul(&mut layouter, &Existing(&P_assigned.x), &Existing(&P_assigned.y))?;
-            assert_eq!(prod.value, prod.truncation.to_bigint());
-            if self.P != None {
-                let actual_prod = self.P.unwrap().x * self.P.unwrap().y;
-                assert_eq!(fp_to_bigint(&actual_prod), prod.value.unwrap());
-            }
-        }
-        */
-
-        // test add_unequal
-        {
-            let sum = chip.add_unequal(
-                &mut layouter.namespace(|| "add_unequal"),
-                &P_assigned,
-                &Q_assigned,
-            )?;
-            assert_eq!(sum.x.truncation.to_bigint(), sum.x.value);
-            assert_eq!(sum.y.truncation.to_bigint(), sum.y.value);
-            if self.P != None {
-                let actual_sum = G1Affine::from(self.P.unwrap() + self.Q.unwrap());
-                assert_eq!(bigint_to_fe::<Fq>(&sum.x.value.unwrap()), actual_sum.x);
-                assert_eq!(bigint_to_fe::<Fq>(&sum.y.value.unwrap()), actual_sum.y);
-            }
-            println!("add unequal witness OK");
-        }
-
-        // test double
-        {
-            let doub = chip.double(&mut layouter.namespace(|| "double"), &P_assigned)?;
-            if self.P != None {
-                let actual_doub = G1Affine::from(self.P.unwrap() * Fr::from(2));
-                assert_eq!(bigint_to_fe::<Fq>(&doub.x.value.unwrap()), actual_doub.x);
-                assert_eq!(bigint_to_fe::<Fq>(&doub.y.value.unwrap()), actual_doub.y);
-            }
-            println!("double witness OK");
-        }
-
-        println!("Using {} advice columns and {} fixed columns", NUM_ADVICE, NUM_FIXED);
-        println!(
-            "maximum rows used by an advice column: {}",
-            chip.field_chip.range.gate().advice_rows.iter().max().unwrap()
-        );
-        // IMPORTANT: this assigns all constants to the fixed columns
-        // This is not optional.
-        let const_rows =
-            chip.field_chip.range.gate().assign_and_constrain_constants(&mut layouter)?;
-        println!("maximum rows used by a fixed column: {}", const_rows);
-
-        Ok(())
+        )
     }
 }
 
@@ -153,7 +152,7 @@ fn test_ecc() {
 #[cfg(test)]
 #[test]
 fn plot_ecc() {
-    let k = 12;
+    let k = 10;
     use plotters::prelude::*;
 
     let root = BitMapBackend::new("layout.png", (512, 16384)).into_drawing_area();

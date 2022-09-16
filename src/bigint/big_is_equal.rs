@@ -1,5 +1,5 @@
 use super::{CRTInteger, OverflowInteger};
-use crate::gates::{GateInstructions, QuantumCell::Existing, RangeInstructions};
+use crate::gates::{Context, GateInstructions, QuantumCell::Existing, RangeInstructions};
 use crate::utils::*;
 use halo2_proofs::{
     arithmetic::{Field, FieldExt},
@@ -10,8 +10,8 @@ use halo2_proofs::{
 // given OverflowInteger<F>'s `a` and `b` of the same shape,
 // returns whether `a == b`
 pub fn assign<F: FieldExt>(
-    range: &mut impl RangeInstructions<F>,
-    layouter: &mut impl Layouter<F>,
+    range: &impl RangeInstructions<F>,
+    ctx: &mut Context<'_, F>,
     a: &OverflowInteger<F>,
     b: &OverflowInteger<F>,
 ) -> Result<AssignedCell<F, F>, Error> {
@@ -26,27 +26,27 @@ pub fn assign<F: FieldExt>(
 
     let mut eq = Vec::with_capacity(k);
     for idx in 0..k {
-        let eq_limb = range.is_equal(layouter, &a.limbs[idx], &b.limbs[idx])?;
+        let eq_limb = range.is_equal(ctx, &a.limbs[idx], &b.limbs[idx])?;
         eq.push(eq_limb);
     }
 
     let mut partials = Vec::with_capacity(k);
     partials.push(eq[0].clone());
     for idx in 0..(k - 1) {
-        let new = range.gate().and(layouter, &Existing(&eq[idx + 1]), &Existing(&partials[idx]))?;
+        let new = range.gate().and(ctx, &Existing(&eq[idx + 1]), &Existing(&partials[idx]))?;
         partials.push(new);
     }
     Ok(partials[k - 1].clone())
 }
 
 pub fn crt<F: FieldExt>(
-    range: &mut impl RangeInstructions<F>,
-    layouter: &mut impl Layouter<F>,
+    range: &impl RangeInstructions<F>,
+    ctx: &mut Context<'_, F>,
     a: &CRTInteger<F>,
     b: &CRTInteger<F>,
 ) -> Result<AssignedCell<F, F>, Error> {
-    let out_trunc = assign(range, layouter, &a.truncation, &b.truncation)?;
-    let out_native = range.is_equal(layouter, &a.native, &b.native)?;
-    let out = range.gate().and(layouter, &Existing(&out_trunc), &Existing(&out_native))?;
+    let out_trunc = assign(range, ctx, &a.truncation, &b.truncation)?;
+    let out_native = range.is_equal(ctx, &a.native, &b.native)?;
+    let out = range.gate().and(ctx, &Existing(&out_trunc), &Existing(&out_native))?;
     Ok(out)
 }

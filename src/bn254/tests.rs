@@ -1,24 +1,22 @@
 #![allow(non_snake_case)]
+use ark_std::{end_timer, start_timer};
+use group::Curve;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::marker::PhantomData;
-use std::time::{Duration, Instant};
 
 use super::pairing::PairingChip;
 use super::*;
-use crate::bigint::FixedOverflowInteger;
-use crate::ecc::EccChip;
-use crate::fields::{fp::FpStrategy, PrimeFieldChip};
-use crate::gates::QuantumCell::Witness;
-use crate::gates::{GateInstructions, RangeInstructions};
-use crate::gates::range::{RangeChip, RangeStrategy};
-use crate::utils::{decompose_bigint_option, fe_to_bigint};
-use ff::{Field, PrimeField};
-use group::Curve;
-use halo2_proofs::pairing::group::Group;
+use crate::{
+    bigint::FixedOverflowInteger,
+    ecc::EccChip,
+    fields::fp::FpStrategy,
+    gates::{Context, ContextParams, GateInstructions, QuantumCell::Witness},
+    utils::decompose_bigint_option,
+};
 use halo2_proofs::{
-    arithmetic::{BaseExt, FieldExt},
-    circuit::{Layouter, SimpleFloorPlanner},
+    arithmetic::{BaseExt, Field, FieldExt},
+    circuit::{floor_planner::V1, Layouter, SimpleFloorPlanner},
     dev::MockProver,
     pairing::bn256::{
         multi_miller_loop, pairing, Bn256, Fr, G1Affine, G2Affine, G2Prepared, Gt, G1, G2,
@@ -27,7 +25,6 @@ use halo2_proofs::{
     poly::commitment::{Params, ParamsVerifier},
     transcript::{Blake2bRead, Blake2bWrite, Challenge255},
 };
-use halo2curves::bn254::Fq12;
 use num_bigint::{BigInt, BigUint, ToBigInt};
 use num_traits::Num;
 
@@ -56,7 +53,7 @@ impl<F: FieldExt> Default for PairingCircuit<F> {
 }
 
 impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
-    type Config = FpConfig<F>;
+    type Config = FpChip<F>;
     type FloorPlanner = SimpleFloorPlanner; // V1;
 
     fn without_witnesses(&self) -> Self {
@@ -88,109 +85,122 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
-        let mut range_chip = RangeChip::construct(config.range_config.clone(), true);
-        let mut chip = PairingChip::construct(config, &mut range_chip, true);
-        chip.fp_chip.load_lookup_table(&mut layouter)?;
+        config.range.load_lookup_table(&mut layouter)?;
+        let chip = PairingChip::construct(&config);
 
-        let P_assigned = chip.load_private_g1(&mut layouter, self.P.clone())?;
-        let Q_assigned = chip.load_private_g2(&mut layouter, self.Q.clone())?;
+        let using_simple_floor_planner = true;
+        let mut first_pass = true;
 
-        /*
-        // test miller loop without final exp
-        {
-            let f = chip.miller_loop(&mut layouter, &Q_assigned, &P_assigned)?;
-            for fc in &f.coeffs {
-                assert_eq!(fc.value, fc.truncation.to_bigint());
+        layouter.assign_region(
+            || "pairing",
+            |region| {
+                if first_pass && using_simple_floor_planner {
+                    first_pass = false;
+                    return Ok(());
+                }
+
+                let mut aux = Context::new(
+                    region,
+                    ContextParams {
+                        num_advice: config.range.gate.num_advice,
+                        using_simple_floor_planner,
+                        first_pass,
+                    },
+                );
+                let ctx = &mut aux;
+
+                let P_assigned = chip.load_private_g1(ctx, self.P.clone())?;
+                let Q_assigned = chip.load_private_g2(ctx, self.Q.clone())?;
+
+                /*
+                // test miller loop without final exp
+                {
+                    let f = chip.miller_loop(ctx, &Q_assigned, &P_assigned)?;
+                    for fc in &f.coeffs {
+                        assert_eq!(fc.value, fc.truncation.to_bigint());
+                    }
+                    if self.P != None {
+                        let actual_f = multi_miller_loop(&[(
+                            &self.P.unwrap(),
+                            &G2Prepared::from_affine(self.Q.unwrap()),
+                        )]);
+                        let f_val: Vec<String> =
+                            f.coeffs.iter().map(|x| x.value.clone().unwrap().to_str_radix(16)).collect();
+                        println!("single miller loop:");
+                        println!("actual f: {:#?}", actual_f);
+                        println!("circuit f: {:#?}", f_val);
+                    }
+                } 
+                */
+
+                // test optimal ate pairing
+                {
+                    let f = chip.pairing(ctx, &Q_assigned, &P_assigned)?;
+                    for fc in &f.coeffs {
+                        assert_eq!(fc.value, fc.truncation.to_bigint());
+                    }
+                    #[cfg(feature = "display")]
+                    if self.P != None {
+                        let actual_f = pairing(&self.P.unwrap(), &self.Q.unwrap());
+                        let f_val: Vec<String> = f
+                            .coeffs
+                            .iter()
+                            .map(|x| x.value.clone().unwrap().to_str_radix(16))
+                            //.map(|x| x.to_bigint().clone().unwrap().to_str_radix(16))
+                            .collect();
+                        println!("optimal ate pairing:");
+                        println!("actual f: {:#?}", actual_f);
+                        println!("circuit f: {:#?}", f_val);
+                    }
+                }
+
+                // IMPORTANT: this assigns all constants to the fixed columns
+                // IMPORTANT: this copies cells to the lookup advice column to perform range check lookups
+                // This is not optional.
+                let (const_rows, total_fixed, lookup_rows) = config.finalize(ctx)?;
+
+                #[cfg(feature = "display")]
+                if self.P != None {
+                    let num_advice = config.range.gate.num_advice;
+                    let num_lookup_advice = config.range.lookup_advice.len();
+                    let num_fixed = config.range.gate.constants.len();
+                    let lookup_bits = config.range.lookup_bits;
+                    let limb_bits = config.limb_bits;
+                    let num_limbs = config.num_limbs;
+
+                    println!("Using:\nadvice columns: {}\nspecial lookup advice columns: {}\nfixed columns: {}\nlookup bits: {}\nlimb bits: {}\nnum limbs: {}", num_advice, num_lookup_advice, num_fixed, lookup_bits, limb_bits, num_limbs);
+                    let advice_rows = ctx.advice_rows.iter();
+                    println!(
+                        "maximum rows used by an advice column: {}",
+                            advice_rows.clone().max().or(Some(&0)).unwrap(),
+                    );
+                    println!(
+                        "minimum rows used by an advice column: {}",
+                            advice_rows.clone().min().or(Some(&usize::MAX)).unwrap(),
+                    );
+                    let total_cells = advice_rows.sum::<usize>();
+                    println!("total cells used: {}", total_cells);
+                    println!("cells used in special lookup columns: {}", ctx.cells_to_lookup.len());
+                    println!("maximum rows used by a fixed column: {}", const_rows);
+
+                    println!("Suggestions:");
+                    let degree = lookup_bits + 1;
+                    println!(
+                        "Have you tried using {} advice columns?",
+                        (total_cells + (1 << degree) - 1) / (1 << degree)
+                    );
+                    println!(
+                        "Have you tried using {} lookup columns?",
+                        (ctx.cells_to_lookup.len() + (1 << degree) - 1) / (1 << degree)
+                    );
+                    println!(
+                        "Have you tried using {} fixed columns?",
+                        (total_fixed + (1 << degree) - 1) / (1 << degree)
+                    );
+                }
+                Ok(())
             }
-            if self.P != None {
-                let actual_f = multi_miller_loop(&[(
-                    &self.P.unwrap(),
-                    &G2Prepared::from_affine(self.Q.unwrap()),
-                )]);
-                let f_val: Vec<String> =
-                    f.coeffs.iter().map(|x| x.value.clone().unwrap().to_str_radix(16)).collect();
-                println!("single miller loop:");
-                println!("actual f: {:#?}", actual_f);
-                println!("circuit f: {:#?}", f_val);
-            }
-        }
-        */
-
-        // test optimal ate pairing
-        {
-            let f = chip.pairing(&mut layouter, &Q_assigned, &P_assigned)?;
-            for fc in &f.coeffs {
-                assert_eq!(fc.value, fc.truncation.to_bigint());
-            }
-            if self.P != None {
-                let actual_f = pairing(&self.P.unwrap(), &self.Q.unwrap());
-                let f_val: Vec<String> = f
-                    .coeffs
-                    .iter()
-                    .map(|x| x.value.clone().unwrap().to_str_radix(16))
-                    //.map(|x| x.to_bigint().clone().unwrap().to_str_radix(16))
-                    .collect();
-                println!("optimal ate pairing:");
-                println!("actual f: {:#?}", actual_f);
-                println!("circuit f: {:#?}", f_val);
-            }
-        }
-
-        // IMPORTANT: this assigns all constants to the fixed columns
-        // This is not optional.
-        let const_rows = chip.fp_chip.range.gate.assign_and_constrain_constants(&mut layouter)?;
-
-        // IMPORTANT: this copies cells to the lookup advice column to perform range check lookups
-        // This is not optional when there is more than 1 advice column.
-        chip.fp_chip.range.copy_and_lookup_cells(&mut layouter)?;
-
-        if self.P != None {
-            let num_advice = chip.fp_chip.range.gate.config.num_advice;
-            let num_lookup_advice = chip.fp_chip.range.config.lookup_advice.len();
-            let num_fixed = chip.fp_chip.range.gate.config.constants.len();
-            let lookup_bits = chip.fp_chip.range.config.lookup_bits;
-            let limb_bits = chip.fp_chip.limb_bits;
-            let num_limbs = chip.fp_chip.num_limbs;
-
-            println!("Using:\nadvice columns: {}\nspecial lookup advice columns: {}\nfixed columns: {}\nlookup bits: {}\nlimb bits: {}\nnum limbs: {}", num_advice, num_lookup_advice, num_fixed, lookup_bits, limb_bits, num_limbs);
-            let advice_rows = chip.fp_chip.range.gate.advice_rows.iter();
-            let horizontal_advice_rows = chip.fp_chip.range.gate.horizontal_advice_rows.iter();
-            println!(
-                "maximum rows used by an advice column: {}",
-                std::cmp::max(
-                    advice_rows.clone().max().or(Some(&0u64)).unwrap(),
-                    horizontal_advice_rows.clone().max().or(Some(&0u64)).unwrap()
-                )
-            );
-            println!(
-                "minimum rows used by an advice column: {}",
-                std::cmp::min(
-                    advice_rows.clone().min().or(Some(&u64::MAX)).unwrap(),
-                    horizontal_advice_rows.clone().min().or(Some(&u64::MAX)).unwrap()
-                )
-            );
-            let total_cells = advice_rows.sum::<u64>() + horizontal_advice_rows.sum::<u64>() * 4;
-            println!("total cells used: {}", total_cells);
-            println!("cells used in special lookup column: {}", range_chip.cells_to_lookup.len());
-            let total_fixed = const_rows * num_fixed;
-            println!("maximum rows used by a fixed column: {}", const_rows);
-
-            println!("Suggestions:");
-            let degree = lookup_bits + 1;
-            println!(
-                "Have you tried using {} advice columns?",
-                (total_cells + (1 << degree) - 1) / (1 << degree)
-            );
-            println!(
-                "Have you tried using {} lookup columns?",
-                (range_chip.cells_to_lookup.len() + (1 << degree) - 1) / (1 << degree)
-            );
-            println!(
-                "Have you tried using {} fixed columns?",
-                (total_fixed + (1 << degree) - 1) / (1 << degree)
-            );
-        }
-        Ok(())
+        )
     }
 }
 
@@ -210,7 +220,7 @@ struct MSMCircuitParams {
 
 #[derive(Clone, Debug)]
 struct MSMConfig<F: FieldExt> {
-    fp_config: FpConfig<F>,
+    fp_chip: FpChip<F>,
     batch_size: usize,
     window_bits: usize,
 }
@@ -229,7 +239,7 @@ impl<F: FieldExt> MSMConfig<F> {
         batch_size: usize,
         window_bits: usize,
     ) -> Self {
-        let fp_config = FpConfig::<F>::configure(
+        let fp_chip = FpChip::<F>::configure(
             meta,
             strategy,
             num_advice,
@@ -240,7 +250,7 @@ impl<F: FieldExt> MSMConfig<F> {
             num_limbs,
             p,
         );
-        MSMConfig { fp_config, batch_size, window_bits }
+        MSMConfig { fp_chip, batch_size, window_bits }
     }
 }
 
@@ -253,7 +263,12 @@ struct MSMCircuit<F: FieldExt> {
 
 impl<F: FieldExt> Default for MSMCircuit<F> {
     fn default() -> Self {
-        Self { bases: vec![None; 10], scalars: vec![None; 10], batch_size: 10, _marker: PhantomData }
+        Self {
+            bases: vec![None; 10],
+            scalars: vec![None; 10],
+            batch_size: 10,
+            _marker: PhantomData,
+        }
     }
 }
 
@@ -262,12 +277,12 @@ impl<F: FieldExt> Circuit<F> for MSMCircuit<F> {
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
-	Self {
-	    bases: vec![None; self.batch_size],
-	    scalars: vec![None; self.batch_size],
-	    batch_size: self.batch_size,
-	    _marker: PhantomData,
-	}
+        Self {
+            bases: vec![None; self.batch_size],
+            scalars: vec![None; self.batch_size],
+            batch_size: self.batch_size,
+            _marker: PhantomData,
+        }
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
@@ -301,124 +316,133 @@ impl<F: FieldExt> Circuit<F> for MSMCircuit<F> {
         assert_eq!(config.batch_size, self.scalars.len());
         assert_eq!(config.batch_size, self.bases.len());
 
-        let mut range_chip = RangeChip::construct(config.fp_config.range_config.clone(), true);
-        let mut scalars_assigned = Vec::new();
-        for scalar in &self.scalars {
-	    let decomposed = decompose_bigint_option(
-		&scalar.map(|x| fe_to_biguint(&x).to_bigint().unwrap()),
-		config.fp_config.num_limbs,
-                config.fp_config.limb_bits
-	    );
-	    let limbs = layouter.assign_region(
-		|| "load scalar",
-		|mut region| {
-		    let limbs = range_chip.gate().assign_region_smart(
-			decomposed.iter().map(|x| Witness(x.clone())).collect(),
-			vec![],
-			vec![],
-			vec![],
-			0,
-			&mut region,
-		    )?;
-		    Ok(limbs)
-		},
-	    )?;
-            scalars_assigned.push(limbs);
-        }
+        config.fp_chip.load_lookup_table(&mut layouter)?;
 
-	let mut fp_chip = FpChip::construct(config.fp_config.clone(), &mut range_chip, true);
-        fp_chip.load_lookup_table(&mut layouter)?;
+        let using_simple_floor_planner = true;
+        let mut first_pass = true;
+        layouter.assign_region(
+            || "MSM",
+            |region| {
+                if first_pass && using_simple_floor_planner {
+                    first_pass = false;
+                    return Ok(());
+                }
 
+                let mut aux = Context::new(
+                    region,
+                    ContextParams {
+                        num_advice: config.fp_chip.range.gate.num_advice,
+                        using_simple_floor_planner,
+                        first_pass,
+                    },
+                );
+                let ctx = &mut aux;
 
-        let mut ecc_chip = EccChip::construct(&mut fp_chip);
-        let mut bases_assigned = Vec::new();
-        for base in &self.bases {
-            let base_assigned = ecc_chip.load_private(
-                &mut layouter,
-                (
-                    base.map(|pt| biguint_to_fe(&fe_to_biguint(&pt.x))),
-                    base.map(|pt| biguint_to_fe(&fe_to_biguint(&pt.y))),
-                ),
-            )?;
-            bases_assigned.push(base_assigned);
-        }
+                let mut scalars_assigned = Vec::new();
+                for scalar in &self.scalars {
+                    let decomposed = decompose_bigint_option(
+                        &scalar.map(|x| fe_to_biguint(&x).to_bigint().unwrap()),
+                        config.fp_chip.num_limbs,
+                        config.fp_chip.limb_bits,
+                    );
+                            let limbs = config.fp_chip.range.gate.assign_region_smart(
+                                ctx,
+                                decomposed.iter().map(|x| Witness(x.clone())).collect(),
+                                vec![],
+                                vec![],
+                                vec![],
+                            )?;
+                    scalars_assigned.push(limbs);
+                }
 
-        let msm = ecc_chip.multi_scalar_mult::<halo2curves::bn254::G1Affine>(
-            &mut layouter.namespace(|| "msm"),
-            &bases_assigned,
-            &scalars_assigned,
-            F::from(3),
-            config.fp_config.limb_bits,
-            config.window_bits,
-        )?;
-        if self.scalars[0] != None {
-            let mut elts = Vec::new();
-            for (base, scalar) in self.bases.iter().zip(&self.scalars) {
-                elts.push(base.unwrap() * scalar.unwrap());
+                let ecc_chip = EccChip::construct(&config.fp_chip);
+                let mut bases_assigned = Vec::new();
+                for base in &self.bases {
+                    let base_assigned = ecc_chip.load_private(
+                        ctx,
+                        (
+                            base.map(|pt| biguint_to_fe(&fe_to_biguint(&pt.x))),
+                            base.map(|pt| biguint_to_fe(&fe_to_biguint(&pt.y))),
+                        ),
+                    )?;
+                    bases_assigned.push(base_assigned);
+                }
+
+                let msm = ecc_chip.multi_scalar_mult::<halo2curves::bn254::G1Affine>(
+                    ctx,
+                    &bases_assigned,
+                    &scalars_assigned,
+                    F::from(3),
+                    config.fp_chip.limb_bits,
+                    config.window_bits,
+                )?;
+
+                #[cfg(feature = "display")]
+                if self.scalars[0] != None {
+                    let mut elts = Vec::new();
+                    for (base, scalar) in self.bases.iter().zip(&self.scalars) {
+                        elts.push(base.unwrap() * scalar.unwrap());
+                    }
+                    let msm_answer = elts.into_iter().reduce(|a, b| a + b).unwrap().to_affine();
+
+                    let msm_x = msm.x.value.clone().unwrap().to_str_radix(16);
+                    let msm_y = msm.y.value.clone().unwrap().to_str_radix(16);
+                    println!("circuit: {:?} {:?}", msm_x, msm_y);
+                    println!("correct: {:?}", msm_answer);
+                }
+
+                let (const_rows, total_fixed, lookup_rows) = config.fp_chip.finalize(ctx)?;
+
+                #[cfg(feature = "display")]
+                if self.bases[0] != None {
+                    let num_advice = config.fp_chip.range.gate.num_advice;
+                    let num_lookup_advice = config.fp_chip.range.lookup_advice.len();
+                    let num_fixed = config.fp_chip.range.gate.constants.len();
+                    let lookup_bits = config.fp_chip.range.lookup_bits;
+                    let limb_bits = config.fp_chip.limb_bits;
+                    let num_limbs = config.fp_chip.num_limbs;
+
+                    println!("Using:\nadvice columns: {}\nspecial lookup advice columns: {}\nfixed columns: {}\nlookup bits: {}\nlimb bits: {}\nnum limbs: {}", num_advice, num_lookup_advice, num_fixed, lookup_bits, limb_bits, num_limbs);
+                    let advice_rows = ctx.advice_rows.iter();
+                    println!(
+                        "maximum rows used by an advice column: {}",
+                            advice_rows.clone().max().or(Some(&0)).unwrap(),
+                    );
+                    println!(
+                        "minimum rows used by an advice column: {}",
+                            advice_rows.clone().min().or(Some(&usize::MAX)).unwrap(),
+                    );
+                    let total_cells = advice_rows.sum::<usize>();
+                    println!("total cells used: {}", total_cells);
+                    println!("cells used in special lookup column: {}", ctx.cells_to_lookup.len());
+                    println!("maximum rows used by a fixed column: {}", const_rows);
+
+                    println!("Suggestions:");
+                    let degree = lookup_bits + 1;
+                    println!(
+                        "Have you tried using {} advice columns?",
+                        (total_cells + (1 << degree) - 1) / (1 << degree)
+                    );
+                    println!(
+                        "Have you tried using {} lookup columns?",
+                        (ctx.cells_to_lookup.len() + (1 << degree) - 1) / (1 << degree)
+                    );
+                    println!(
+                        "Have you tried using {} fixed columns?",
+                        (total_fixed + (1 << degree) - 1) / (1 << degree)
+                    );
+                }
+                Ok(())
             }
-            let msm_answer = elts.into_iter().reduce(|a, b| a + b).unwrap().to_affine();
-
-            let msm_x = msm.x.value.clone().unwrap().to_str_radix(16);
-            let msm_y = msm.y.value.clone().unwrap().to_str_radix(16);
-            println!("circuit: {:?} {:?}", msm_x, msm_y);
-            println!("correct: {:?}", msm_answer);
-        }
-
-        let const_rows = fp_chip.range.gate.assign_and_constrain_constants(&mut layouter)?;
-        fp_chip.range.copy_and_lookup_cells(&mut layouter)?;
-        if self.bases[0] != None {
-            let num_advice = fp_chip.range.gate.config.num_advice;
-            let num_lookup_advice = fp_chip.range.config.lookup_advice.len();
-            let num_fixed = fp_chip.range.gate.config.constants.len();
-            let lookup_bits = fp_chip.range.config.lookup_bits;
-            let limb_bits = fp_chip.limb_bits;
-            let num_limbs = fp_chip.num_limbs;
-
-            println!("Using:\nadvice columns: {}\nspecial lookup advice columns: {}\nfixed columns: {}\nlookup bits: {}\nlimb bits: {}\nnum limbs: {}", num_advice, num_lookup_advice, num_fixed, lookup_bits, limb_bits, num_limbs);
-            let advice_rows = fp_chip.range.gate.advice_rows.iter();
-            let horizontal_advice_rows = fp_chip.range.gate.horizontal_advice_rows.iter();
-            println!(
-                "maximum rows used by an advice column: {}",
-                std::cmp::max(
-                    advice_rows.clone().max().or(Some(&0u64)).unwrap(),
-                    horizontal_advice_rows.clone().max().or(Some(&0u64)).unwrap()
-                )
-            );
-            println!(
-                "minimum rows used by an advice column: {}",
-                std::cmp::min(
-                    advice_rows.clone().min().or(Some(&u64::MAX)).unwrap(),
-                    horizontal_advice_rows.clone().min().or(Some(&u64::MAX)).unwrap()
-                )
-            );
-            let total_cells = advice_rows.sum::<u64>() + horizontal_advice_rows.sum::<u64>() * 4;
-            println!("total cells used: {}", total_cells);
-            println!("cells used in special lookup column: {}", range_chip.cells_to_lookup.len());
-            let total_fixed = const_rows * num_fixed;
-            println!("maximum rows used by a fixed column: {}", const_rows);
-
-            println!("Suggestions:");
-            let degree = lookup_bits + 1;
-            println!(
-                "Have you tried using {} advice columns?",
-                (total_cells + (1 << degree) - 1) / (1 << degree)
-            );
-            println!(
-                "Have you tried using {} lookup columns?",
-                (range_chip.cells_to_lookup.len() + (1 << degree) - 1) / (1 << degree)
-            );
-            println!(
-                "Have you tried using {} fixed columns?",
-                (total_fixed + (1 << degree) - 1) / (1 << degree)
-            );
-        }
-        Ok(())
+        )
     }
 }
 
 #[cfg(test)]
 #[test]
 fn test_msm() {
+    use ff::Field;
+
     let mut folder = std::path::PathBuf::new();
     folder.push("./src/bn254");
     folder.push("configs/msm_circuit.config");
@@ -439,15 +463,11 @@ fn test_msm() {
         scalars.push(new_scalar);
     }
 
-    let circuit = MSMCircuit::<Fr> {
-	bases,
-	scalars,
-	batch_size: params.batch_size,
-	_marker: PhantomData
-    };
+    let circuit =
+        MSMCircuit::<Fr> { bases, scalars, batch_size: params.batch_size, _marker: PhantomData };
 
     let prover = MockProver::run(k, &circuit, vec![]).unwrap();
-//    prover.assert_satisfied();
+    //    prover.assert_satisfied();
     assert_eq!(prover.verify(), Ok(()));
 }
 
@@ -487,7 +507,6 @@ fn bench_msm() -> Result<(), Box<dyn std::error::Error>> {
             bench_params.degree
         );
         let mut rng = rand::thread_rng();
-        let start = Instant::now();
 
         {
             folder.pop();
@@ -498,6 +517,7 @@ fn bench_msm() -> Result<(), Box<dyn std::error::Error>> {
             folder.pop();
             folder.push("data");
         }
+        let params_time = start_timer!(|| "Params construction");
         let params = {
             params_folder.push(format!("bn254_{}.params", bench_params.degree));
             let fd = std::fs::File::open(params_folder.as_path());
@@ -514,19 +534,19 @@ fn bench_msm() -> Result<(), Box<dyn std::error::Error>> {
             params_folder.pop();
             params
         };
+        end_timer!(params_time);
 
         let circuit = MSMCircuit::<Fr> {
             bases: vec![None; bench_params.batch_size],
             scalars: vec![None; bench_params.batch_size],
-	    batch_size: bench_params.batch_size,
+            batch_size: bench_params.batch_size,
             _marker: PhantomData,
         };
-        let circuit_duration = start.elapsed();
-        println!("Time elapsed in circuit & params construction: {:?}", circuit_duration);
 
+        let vk_time = start_timer!(|| "Generating vkey");
         let vk = keygen_vk(&params, &circuit)?;
-        let vk_duration = start.elapsed();
-        println!("Time elapsed in generating vkey: {:?}", vk_duration - circuit_duration);
+        end_timer!(vk_time);
+
         let vk_size = {
             folder.push(format!(
                 "msm_circuit_{}_{}_{}_{}_{}_{}_{}_{}_{}.vkey",
@@ -545,37 +565,35 @@ fn bench_msm() -> Result<(), Box<dyn std::error::Error>> {
             vk.write(&mut fd).unwrap();
             fd.metadata().unwrap().len()
         };
-        let pk = keygen_pk(&params, vk, &circuit)?;
-        let pk_duration = start.elapsed();
-        println!("Time elapsed in generating pkey: {:?}", pk_duration - vk_duration);
 
-	let mut bases = Vec::new();
-	let mut scalars = Vec::new();
-	for idx in 0..bench_params.batch_size {
+        let pk_time = start_timer!(|| "Generating pkey");
+        let pk = keygen_pk(&params, vk, &circuit)?;
+        end_timer!(pk_time);
+
+        let mut bases = Vec::new();
+        let mut scalars = Vec::new();
+        for idx in 0..bench_params.batch_size {
             let new_pt = Some(G1Affine::random(&mut rng));
             bases.push(new_pt);
-	    
+
             let new_scalar = Some(Fr::random(&mut rng));
             scalars.push(new_scalar);
-	}
+        }
 
-	println!("{:?}", bench_params);
+        println!("{:?}", bench_params);
         let proof_circuit = MSMCircuit::<Fr> {
-	    bases,
-	    scalars,
-	    batch_size: bench_params.batch_size,
-	    _marker: PhantomData
-	};
-        let fill_duration = start.elapsed();
-        println!("Time elapsed in filling circuit: {:?}", fill_duration - pk_duration);
+            bases,
+            scalars,
+            batch_size: bench_params.batch_size,
+            _marker: PhantomData,
+        };
 
         // create a proof
+        let proof_time = start_timer!(|| "Proving time");
         let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
         create_proof(&params, &pk, &[proof_circuit], &[&[]], rng, &mut transcript)?;
         let proof = transcript.finalize();
-        let proof_duration = start.elapsed();
-        let proof_time = proof_duration - fill_duration;
-        println!("Proving time: {:?}", proof_time);
+        end_timer!(proof_time);
 
         let proof_size = {
             folder.push(format!(
@@ -587,8 +605,8 @@ fn bench_msm() -> Result<(), Box<dyn std::error::Error>> {
                 bench_params.lookup_bits,
                 bench_params.limb_bits,
                 bench_params.num_limbs,
-		bench_params.batch_size,
-		bench_params.window_bits
+                bench_params.batch_size,
+                bench_params.window_bits
             ));
             let mut fd = std::fs::File::create(folder.as_path()).unwrap();
             folder.pop();
@@ -596,16 +614,14 @@ fn bench_msm() -> Result<(), Box<dyn std::error::Error>> {
             fd.metadata().unwrap().len()
         };
 
-        let verify_start = start.elapsed();
+        let verify_time = start_timer!(|| "Verify time");
         let params_verifier: ParamsVerifier<Bn256> = params.verifier(0).unwrap();
         let strategy = SingleVerifier::new(&params_verifier);
         let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
         assert!(
             verify_proof(&params_verifier, pk.get_vk(), strategy, &[&[]], &mut transcript).is_ok()
         );
-        let verify_duration = start.elapsed();
-        let verify_time = verify_duration - verify_start;
-        println!("Verify time: {:?}", verify_time);
+        end_timer!(verify_time);
 
         write!(
             fs_results,
@@ -617,12 +633,12 @@ fn bench_msm() -> Result<(), Box<dyn std::error::Error>> {
             bench_params.lookup_bits,
             bench_params.limb_bits,
             bench_params.num_limbs,
-	    bench_params.batch_size,
-	    bench_params.window_bits,
+            bench_params.batch_size,
+            bench_params.window_bits,
             vk_size,
-            proof_time,
+            proof_time.time.elapsed(),
             proof_size,
-            verify_time
+            verify_time.time.elapsed()
         )?;
     }
     Ok(())
@@ -654,16 +670,6 @@ fn test_pairing() {
 #[cfg(test)]
 #[test]
 fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
-    /*
-    // Parameters for FpStrategy::CustomVerticalCRT
-    const DEGREE: [u32; 10] = [22, 21, 20, 19, 18, 17, 16, 15, 14, 13];
-    const NUM_ADVICE: [usize; 10] = [1, 2, 3, 5, 10, 19, 37, 75, 149, 307];
-    const NUM_LOOKUP: [usize; 10] = [0, 1, 1, 1, 2, 4, 7, 16, 32, 74];
-    const NUM_FIXED: [usize; 10] = [1, 1, 1, 1, 1, 1, 1, 1, 1, 1];
-    const LOOKUP_BITS: [usize; 10] = [21, 20, 19, 18, 17, 16, 15, 14, 13, 12];
-    const LIMB_BITS: [usize; 10] = [88, 88, 88, 88, 88, 88, 88, 88, 88, 88];
-    */
-
     use std::io::BufRead;
     let mut folder = std::path::PathBuf::new();
     folder.push("./src/bn254");
@@ -697,8 +703,6 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
             "---------------------- degree = {} ------------------------------",
             bench_params.degree
         );
-        let mut rng = rand::thread_rng();
-        let start = Instant::now();
 
         {
             folder.pop();
@@ -709,6 +713,7 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
             folder.pop();
             folder.push("data");
         }
+        let params_time = start_timer!(|| "Params construction");
         let params = {
             params_folder.push(format!("bn254_{}.params", bench_params.degree));
             let fd = std::fs::File::open(params_folder.as_path());
@@ -727,12 +732,12 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let circuit = PairingCircuit::<Fr>::default();
-        let circuit_duration = start.elapsed();
-        println!("Time elapsed in circuit & params construction: {:?}", circuit_duration);
+        end_timer!(params_time);
 
+        let vk_time = start_timer!(|| "Generating vkey");
         let vk = keygen_vk(&params, &circuit)?;
-        let vk_duration = start.elapsed();
-        println!("Time elapsed in generating vkey: {:?}", vk_duration - circuit_duration);
+        end_timer!(vk_time);
+
         let vk_size = {
             folder.push(format!(
                 "pairing_circuit_{}_{}_{}_{}_{}_{}_{}.vkey",
@@ -749,28 +754,22 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
             vk.write(&mut fd).unwrap();
             fd.metadata().unwrap().len()
         };
-        let pk = keygen_pk(&params, vk, &circuit)?;
-        let pk_duration = start.elapsed();
-        println!("Time elapsed in generating pkey: {:?}", pk_duration - vk_duration);
-        /*{
-            folder.push(format!("pairing_circuit_{}_{}_{}_{}_{}_{}_{}.pkey", DEGREE[I], NUM_ADVICE[I], NUM_LOOKUP[I], NUM_FIXED[I], LOOKUP_BITS[I], LIMB_BITS[I], 3));
-            let mut fd = std::fs::File::create(folder.as_path()).unwrap();
-            folder.pop();
-        }*/
 
+        let pk_time = start_timer!(|| "Generating pkey");
+        let pk = keygen_pk(&params, vk, &circuit)?;
+        end_timer!(pk_time);
+
+        let mut rng = rand::thread_rng();
         let P = Some(G1Affine::random(&mut rng));
         let Q = Some(G2Affine::random(&mut rng));
         let proof_circuit = PairingCircuit::<Fr> { P, Q, _marker: PhantomData };
-        let fill_duration = start.elapsed();
-        println!("Time elapsed in filling circuit: {:?}", fill_duration - pk_duration);
 
         // create a proof
+        let proof_time = start_timer!(|| "Proving time");
         let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
         create_proof(&params, &pk, &[proof_circuit], &[&[]], rng, &mut transcript)?;
         let proof = transcript.finalize();
-        let proof_duration = start.elapsed();
-        let proof_time = proof_duration - fill_duration;
-        println!("Proving time: {:?}", proof_time);
+        end_timer!(proof_time);
 
         let proof_size = {
             folder.push(format!(
@@ -789,16 +788,14 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
             fd.metadata().unwrap().len()
         };
 
-        let verify_start = start.elapsed();
+        let verify_time = start_timer!(|| "Verify time");
         let params_verifier: ParamsVerifier<Bn256> = params.verifier(0).unwrap();
         let strategy = SingleVerifier::new(&params_verifier);
         let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
         assert!(
             verify_proof(&params_verifier, pk.get_vk(), strategy, &[&[]], &mut transcript).is_ok()
         );
-        let verify_duration = start.elapsed();
-        let verify_time = verify_duration - verify_start;
-        println!("Verify time: {:?}", verify_time);
+        end_timer!(verify_time);
 
         write!(
             fs_results,
@@ -811,9 +808,9 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
             bench_params.limb_bits,
             bench_params.num_limbs,
             vk_size,
-            proof_time,
+            proof_time.time.elapsed(),
             proof_size,
-            verify_time
+            verify_time.time.elapsed()
         )?;
     }
     Ok(())
