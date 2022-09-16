@@ -348,6 +348,8 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpConfig<F, Fp> {
         ctx: &mut Context<'_, F>,
         a: &CRTInteger<F>,
     ) -> Result<AssignedCell<F, F>, Error> {
+        // TODO: optimize this?
+
         // underflow != 0 iff carry < p
         let p = self.load_constant(ctx, BigInt::from(self.p.clone()))?;
         let (diff, underflow) = sub::crt(self.range(), ctx, a, &p)?;

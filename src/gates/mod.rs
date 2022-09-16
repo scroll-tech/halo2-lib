@@ -58,6 +58,12 @@ pub struct Context<'a, F: FieldExt> {
     pub op_count: HashMap<String, usize>,
 }
 
+impl<'a, F: FieldExt> std::fmt::Display for Context<'a, F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#?}", self)
+    }
+}
+
 // a single struct to package any configuration parameters we will need for constructing a new `Context`
 #[derive(Clone, Copy, Debug)]
 pub struct ContextParams {
@@ -198,6 +204,23 @@ pub trait GateInstructions<F: FieldExt> {
         a: &QuantumCell<F>,
         b: &QuantumCell<F>,
     ) -> Result<AssignedCell<F, F>, Error>;
+
+    fn div_unsafe(
+        &self,
+        ctx: &mut Context<'_, F>,
+        a: &QuantumCell<F>,
+        b: &QuantumCell<F>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        let c = a.value().zip(b.value()).map(|(&a, b)| a * b.invert().unwrap());
+        let assignments = self.assign_region_smart(
+            ctx,
+            vec![QuantumCell::Constant(F::from(0)), QuantumCell::Witness(c), b.clone(), a.clone()],
+            vec![0],
+            vec![],
+            vec![],
+        )?;
+        Ok(assignments[1].clone())
+    }
 
     fn inner_product(
         &self,

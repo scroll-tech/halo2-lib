@@ -579,12 +579,44 @@ impl<'a, F: FieldExt, FC: FieldChip<F>> EccChip<'a, F, FC> {
         ecc_add_unequal(self.field_chip, ctx, P, Q)
     }
 
+    pub fn sub_unequal(
+        &self,
+        ctx: &mut Context<'_, F>,
+        P: &EccPoint<F, FC::FieldPoint>,
+        Q: &EccPoint<F, FC::FieldPoint>,
+    ) -> Result<EccPoint<F, FC::FieldPoint>, Error> {
+        ecc_sub_unequal(self.field_chip, ctx, P, Q)
+    }
+
     pub fn double(
         &self,
         ctx: &mut Context<'_, F>,
         P: &EccPoint<F, FC::FieldPoint>,
     ) -> Result<EccPoint<F, FC::FieldPoint>, Error> {
         ecc_double(self.field_chip, ctx, P)
+    }
+
+    pub fn is_equal(
+        &self,
+        ctx: &mut Context<'_, F>,
+        P: &EccPoint<F, FC::FieldPoint>,
+        Q: &EccPoint<F, FC::FieldPoint>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        // TODO: optimize
+        let x_is_equal = self.field_chip.is_equal(ctx, &P.x, &Q.x)?;
+        let y_is_equal = self.field_chip.is_equal(ctx, &P.y, &Q.y)?;
+        self.field_chip.range().gate().and(ctx, &Existing(&x_is_equal), &Existing(&y_is_equal))
+    }
+
+    pub fn assert_equal(
+        &self,
+        ctx: &mut Context<'_, F>,
+        P: &EccPoint<F, FC::FieldPoint>,
+        Q: &EccPoint<F, FC::FieldPoint>,
+    ) -> Result<(), Error> {
+        let is_equal = self.is_equal(ctx, P, Q)?;
+        ctx.constants_to_assign.push((F::from(1), Some(is_equal.cell())));
+        Ok(())
     }
 }
 

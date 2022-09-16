@@ -66,6 +66,12 @@ impl<'a, F: FieldExt, Fp: PrimeField> FpOverflowChip<'a, F, Fp> {
     ) -> Self {
         Self { range, limb_bits, num_limbs, p, _marker: PhantomData }
     }
+
+    pub fn get_last_bit(&self, ctx: &mut Context<F>, a: &OverflowInteger<F>) -> Self {
+        let a_val = a.to_bigint();
+        let half_val = a_val.map(|a| a / BigInt::from(2));
+        let bit_val = a_val.zip(half_val).map(|(a, h)| &a - 2 * &h);
+    }
 }
 
 impl<'a, F: FieldExt, Fp: PrimeField> PrimeFieldChip<F> for FpOverflowChip<'a, F, Fp> {}
