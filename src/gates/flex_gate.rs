@@ -315,7 +315,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         let mut b_assigned = Vec::with_capacity(vec_a.len());
         for i in 0..vec_a.len() {
             a_assigned.push(assigned_cells[3 * i + 1].clone());
-            b_assigned.push(assigned_cells[3 * i + 1].clone());
+            b_assigned.push(assigned_cells[3 * i + 2].clone());
         }
 
         Ok((a_assigned, b_assigned, assigned_cells.last().unwrap().clone()))

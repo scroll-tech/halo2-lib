@@ -131,7 +131,7 @@ impl<'a, F: FieldExt> Context<'a, F> {
                 self.region.constrain_equal(c_cell.cell(), cell.clone())?;
             }
         }
-        Ok((offset + 1, assigned.len()))
+        Ok((offset, assigned.len()))
     }
 
     /// call this at the very end of synthesize!
@@ -155,7 +155,7 @@ impl<'a, F: FieldExt> Context<'a, F> {
                 offset += 1;
             }
         }
-        Ok(offset + 1)
+        Ok(offset)
     }
 }
 
