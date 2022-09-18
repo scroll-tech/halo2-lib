@@ -88,6 +88,10 @@ pub fn ecc_add_unequal<F: FieldExt, FC: FieldChip<F>>(
 // Implements:
 //  Given P = (x_1, y_1) and Q = (x_2, y_2), ecc points over the field F_p
 //  Find ecc subtraction P - Q = (x_3, y_3)
+//  -Q = (x_2, -y_2)
+//  lambda = -(y_2+y_1)/(x_2-x_1) using constraint
+//  x_3 = lambda^2 - x_1 - x_2 (mod p)
+//  y_3 = lambda (x_1 - x_3) - y_1 mod p
 //  Assumes that P !=Q and Q != (P - Q)
 pub fn ecc_sub_unequal<F: FieldExt, FC: FieldChip<F>>(
     chip: &FC,
@@ -415,14 +419,25 @@ where
         neg_mult_rand_start_vec.push(diff.clone());
     }
 
+    // add selector for whether P_i is the point at infinity (aka 0 in elliptic curve group)
+    // this can be checked by P_i.y == 0 iff P_i == O
+    let mut is_infinity = Vec::with_capacity(k);
+    for i in 0..k {
+        let is_zero = chip.is_zero(ctx, &P[i].y)?;
+        is_infinity.push(is_zero);
+    }
+
     let cache_size = 1usize << window_bits;
     let mut cached_points_vec = Vec::with_capacity(k);
     for idx in 0..k {
         let mut cached_points = Vec::with_capacity(cache_size);
         cached_points.push(neg_mult_rand_start_vec[idx].clone());
         for cache_idx in 0..(cache_size - 1) {
-            let new_point = ecc_add_unequal(chip, ctx, &cached_points[cache_idx], &P[idx])?;
-            cached_points.push(new_point.clone());
+            let mut new_point = ecc_add_unequal(chip, ctx, &cached_points[cache_idx], &P[idx])?;
+            // special case for when P[idx] = O
+            new_point =
+                select(chip, ctx, &cached_points[cache_idx], &new_point, &is_infinity[idx])?;
+            cached_points.push(new_point);
         }
         cached_points_vec.push(cached_points);
     }

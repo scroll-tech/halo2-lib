@@ -354,14 +354,7 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpConfig<F, Fp> {
         let p = self.load_constant(ctx, BigInt::from(self.p.clone()))?;
         let (diff, underflow) = sub::crt(self.range(), ctx, a, &p)?;
         let is_underflow_zero = self.range.is_zero(ctx, &underflow)?;
-
-        self.range.gate.assign_region_smart(
-            ctx,
-            vec![Constant(F::from(0))],
-            vec![],
-            vec![],
-            vec![(&is_underflow_zero, 0)],
-        )?;
+        ctx.constants_to_assign.push((F::from(0), Some(is_underflow_zero.cell())));
 
         big_is_zero::crt(self.range(), ctx, a)
     }
