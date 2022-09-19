@@ -361,6 +361,8 @@ pub fn is_on_curve<F: FieldExt, FC: FieldChip<F>>(
 }
 
 // need to supply an extra generic `GA` implementing `CurveAffine` trait in order to generate random witness points on the curve in question
+// Using Simultaneous 2^w-Ary Method, see https://www.bmoeller.de/pdf/multiexp-sac2001.pdf
+// Random Accumlation point trick learned from halo2wrong: https://hackmd.io/ncuKqRXzR-Cw-Au2fGzsMg?view
 // Input:
 // - `scalars` is vector of same length as `P`
 // - each `scalar` in `scalars` satisfies same assumptions as in `scalar_multiply` above
