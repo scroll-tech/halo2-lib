@@ -8,7 +8,7 @@ use halo2_proofs::{
     poly::Rotation,
 };
 use num_bigint::{BigInt, BigUint};
-use num_traits::Num;
+use num_traits::{Num, Signed};
 use serde::{Deserialize, Serialize};
 
 use super::{FieldChip, PrimeFieldChip, Selectable};
@@ -25,7 +25,7 @@ use crate::{
     },
     utils::{
         bigint_to_fe, decompose_bigint, decompose_bigint_option, decompose_biguint,
-        decompose_biguint_to_biguints, fe_to_biguint, modulus,
+        decompose_biguint_to_biguints, fe_to_bigint, fe_to_biguint, modulus,
     },
 };
 
@@ -123,6 +123,39 @@ impl<F: FieldExt, Fp: PrimeField> FpConfig<F, Fp> {
         self.range.load_lookup_table(layouter)
     }
 
+    pub fn load_constant_overflow(
+        &self,
+        ctx: &mut Context<'_, F>,
+        a: BigInt,
+    ) -> Result<OverflowInteger<F>, Error> {
+        let a_vec = decompose_bigint::<F>(&a, self.num_limbs, self.limb_bits);
+        let a_limbs = self.range.gate().assign_region_smart(
+            ctx,
+            a_vec.iter().map(|v| Constant(v.clone())).collect(),
+            vec![],
+            vec![],
+            vec![],
+        )?;
+
+        Ok(OverflowInteger::construct(
+            a_limbs,
+            (BigUint::from(1u64) << self.limb_bits) - 1usize,
+            self.limb_bits,
+            a.abs().to_biguint().unwrap(),
+        ))
+    }
+
+    pub fn enforce_less_than_p(
+        &self,
+        ctx: &mut Context<'_, F>,
+        a: &CRTInteger<F>,
+    ) -> Result<(), Error> {
+        let p_assigned = self.load_constant_overflow(ctx, BigInt::from(self.p.clone()))?;
+        let is_lt_p = big_less_than::assign(self.range(), ctx, &a.truncation, &p_assigned)?;
+        ctx.constants_to_assign.push((F::from(1), Some(is_lt_p.cell())));
+        Ok(())
+    }
+
     pub fn finalize(&self, ctx: &mut Context<'_, F>) -> Result<(usize, usize, usize), Error> {
         self.range.finalize(ctx)
     }
@@ -215,6 +248,30 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpConfig<F, Fp> {
         b: &CRTInteger<F>,
     ) -> Result<CRTInteger<F>, Error> {
         add_no_carry::crt(self.range.gate(), ctx, a, b)
+    }
+
+    fn add_native_constant_no_carry(
+        &self,
+        ctx: &mut Context<'_, F>,
+        a: &CRTInteger<F>,
+        c: F,
+    ) -> Result<CRTInteger<F>, Error> {
+        let mut limbs = a.truncation.limbs.clone();
+        limbs[0] = self.range.gate.add(ctx, &Existing(&limbs[0]), &Constant(c))?;
+        let native = self.range.gate.add(ctx, &Existing(&a.native), &Constant(c))?;
+        let value = a.value.as_ref().map(|a| a + fe_to_bigint(&c));
+
+        let c_abs = fe_to_bigint(&c).abs().to_biguint().unwrap();
+        Ok(CRTInteger::construct(
+            OverflowInteger::construct(
+                limbs,
+                &a.truncation.max_limb_size + &c_abs,
+                a.truncation.limb_bits,
+                &a.truncation.max_size + &c_abs,
+            ),
+            native,
+            value,
+        ))
     }
 
     fn sub_no_carry(
@@ -341,6 +398,7 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpConfig<F, Fp> {
         Ok(res)
     }
 
+    // assuming `a` has been range checked to be a proper BigInt
     // constrain the witness `a` to be `< p`
     // then check if `a` is 0
     fn is_zero(
@@ -348,15 +406,23 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpConfig<F, Fp> {
         ctx: &mut Context<'_, F>,
         a: &CRTInteger<F>,
     ) -> Result<AssignedCell<F, F>, Error> {
-        // TODO: optimize this?
-
-        // underflow != 0 iff carry < p
-        let p = self.load_constant(ctx, BigInt::from(self.p.clone()))?;
-        let (diff, underflow) = sub::crt(self.range(), ctx, a, &p)?;
-        let is_underflow_zero = self.range.is_zero(ctx, &underflow)?;
-        ctx.constants_to_assign.push((F::from(0), Some(is_underflow_zero.cell())));
-
+        self.enforce_less_than_p(ctx, a)?;
         big_is_zero::crt(self.range(), ctx, a)
+    }
+
+    // assuming `a, b` have been range checked to be a proper BigInt
+    // constrain the witnesses `a, b` to be `< p`
+    // then check `a == b` as BigInts
+    fn is_equal(
+        &self,
+        ctx: &mut Context<'_, F>,
+        a: &Self::FieldPoint,
+        b: &Self::FieldPoint,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        self.enforce_less_than_p(ctx, a)?;
+        self.enforce_less_than_p(ctx, b)?;
+        // a.native and b.native are derived from `a.truncation, b.truncation`, so no need to check if they're equal
+        big_is_equal::assign(self.range(), ctx, &a.truncation, &b.truncation)
     }
 }
 
@@ -395,6 +461,7 @@ pub(crate) mod tests {
     };
     use num_traits::One;
 
+    use crate::bigint::big_less_than;
     use crate::fields::fp::FpConfig;
     use crate::fields::{FieldChip, PrimeFieldChip};
     use crate::gates::flex_gate::GateStrategy;
@@ -430,7 +497,7 @@ pub(crate) mod tests {
                 NUM_ADVICE,
                 1,
                 NUM_FIXED,
-                22,
+                11,
                 88,
                 3,
                 modulus::<Fq>(),
@@ -475,7 +542,25 @@ pub(crate) mod tests {
                         chip.mul(ctx, &a_assigned, &b_assigned)?;
                     }
 
+                    /*
+                    // test big_less_than
+                    {
+                        println!(
+                            "{:?}",
+                            big_less_than::test(
+                                chip.range(),
+                                ctx,
+                                &a_assigned.truncation,
+                                &b_assigned.truncation
+                            )
+                            .expect("")
+                            .value()
+                        );
+                    }
+                    */
+
                     println!("Using {} advice columns and {} fixed columns", NUM_ADVICE, NUM_FIXED);
+                    println!("total cells: {}", ctx.advice_rows.iter().sum::<usize>());
                     println!(
                         "maximum rows used by an advice column: {}",
                         ctx.advice_rows.iter().max().unwrap()
@@ -492,7 +577,7 @@ pub(crate) mod tests {
 
     #[test]
     fn test_fp() {
-        let k = 23;
+        let k = 12;
         let a = Fq::rand();
         let b = Fq::rand();
 

@@ -7,7 +7,7 @@ use halo2_proofs::{
     plonk::Error,
 };
 use num_bigint::{BigInt, BigUint};
-use num_traits::Num;
+use num_traits::{Num, Signed};
 
 use super::{FieldChip, PrimeFieldChip, Selectable};
 use crate::bigint::{
@@ -129,7 +129,7 @@ impl<'a, F: FieldExt, Fp: PrimeField> FieldChip<F> for FpOverflowChip<'a, F, Fp>
             a_limbs,
             BigUint::from(1u64) << self.limb_bits,
             self.limb_bits,
-            &self.p - 1usize,
+            a.abs().to_biguint().unwrap(),
         ))
     }
 

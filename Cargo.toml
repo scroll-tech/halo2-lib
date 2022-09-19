@@ -21,7 +21,7 @@ num-traits = "0.2"
 halo2_proofs = { version = "0.1.0-beta.1" }
 ff = "0.11.0"
 group = "0.11"
-pairing_bn256 = { git = "https://github.com/appliedzkp/pairing", tag = "v0.1.1" }
+halo2curves = { git = "https://github.com/jonathanpwang/pse-pairing-bn254.git", package = "pairing_bn254" }
 # halo2curves = { git = "https://github.com/jonathanpwang/halo2curves.git", package = "halo2curves" }
 plotters = { version = "0.3.0", optional = true }
 tabbycat = { version = "0.1", features = ["attributes"], optional = true }

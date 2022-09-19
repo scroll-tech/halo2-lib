@@ -426,6 +426,25 @@ where
         }
         Ok(prev.unwrap())
     }
+
+    fn is_equal(
+        &self,
+        ctx: &mut Context<'_, F>,
+        a: &Self::FieldPoint,
+        b: &Self::FieldPoint,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        let mut acc = None;
+        for (a_coeff, b_coeff) in a.coeffs.iter().zip(b.coeffs.iter()) {
+            let coeff = self.fp_chip.is_equal(ctx, a_coeff, b_coeff)?;
+            if let Some(c) = acc {
+                acc =
+                    Some(self.fp_chip.range().gate().and(ctx, &Existing(&coeff), &Existing(&c))?);
+            } else {
+                acc = Some(coeff);
+            }
+        }
+        Ok(acc.unwrap())
+    }
 }
 
 #[cfg(test)]
