@@ -32,6 +32,21 @@ pub mod select;
 pub mod sub;
 pub mod sub_no_carry;
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum BigIntStrategy {
+    // use existing gates
+    Simple,
+    // vertical custom gates of length 4 for dot product between an unknown vector and a constant vector, both of length 3
+    // we restrict to gate of length 4 since this uses the same set of evaluation points Rotation(0..=3) as our simple gate
+    // CustomVerticalShort,
+}
+
+impl Default for BigIntStrategy {
+    fn default() -> Self {
+        BigIntStrategy::Simple
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct OverflowInteger<F: FieldExt> {
     pub limbs: Vec<AssignedCell<F, F>>,
@@ -75,26 +90,9 @@ impl<F: FieldExt> OverflowInteger<F> {
         match chip.strategy {
             BigIntStrategy::Simple => {
                 // Constrain `out_native = sum_i out_assigned[i] * 2^{n*i}` in `F`
-                let (_, _, native) =
+                let (_, _, native, _) =
                     gate.inner_product(ctx, &limbs.iter().map(|a| Existing(a)).collect(), &pows)?;
                 Ok(native)
-            }
-            BigIntStrategy::CustomVerticalShort => {
-                let (cells, enable_sel) = mul_no_carry::witness_dot_constant(
-                    chip,
-                    &limbs.iter().map(|a| Existing(a)).collect(),
-                    &pows.iter().map(|qc| qc.value().unwrap().clone()).collect(),
-                )?;
-                let (assignments, gate_index) = gate.assign_region(ctx, cells, vec![])?;
-                for (c, row) in &enable_sel {
-                    chip.q_dot_constant.get(c).expect("should have constant for custom gate")
-                        [gate_index]
-                        .enable(
-                            &mut ctx.region,
-                            ctx.advice_rows[gate_index] - assignments.len() + *row,
-                        )?;
-                }
-                Ok(assignments.last().unwrap().clone())
             }
         }
     }
@@ -233,34 +231,9 @@ impl<F: FieldExt> FixedCRTInteger<F> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub enum BigIntStrategy {
-    // use existing gates
-    Simple,
-    // vertical custom gates of length 4 for dot product between an unknown vector and a constant vector, both of length 3
-    // we restrict to gate of length 4 since this uses the same set of evaluation points Rotation(0..=3) as our simple gate
-    CustomVerticalShort,
-}
-
-impl Default for BigIntStrategy {
-    fn default() -> Self {
-        BigIntStrategy::Simple
-    }
-}
-
-pub const GATE_LEN: usize = 4;
-
 #[derive(Clone, Debug, Default)]
 pub struct BigIntConfig<F: FieldExt> {
-    // everything is empty if strategy is `Simple`
-
-    // selector for custom gate
-    // | a0 | a1 | a2 | a3 |
-    // that constraints a3 = <[a0, a1, a2], [c0, c1, c2]> (dot product) = a0 * c0 + a1 * c1 + a2 * c2
-    // for a constant vector `c = [c0, c1, c2]`
-    // `q_dot_constant[c][i]` stores the selector for gate to dot product with `c` using index `i` vertical gate
-    // Using BigUint for max flexibility (FieldExt does not impl Hashable); TODO: can be optimized if speed is a concern
-    pub q_dot_constant: HashMap<Vec<BigUint>, Vec<Selector>>,
+    // everything is empty if strategy is `Simple` or `SimplePlus`
     strategy: BigIntStrategy,
     _marker: PhantomData<F>,
 }
@@ -272,58 +245,12 @@ impl<F: FieldExt> BigIntConfig<F> {
         limb_bits: usize,
         num_limbs: usize,
         gate: &FlexGateConfig<F>,
-        constants: Vec<Vec<BigUint>>, // collection of the constant vectors we want custom dot product gates for
+        // constants: Vec<Vec<BigUint>>, // collection of the constant vectors we want custom dot product gates for
     ) -> Self {
-        let mut q_dot_constant = HashMap::new();
+        // let mut q_dot_constant = HashMap::new();
         match strategy {
-            BigIntStrategy::CustomVerticalShort => {
-                for constant in &constants {
-                    assert!(constant.len() < GATE_LEN);
-                    q_dot_constant.insert(
-                        constant.clone(),
-                        gate.basic_gates
-                            .iter()
-                            .map(|gate| {
-                                let q = meta.selector();
-                                create_vertical_dot_constant_gate(
-                                    meta,
-                                    constant.iter().map(|c| biguint_to_fe::<F>(c)).collect(),
-                                    gate.value.clone(),
-                                    q,
-                                );
-                                q
-                            })
-                            .collect(),
-                    );
-                }
-            }
             _ => {}
         }
-        Self { q_dot_constant, strategy, _marker: PhantomData }
+        Self { strategy, _marker: PhantomData }
     }
-}
-
-/// Takes transpose of | a0 | a1 | .. | a_{k-1} | a_k |
-/// and constrains a0 * c0 + ... + a_{k-1} * c_{k-1} = a_k
-/// where c is constant vector of length k
-fn create_vertical_dot_constant_gate<F: FieldExt>(
-    meta: &mut ConstraintSystem<F>,
-    mut constant: Vec<F>,
-    value: Column<Advice>,
-    selector: Selector,
-) {
-    constant.extend((constant.len()..(GATE_LEN - 1)).map(|_| F::from(0)));
-    assert_eq!(constant.len(), GATE_LEN - 1);
-    meta.create_gate("custom vertical dot constant gate", |meta| {
-        let q = meta.query_selector(selector);
-        let a: Vec<Expression<F>> = (0..constant.len())
-            .map(|i| meta.query_advice(value.clone(), Rotation(i as i32)))
-            .collect();
-        let out = meta.query_advice(value, Rotation(constant.len() as i32));
-        let a_dot_c = (0..constant.len()).fold(Expression::Constant(F::from(0)), |sum, j| {
-            sum + a[j].clone() * Expression::Constant(constant[j])
-        });
-
-        vec![q * (a_dot_c - out)]
-    })
 }

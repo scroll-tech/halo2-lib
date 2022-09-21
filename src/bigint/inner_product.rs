@@ -56,7 +56,7 @@ pub fn crt<F: FieldExt>(
         for int_idx in 0..length {
             int_limbs.push(Existing(&a[int_idx].truncation.limbs[idx]));
         }
-        let (_, _, limb_res) = gate.inner_product(ctx, &int_limbs, &coeffs_quantum)?;
+        let (_, _, limb_res, _) = gate.inner_product(ctx, &int_limbs, &coeffs_quantum)?;
         out_limbs.push(limb_res);
     }
 
@@ -69,7 +69,7 @@ pub fn crt<F: FieldExt>(
     let out_trunc =
         OverflowInteger::construct(out_limbs, max_limb_size, a[0].truncation.limb_bits, max_size);
     let a_native = a.iter().map(|x| Existing(&x.native)).collect();
-    let (_, _, out_native) = gate.inner_product(ctx, &a_native, &coeffs_quantum)?;
+    let (_, _, out_native, _) = gate.inner_product(ctx, &a_native, &coeffs_quantum)?;
     let out_val = a.iter().zip(coeffs.iter()).fold(Some(BigInt::from(0)), |acc, (x, y)| {
         acc.zip(x.value.as_ref()).zip(y.value()).map(|((a, x), y)| a + x * fe_to_bigint(y))
     });

@@ -9,6 +9,8 @@ use num_bigint::BigUint;
 
 use crate::utils::fe_to_biguint;
 
+use self::{flex_gate::GateStrategy, range::RangeStrategy};
+
 pub mod flex_gate;
 pub mod range;
 
@@ -160,11 +162,13 @@ impl<'a, F: FieldExt> Context<'a, F> {
 }
 
 pub trait GateInstructions<F: FieldExt> {
+    fn strategy(&self) -> GateStrategy;
     fn assign_region(
         &self,
         ctx: &mut Context<'_, F>,
         inputs: Vec<QuantumCell<F>>,
-        gate_offsets: Vec<usize>,
+        gate_offsets: Vec<(isize, Option<[F; 3]>)>,
+        gate_index: Option<usize>,
     ) -> Result<(Vec<AssignedCell<F, F>>, usize), Error>;
 
     fn assign_region_smart(
@@ -227,7 +231,15 @@ pub trait GateInstructions<F: FieldExt> {
         ctx: &mut Context<'_, F>,
         vec_a: &Vec<QuantumCell<F>>,
         vec_b: &Vec<QuantumCell<F>>,
-    ) -> Result<(Vec<AssignedCell<F, F>>, Vec<AssignedCell<F, F>>, AssignedCell<F, F>), Error>;
+    ) -> Result<
+        (
+            Option<Vec<(AssignedCell<F, F>, usize)>>,
+            Option<Vec<(AssignedCell<F, F>, usize)>>,
+            AssignedCell<F, F>,
+            usize,
+        ),
+        Error,
+    >;
 
     fn or(
         &self,
@@ -278,6 +290,7 @@ pub trait RangeInstructions<F: FieldExt> {
     type Gate: GateInstructions<F>;
 
     fn gate(&self) -> &Self::Gate;
+    fn strategy(&self) -> RangeStrategy;
 
     fn lookup_bits(&self) -> usize;
 

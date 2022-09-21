@@ -19,33 +19,61 @@ use super::{
     QuantumCell::{self, Constant, Existing, Witness},
 };
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum GateStrategy {
     Vertical,
+    PlonkPlus,
 }
 
-// Gate to perform `a + b * c - out = 0`
-// We chose `a + b * c` instead of `a * b + c` to allow "chaining" of gates, i.e., the output of one gate because `a` in the next gate
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct BasicGateConfig<F: FieldExt> {
-    pub q_enable: Selector,
+    // `q_enable` will have either length 1 or 2, depending on the strategy
+
+    // If strategy is Vertical, then this is the basic vertical gate
+    // `q_0 * (a + b * c - d) = 0`
+    // where
+    // * a = value[0], b = value[1], c = value[2], d = value[3]
+    // * q = q_enable[0]
+    // * q_i is either 0 or 1 so this is just a simple selector
+    // We chose `a + b * c` instead of `a * b + c` to allow "chaining" of gates, i.e., the output of one gate because `a` in the next gate
+
+    // If strategy is PlonkPlus, then this is a slightly extended version of the vanilla plonk (vertical) gate
+    // `q_io * (a + q_left * b + q_right * c + q_mul * b * c - d)`
+    // where
+    // * a = value[0], b = value[1], c = value[2], d = value[3]
+    // * the q_{} can be any fixed values in F, placed in two fixed columns
+    // * it is crucial that q_io goes in its own selector column! we need it to be 0, 1 to turn on/off the gate
+    pub q_enable: Vec<Column<Fixed>>,
     // one column to store the inputs and outputs of the gate
     pub value: Column<Advice>,
     _marker: PhantomData<F>,
 }
 
 impl<F: FieldExt> BasicGateConfig<F> {
-    pub fn configure(meta: &mut ConstraintSystem<F>) -> Self {
+    pub fn configure(meta: &mut ConstraintSystem<F>, strategy: GateStrategy) -> Self {
         let value = meta.advice_column();
         meta.enable_equality(value);
-        let config = Self { q_enable: meta.selector(), value, _marker: PhantomData };
-        config.create_gate(meta);
+        let q = meta.fixed_column();
 
-        config
+        match strategy {
+            GateStrategy::Vertical => {
+                let config = Self { q_enable: vec![q], value, _marker: PhantomData };
+                config.create_gate(meta);
+                config
+            }
+            GateStrategy::PlonkPlus => {
+                let q_aux = meta.fixed_column();
+                let config = Self { q_enable: vec![q, q_aux], value, _marker: PhantomData };
+                config.create_plonk_gate(meta);
+                config
+            }
+        }
     }
+
     fn create_gate(&self, meta: &mut ConstraintSystem<F>) {
+        assert_eq!(self.q_enable.len(), 1);
         meta.create_gate("1 column a * b + c = out", |meta| {
-            let q = meta.query_selector(self.q_enable);
+            let q = meta.query_fixed(self.q_enable[0], Rotation::cur());
 
             let a = meta.query_advice(self.value, Rotation::cur());
             let b = meta.query_advice(self.value, Rotation::next());
@@ -53,6 +81,26 @@ impl<F: FieldExt> BasicGateConfig<F> {
             let out = meta.query_advice(self.value, Rotation(3));
 
             vec![q * (a + b * c - out)]
+        })
+    }
+
+    fn create_plonk_gate(&self, meta: &mut ConstraintSystem<F>) {
+        assert_eq!(self.q_enable.len(), 2);
+        meta.create_gate("plonk plus", |meta| {
+            // q_io * (a + q_left * b + q_right * c + q_mul * b * c - d)
+            // the gate is turned "off" as long as q_in = q_out = 0
+            let q_io = meta.query_fixed(self.q_enable[0], Rotation::cur());
+
+            let q_mul = meta.query_fixed(self.q_enable[1], Rotation::cur());
+            let q_left = meta.query_fixed(self.q_enable[1], Rotation::next());
+            let q_right = meta.query_fixed(self.q_enable[1], Rotation(2));
+
+            let a = meta.query_advice(self.value, Rotation::cur());
+            let b = meta.query_advice(self.value, Rotation::next());
+            let c = meta.query_advice(self.value, Rotation(2));
+            let d = meta.query_advice(self.value, Rotation(3));
+
+            vec![q_io * (a + q_left * b.clone() + q_right * c.clone() + q_mul * b * c - d)]
         })
     }
 }
@@ -64,6 +112,7 @@ pub struct FlexGateConfig<F: FieldExt> {
     pub constants: Vec<Column<Fixed>>,
     pub num_advice: usize,
     strategy: GateStrategy,
+    gate_len: usize,
 }
 
 impl<F: FieldExt> FlexGateConfig<F> {
@@ -81,13 +130,13 @@ impl<F: FieldExt> FlexGateConfig<F> {
             constants.push(c);
         }
         match strategy {
-            GateStrategy::Vertical => {
+            GateStrategy::Vertical | GateStrategy::PlonkPlus => {
                 let mut basic_gates = Vec::with_capacity(num_advice);
                 for _i in 0..num_advice {
-                    let gate = BasicGateConfig::configure(meta);
+                    let gate = BasicGateConfig::configure(meta, strategy);
                     basic_gates.push(gate);
                 }
-                Self { basic_gates, constants, num_advice, strategy }
+                Self { basic_gates, constants, num_advice, strategy, gate_len: 4 }
             }
         }
     }
@@ -133,20 +182,24 @@ impl<F: FieldExt> FlexGateConfig<F> {
 }
 
 impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
-    /// Only call this if ctx.region is not in shape mode, i.e., if not using simple layouter or ctx.first_pass = false
-    ///
+    fn strategy(&self) -> GateStrategy {
+        self.strategy
+    }
     /// All indices in `gate_offsets` are with respect to `inputs` indices
-    /// - `gate_offsets` specifies indices to enable selector for the gate
+    /// * `gate_offsets` specifies indices to enable selector for the gate
+    /// * `gate_offsets` specifies (index, Option<[q_left, q_right, q_mul, q_const, q_out]>)
+    /// * second coordinate should only be set if using strategy PlonkPlus; if not set, default to [1, 0, 0]
+    /// * allow the index in `gate_offsets` to be negative in case we want to do advanced overlapping
+    /// * gate_index can either be set if you know the specific column you want to assign to, or None if you want to auto-select index
     fn assign_region(
         &self,
         ctx: &mut Context<'_, F>,
         inputs: Vec<QuantumCell<F>>,
-        gate_offsets: Vec<usize>,
+        gate_offsets: Vec<(isize, Option<[F; 3]>)>,
+        gate_index: Option<usize>,
         // offset: usize, // It's useless to have an offset here since the function auto-selects what column to put stuff into
     ) -> Result<(Vec<AssignedCell<F, F>>, usize), Error> {
-        assert!(self.strategy == GateStrategy::Vertical);
-
-        let gate_index = ctx.min_gate_index();
+        let gate_index = if let Some(id) = gate_index { id } else { ctx.min_gate_index() };
 
         let mut assigned_cells = Vec::with_capacity(inputs.len());
         for (i, input) in inputs.iter().enumerate() {
@@ -158,11 +211,27 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
             )?;
             assigned_cells.push(assigned_cell);
         }
-        for gate_relative_offset in gate_offsets {
-            self.basic_gates[gate_index]
-                .q_enable
-                .enable(&mut ctx.region, ctx.advice_rows[gate_index] + gate_relative_offset)?;
+        for (i, q_coeff) in &gate_offsets {
+            ctx.region.assign_fixed(
+                || "",
+                self.basic_gates[gate_index].q_enable[0],
+                ((ctx.advice_rows[gate_index] as isize) + i) as usize,
+                || Ok(F::one()),
+            )?;
+
+            if self.strategy == GateStrategy::PlonkPlus {
+                let q_coeff = q_coeff.unwrap_or([F::one(), F::zero(), F::zero()]);
+                for j in 0..3 {
+                    ctx.region.assign_fixed(
+                        || "",
+                        self.basic_gates[gate_index].q_enable[1],
+                        ((ctx.advice_rows[gate_index] as isize) + i) as usize + j,
+                        || Ok(q_coeff[j]),
+                    )?;
+                }
+            }
         }
+
         ctx.advice_rows[gate_index] += inputs.len();
 
         Ok((assigned_cells, gate_index))
@@ -183,10 +252,15 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         external_equality: Vec<(&AssignedCell<F, F>, usize)>,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
         let assigned_cells = match self.strategy {
-            GateStrategy::Vertical => {
-                self.assign_region(ctx, inputs, gate_offsets)
-                    .expect("assign region should not fail")
-                    .0
+            GateStrategy::Vertical | GateStrategy::PlonkPlus => {
+                self.assign_region(
+                    ctx,
+                    inputs,
+                    gate_offsets.iter().map(|i| (*i as isize, None)).collect(),
+                    None,
+                )
+                .expect("assign region should not fail")
+                .0
             }
         };
 
@@ -284,17 +358,106 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
     }
 
     // Takes two vectors of `QuantumCell` and constrains a witness output to the inner product of `<vec_a, vec_b>`
+    // outputs are vec<(a_cell, a_relative_index)>, vec<(b_cell, b_relative_index)>, out_cell, gate_index
     fn inner_product(
         &self,
         ctx: &mut Context<'_, F>,
         vec_a: &Vec<QuantumCell<F>>,
         vec_b: &Vec<QuantumCell<F>>,
-    ) -> Result<(Vec<AssignedCell<F, F>>, Vec<AssignedCell<F, F>>, AssignedCell<F, F>), Error> {
+    ) -> Result<
+        (
+            Option<Vec<(AssignedCell<F, F>, usize)>>,
+            Option<Vec<(AssignedCell<F, F>, usize)>>,
+            AssignedCell<F, F>,
+            usize,
+        ),
+        Error,
+    > {
         assert_eq!(vec_a.len(), vec_b.len());
         // don't try to call this function with empty inputs!
         if vec_a.len() == 0 {
             return Err(Error::Synthesis);
         }
+        // we will do special handling of the cases where one of the vectors is all constants
+        if self.strategy == GateStrategy::PlonkPlus
+            && vec_b.iter().all(|b| if let Constant(c) = b { true } else { false })
+        {
+            let vec_b: Vec<F> = vec_b.iter().map(|c| c.value().unwrap().clone()).collect();
+            let k = vec_a.len();
+            let gate_segment = self.gate_len - 2;
+
+            // Say a = [a0, .., a4] for example
+            // Then to compute <a, b> we use transpose of
+            // | 0  | a0 | a1 | x | a2 | a3 | y | a4 | 0 | <a,c> |
+            // while letting q_enable equal transpose of
+            // | *  |    |    | * |    |    | * |    |   |       |
+            // | 0  | b0 | b1 | 0 | b2 | b3 | 0 | b4 | 0 |
+
+            // we effect a small optimization if we know the constant b0 == 1: then instead of starting from 0 we can start from a0
+            // this is a peculiarity of our plonk-plus gate
+            let start_ida: usize = if vec_b[0] == F::one() { 1 } else { 0 };
+            if start_ida == 1 && k == 1 {
+                // this is just a0 * 1 = a0; you're doing nothing, why are you calling this function?
+                let (assignment, gate_index) =
+                    self.assign_region(ctx, vec![vec_a[0].clone()], vec![], None)?;
+                return Ok((
+                    Some(vec![(assignment[0].clone(), 0)]),
+                    None,
+                    assignment[0].clone(),
+                    gate_index,
+                ));
+            }
+            let k_chunks = (k - start_ida + gate_segment - 1) / gate_segment;
+            let mut cells = Vec::with_capacity(1 + (gate_segment + 1) * k_chunks);
+            let mut gate_offsets = Vec::with_capacity(k_chunks);
+            let mut running_sum =
+                if start_ida == 1 { vec_a[0].clone() } else { Constant(F::zero()) };
+            cells.push(running_sum.clone());
+            for i in 0..k_chunks {
+                let window = (start_ida + i * gate_segment)
+                    ..std::cmp::min(k, start_ida + (i + 1) * gate_segment);
+                // we add a 0 at the start for q_mul = 0
+                let mut c_window = [&[F::zero()], &vec_b[window.clone()]].concat();
+                c_window.extend((c_window.len()..(gate_segment + 1)).map(|_| F::zero()));
+                // c_window should have length gate_segment + 1
+                gate_offsets.push((
+                    (i * (gate_segment + 1)) as isize,
+                    Some(c_window.try_into().expect("q_coeff should be correct len")),
+                ));
+
+                cells.extend(window.clone().map(|j| vec_a[j].clone()));
+                cells.extend((window.len()..gate_segment).map(|_| Constant(F::from(0))));
+                running_sum = Witness(
+                    window.into_iter().fold(running_sum.value().copied(), |sum: Option<F>, j| {
+                        sum.zip(vec_a[j].value()).map(|(s, &a)| s + a * vec_b[j])
+                    }),
+                );
+                cells.push(running_sum.clone());
+            }
+
+            let (assignments, gate_index) = self.assign_region(ctx, cells, gate_offsets, None)?;
+            let mut a_assigned = Vec::with_capacity(k);
+            if start_ida == 1 {
+                a_assigned.push((assignments[0].clone(), 0));
+            }
+            for i in start_ida..k {
+                let chunk = (i - start_ida) / gate_segment;
+                a_assigned.push((
+                    assignments[1 + chunk * (gate_segment + 1) + ((i - start_ida) % gate_segment)]
+                        .clone(),
+                    1 + chunk * (gate_segment + 1) + ((i - start_ida) % gate_segment),
+                ))
+            }
+            return Ok((Some(a_assigned), None, assignments.last().unwrap().clone(), gate_index));
+        }
+
+        if self.strategy == GateStrategy::PlonkPlus
+            && vec_a.iter().all(|a| if let Constant(c) = a { true } else { false })
+        {
+            let (b, a, out, id) = self.inner_product(ctx, vec_b, vec_a)?;
+            return Ok((a, b, out, id));
+        }
+
         let mut cells: Vec<QuantumCell<F>> = Vec::with_capacity(3 * vec_a.len() + 1);
         cells.push(QuantumCell::Constant(F::from(0)));
 
@@ -310,15 +473,20 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         for i in 0..vec_a.len() {
             gate_offsets.push(3 * i);
         }
-        let assigned_cells = self.assign_region_smart(ctx, cells, gate_offsets, vec![], vec![])?;
+        let (assigned_cells, gate_index) = self.assign_region(
+            ctx,
+            cells,
+            gate_offsets.iter().map(|i| (*i as isize, None)).collect(),
+            None,
+        )?;
         let mut a_assigned = Vec::with_capacity(vec_a.len());
         let mut b_assigned = Vec::with_capacity(vec_a.len());
         for i in 0..vec_a.len() {
-            a_assigned.push(assigned_cells[3 * i + 1].clone());
-            b_assigned.push(assigned_cells[3 * i + 2].clone());
+            a_assigned.push((assigned_cells[3 * i + 1].clone(), 3 * i + 1));
+            b_assigned.push((assigned_cells[3 * i + 2].clone(), 3 * i + 2));
         }
 
-        Ok((a_assigned, b_assigned, assigned_cells.last().unwrap().clone()))
+        Ok((Some(a_assigned), Some(b_assigned), assigned_cells.last().unwrap().clone(), gate_index))
     }
 
     // | 1 - b | 1 | b | 1 | b | a | 1 - b | out |
