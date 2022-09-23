@@ -350,14 +350,13 @@ pub fn is_on_curve<F: FieldExt, FC: FieldChip<F>>(
     ctx: &mut Context<'_, F>,
     P: &EccPoint<F, FC::FieldPoint>,
     b: F,
-) -> Result<AssignedCell<F, F>, Error> {
-    let lhs = chip.mul(ctx, &P.y, &P.y)?;
+) -> Result<(), Error> {
+    let lhs = chip.mul_no_carry(ctx, &P.y, &P.y)?;
     let mut rhs = chip.mul(ctx, &P.x, &P.x)?;
     rhs = chip.mul_no_carry(ctx, &rhs, &P.x)?;
     rhs = chip.add_native_constant_no_carry(ctx, &rhs, b)?;
-    rhs = chip.carry_mod(ctx, &rhs)?;
-
-    chip.is_equal(ctx, &lhs, &rhs)
+    let diff = chip.sub_no_carry(ctx, &lhs, &rhs)?;
+    chip.check_carry_mod_to_zero(ctx, &diff)
 }
 
 // need to supply an extra generic `GA` implementing `CurveAffine` trait in order to generate random witness points on the curve in question
@@ -437,8 +436,7 @@ where
         EccPoint::construct(x_overflow, y_overflow)
     };
     // for above reason we still need to constrain that the witness is on the curve
-    let base_is_on_curve = is_on_curve(chip, ctx, &base, b)?;
-    ctx.constants_to_assign.push((F::from(1), Some(base_is_on_curve.cell())));
+    is_on_curve(chip, ctx, &base, b)?;
 
     // contains random base points [A, ..., 2^{w + k - 1} * A]
     let mut rand_start_vec = Vec::with_capacity(k);

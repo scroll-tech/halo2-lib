@@ -88,7 +88,7 @@ impl<F: FieldExt> BasicGateConfig<F> {
         assert_eq!(self.q_enable.len(), 2);
         meta.create_gate("plonk plus", |meta| {
             // q_io * (a + q_left * b + q_right * c + q_mul * b * c - d)
-            // the gate is turned "off" as long as q_in = q_out = 0
+            // the gate is turned "off" as long as q_io = 0
             let q_io = meta.query_fixed(self.q_enable[0], Rotation::cur());
 
             let q_mul = meta.query_fixed(self.q_enable[1], Rotation::cur());
@@ -388,7 +388,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
 
             // Say a = [a0, .., a4] for example
             // Then to compute <a, b> we use transpose of
-            // | 0  | a0 | a1 | x | a2 | a3 | y | a4 | 0 | <a,c> |
+            // | 0  | a0 | a1 | x | a2 | a3 | y | a4 | 0 | <a,b> |
             // while letting q_enable equal transpose of
             // | *  |    |    | * |    |    | * |    |   |       |
             // | 0  | b0 | b1 | 0 | b2 | b3 | 0 | b4 | 0 |
