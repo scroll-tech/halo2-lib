@@ -6,8 +6,8 @@ use crate::{
 };
 use ff::PrimeField;
 use halo2_proofs::{
-    arithmetic::{BaseExt, Field, FieldExt},
-    circuit::AssignedCell,
+    arithmetic::{Field, FieldExt},
+    circuit::{AssignedCell, Value},
     plonk::Error,
 };
 use num_bigint::BigUint;
@@ -45,9 +45,9 @@ pub trait FieldChip<F: FieldExt> {
 
     fn range(&self) -> &Self::RangeChip;
 
-    fn get_assigned_value(x: &Self::FieldPoint) -> Option<Self::FieldType>;
+    fn get_assigned_value(x: &Self::FieldPoint) -> Value<Self::FieldType>;
 
-    fn fe_to_witness(x: &Option<Self::FieldType>) -> Self::WitnessType;
+    fn fe_to_witness(x: &Value<Self::FieldType>) -> Self::WitnessType;
 
     fn load_private(
         &self,
@@ -181,8 +181,7 @@ pub trait FieldChip<F: FieldExt> {
     ) -> Result<Self::FieldPoint, Error> {
         let a_val = Self::get_assigned_value(a);
         let b_val = Self::get_assigned_value(b);
-        let b_inv: Option<Self::FieldType> =
-            if let Some(bv) = b_val { bv.invert().into() } else { None };
+        let b_inv = b_val.map(|bv| bv.invert().unwrap());
         let quot_val = a_val.zip(b_inv).map(|(a, bi)| a * bi);
 
         let quot = self.load_private(ctx, Self::fe_to_witness(&quot_val))?;
@@ -206,8 +205,7 @@ pub trait FieldChip<F: FieldExt> {
     ) -> Result<Self::FieldPoint, Error> {
         let a_val = Self::get_assigned_value(a);
         let b_val = Self::get_assigned_value(b);
-        let b_inv: Option<Self::FieldType> =
-            if let Some(bv) = b_val { bv.invert().into() } else { None };
+        let b_inv = b_val.map(|bv| bv.invert().unwrap());
         let quot_val = a_val.zip(b_inv).map(|(a, b)| -a * b);
 
         let quot = self.load_private(ctx, Self::fe_to_witness(&quot_val))?;

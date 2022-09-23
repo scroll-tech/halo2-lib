@@ -65,8 +65,8 @@ impl<F: FieldExt> OverflowInteger<F> {
         Self { limbs, max_limb_size, limb_bits, max_size }
     }
 
-    pub fn to_bigint(&self) -> Option<BigInt> {
-        self.limbs.iter().rev().fold(Some(BigInt::zero()), |acc, acell| {
+    pub fn to_bigint(&self) -> Value<BigInt> {
+        self.limbs.iter().rev().fold(Value::known(BigInt::zero()), |acc, acell| {
             acc.zip(acell.value()).map(|(acc, x)| (acc << self.limb_bits) + fe_to_bigint(x))
         })
     }
@@ -159,14 +159,14 @@ pub struct CRTInteger<F: FieldExt> {
     // this struct should only be used if the implicit assumption above is satisfied
     pub truncation: OverflowInteger<F>,
     pub native: AssignedCell<F, F>,
-    pub value: Option<BigInt>,
+    pub value: Value<BigInt>,
 }
 
 impl<F: FieldExt> CRTInteger<F> {
     pub fn construct(
         truncation: OverflowInteger<F>,
         native: AssignedCell<F, F>,
-        value: Option<BigInt>,
+        value: Value<BigInt>,
     ) -> Self {
         Self { truncation, native, value }
     }
@@ -225,8 +225,11 @@ impl<F: FieldExt> FixedCRTInteger<F> {
                 gate.assign_region_smart(ctx, native_cells, vec![], vec![], vec![])?;
             native_cells_assigned[0].clone()
         };
-        let assigned =
-            CRTInteger::construct(assigned_truncation, assigned_native, Some(self.value.clone()));
+        let assigned = CRTInteger::construct(
+            assigned_truncation,
+            assigned_native,
+            Value::known(self.value.clone()),
+        );
         Ok(assigned)
     }
 }

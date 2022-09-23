@@ -5,15 +5,12 @@ use std::io::Write;
 use std::marker::PhantomData;
 
 use ff::{Field, PrimeField};
-use halo2_proofs::circuit::floor_planner::*;
-use halo2_proofs::pairing::bn256::{Bn256, G1Affine};
-use halo2_proofs::pairing::group::Group;
-use halo2_proofs::poly::commitment::{Params, ParamsVerifier};
+use halo2_proofs::poly::commitment::{Params, ParamsProver, ParamsVerifier};
 use halo2_proofs::{
     arithmetic::{CurveAffine, FieldExt},
     circuit::*,
     dev::MockProver,
-    pairing::bn256::Fr,
+    halo2curves::{bn256::{Fr, Bn256, G1Affine}},
     plonk::*,
     transcript::{Blake2bRead, Blake2bWrite, Challenge255},
 };
@@ -32,7 +29,7 @@ use crate::{
         QuantumCell::Witness,
         RangeInstructions,
     },
-    utils::{bigint_to_fe, biguint_to_fe, decompose_biguint_option, fe_to_biguint, modulus},
+    utils::{bigint_to_fe, biguint_to_fe, fe_to_biguint, modulus},
 };
 
 #[derive(Serialize, Deserialize)]
@@ -136,19 +133,19 @@ impl<F: FieldExt> Circuit<F> for ECDSACircuit<F> {
 
                 let m_assigned = fq_chip.load_private(
                     ctx,
-                    FqOverflowChip::<F>::fe_to_witness(&self.msghash),
+                    FqOverflowChip::<F>::fe_to_witness(&self.msghash.map_or(Value::unknown(), |v| Value::known(v))),
                 )?;
 
                 let r_assigned = fq_chip
-                    .load_private(ctx, FqOverflowChip::<F>::fe_to_witness(&self.r))?;
+                    .load_private(ctx, FqOverflowChip::<F>::fe_to_witness(&self.r.map_or(Value::unknown(), |v| Value::known(v))))?;
                 let s_assigned = fq_chip
-                    .load_private(ctx, FqOverflowChip::<F>::fe_to_witness(&self.s))?;
+                    .load_private(ctx, FqOverflowChip::<F>::fe_to_witness(&self.s.map_or(Value::unknown(), |v| Value::known(v))))?;
                 (r_assigned, s_assigned, m_assigned)
             };
 
             let ecc_chip = EccChip::<F, FpChip<F>>::construct(&fp_chip);
             let pk_assigned = ecc_chip
-                .load_private(ctx, (self.pk.map(|pt| pt.x), self.pk.map(|pt| pt.y)))?;
+                .load_private(ctx, (self.pk.map_or(Value::unknown(), |pt| Value::known(pt.x)), self.pk.map_or(Value::unknown(), |pt| Value::known(pt.y))))?;
             // test ECDSA
             let ecdsa = ecdsa_verify_no_pubkey_check::<F, Fp, Fq, Secp256k1Affine>(
                 &fp_chip,
@@ -359,6 +356,9 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
     */
 
     use std::io::BufRead;
+    use halo2_proofs::{poly::{kzg::{strategy::SingleStrategy,commitment::{ParamsKZG, KZGCommitmentScheme, ParamsVerifierKZG}, multiopen::{ProverSHPLONK, VerifierSHPLONK}}}, transcript::{TranscriptWriterBuffer, TranscriptReadBuffer}};
+
+    let mut rng = rand::thread_rng();
 
     let mut folder = std::path::PathBuf::new();
     folder.push("./src/secp256k1");
@@ -403,15 +403,15 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
         }
         let params_time = start_timer!(|| "Time elapsed in circuit & params construction");
         let params = {
-            params_folder.push(format!("bn254_{}.params", bench_params.degree));
+            params_folder.push(format!("kzg_bn254_{}.params", bench_params.degree));
             let fd = std::fs::File::open(params_folder.as_path());
             let params = if let Ok(mut f) = fd {
                 println!("Found existing params file. Reading params...");
-                Params::<G1Affine>::read(&mut f).unwrap()
+                ParamsKZG::<Bn256>::read(&mut f).unwrap()
             } else {
                 println!("Creating new params file...");
                 let mut f = std::fs::File::create(params_folder.as_path())?;
-                let params = Params::<G1Affine>::unsafe_setup::<Bn256>(bench_params.degree);
+                let params = ParamsKZG::<Bn256>::setup(bench_params.degree, &mut rng);
                 params.write(&mut f).unwrap();
                 params
             };
@@ -426,7 +426,7 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
         let vk = keygen_vk(&params, &circuit)?;
         end_timer!(vk_time);
 
-        let vk_size = {
+        /*let vk_size = {
             folder.push(format!(
                 "ecdsa_circuit_{}_{}_{}_{}_{}_{}_{}.vkey",
                 bench_params.degree,
@@ -441,7 +441,7 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
             folder.pop();
             vk.write(&mut fd).unwrap();
             fd.metadata().unwrap().len()
-        };
+        };*/
 
         let pk_time = start_timer!(|| "Time elapsed in generating pkey");
         let pk = keygen_pk(&params, vk, &circuit)?;
@@ -475,7 +475,14 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
         // create a proof
         let proof_time = start_timer!(|| "Proving time");
         let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
-        create_proof(&params, &pk, &[proof_circuit], &[&[]], rng, &mut transcript)?;
+        create_proof::<
+            KZGCommitmentScheme<Bn256>,
+            ProverSHPLONK<'_, Bn256>,
+            Challenge255<G1Affine>,
+            _,
+            Blake2bWrite<Vec<u8>, G1Affine, Challenge255<G1Affine>>,
+            ECDSACircuit<Fr>,
+        >(&params, &pk, &[proof_circuit], &[&[]], rng, &mut transcript)?;
         let proof = transcript.finalize();
         end_timer!(proof_time);
 
@@ -497,17 +504,23 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let verify_time = start_timer!(|| "Verify time");
-        let params_verifier: ParamsVerifier<Bn256> = params.verifier(0).unwrap();
-        let strategy = SingleVerifier::new(&params_verifier);
+        let verifier_params = params.verifier_params();
+        let strategy = SingleStrategy::new(&params);
         let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
         assert!(
-            verify_proof(&params_verifier, pk.get_vk(), strategy, &[&[]], &mut transcript).is_ok()
+            verify_proof::<
+            KZGCommitmentScheme<Bn256>,
+            VerifierSHPLONK<'_, Bn256>,
+            Challenge255<G1Affine>,
+            Blake2bRead<&[u8], G1Affine, Challenge255<G1Affine>>,
+            SingleStrategy<'_, Bn256>,
+            >(verifier_params, pk.get_vk(), strategy, &[&[]], &mut transcript).is_ok()
         );
         end_timer!(verify_time);
 
         write!(
             fs_results,
-            "{},{},{},{},{},{},{},{},{:?},{},{:?}\n",
+            "{},{},{},{},{},{},{},{:?},{},{:?}\n",
             bench_params.degree,
             bench_params.num_advice,
             bench_params.num_lookup_advice,
@@ -515,7 +528,6 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
             bench_params.lookup_bits,
             bench_params.limb_bits,
             bench_params.num_limbs,
-            vk_size,
             proof_time.time.elapsed(),
             proof_size,
             verify_time.time.elapsed()

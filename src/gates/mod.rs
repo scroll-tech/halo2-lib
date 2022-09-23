@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use halo2_proofs::{
     arithmetic::FieldExt,
-    circuit::{AssignedCell, Cell, Layouter, Region},
+    circuit::{AssignedCell, Cell, Layouter, Region, Value},
     plonk::{Advice, Column, ConstraintSystem, Error, Fixed, Selector},
 };
 use num_bigint::BigUint;
@@ -17,16 +17,16 @@ pub mod range;
 #[derive(Clone, Debug)]
 pub enum QuantumCell<'a, F: FieldExt> {
     Existing(&'a AssignedCell<F, F>),
-    Witness(Option<F>),
+    Witness(Value<F>),
     Constant(F),
 }
 
 impl<F: FieldExt> QuantumCell<'_, F> {
-    pub fn value(&self) -> Option<&F> {
+    pub fn value(&self) -> Value<&F> {
         match self {
             Self::Existing(a) => a.value(),
             Self::Witness(a) => a.as_ref(),
-            Self::Constant(a) => Some(a),
+            Self::Constant(a) => Value::known(a),
         }
     }
 }
@@ -119,7 +119,7 @@ impl<'a, F: FieldExt> Context<'a, F> {
                     || "load constant",
                     fixed_columns[col],
                     offset,
-                    || Ok(c.clone()),
+                    || Value::known(c.clone()),
                 )?;
                 assigned.insert(c_big, c_cell.clone());
                 col += 1;

@@ -2,8 +2,8 @@ use std::marker::PhantomData;
 
 use ff::PrimeField;
 use halo2_proofs::{
-    arithmetic::{BaseExt, Field, FieldExt},
-    circuit::{AssignedCell, Layouter},
+    arithmetic::{Field, FieldExt},
+    circuit::{AssignedCell, Layouter, Value},
     plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed, Selector, TableColumn},
     poly::Rotation,
 };
@@ -128,7 +128,7 @@ impl<F: FieldExt, Fp: PrimeField> PrimeFieldChip<F> for FpConfig<F, Fp> {}
 
 impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpConfig<F, Fp> {
     type ConstantType = BigInt;
-    type WitnessType = Option<BigInt>;
+    type WitnessType = Value<BigInt>;
     type FieldPoint = CRTInteger<F>;
     type FieldType = Fp;
     type RangeChip = RangeConfig<F>;
@@ -137,18 +137,18 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpConfig<F, Fp> {
         &self.range
     }
 
-    fn get_assigned_value(x: &CRTInteger<F>) -> Option<Fp> {
+    fn get_assigned_value(x: &CRTInteger<F>) -> Value<Fp> {
         x.value.as_ref().map(|x| bigint_to_fe::<Fp>(x))
     }
 
-    fn fe_to_witness(x: &Option<Fp>) -> Option<BigInt> {
+    fn fe_to_witness(x: &Value<Fp>) -> Value<BigInt> {
         x.map(|x| BigInt::from(fe_to_biguint(&x)))
     }
 
     fn load_private(
         &self,
         ctx: &mut Context<'_, F>,
-        a: Option<BigInt>,
+        a: Value<BigInt>,
     ) -> Result<CRTInteger<F>, Error> {
         let a_vec = decompose_bigint_option::<F>(&a, self.num_limbs, self.limb_bits);
         let limbs = self.range.gate().assign_region_smart(
@@ -199,7 +199,7 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpConfig<F, Fp> {
                 &self.p - 1usize,
             ),
             a_native,
-            Some(a),
+            Value::known(a),
         ))
     }
 
@@ -312,9 +312,9 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpConfig<F, Fp> {
         let last_limb_bits = a.truncation.max_size.bits() as usize - n * (k - 1);
         assert!(last_limb_bits > 0);
 
-        if a.value != None {
-            assert!(a.value.clone().unwrap().bits() <= a.truncation.max_size.bits());
-        }
+        a.value.clone().map(|v| {
+            assert!(v.bits() <= a.truncation.max_size.bits());
+        });
 
         // range check limbs of `a` are in [0, 2^n) except last limb should be in [0, 2^last_limb_bits)
         let mut index: usize = 0;
@@ -416,13 +416,17 @@ impl<F: FieldExt, Fp: PrimeField> Selectable<F> for FpConfig<F, Fp> {
 pub(crate) mod tests {
     use std::marker::PhantomData;
 
-    use halo2_proofs::arithmetic::BaseExt;
+    use group::ff::Field;
     use halo2_proofs::circuit::floor_planner::V1;
     use halo2_proofs::{
-        arithmetic::FieldExt, circuit::*, dev::MockProver, pairing::bn256::Fq, pairing::bn256::Fr,
+        arithmetic::FieldExt,
+        circuit::*,
+        dev::MockProver,
+        halo2curves::bn256::{Fq, Fr},
         plonk::*,
     };
     use num_traits::One;
+    use rand::rngs::OsRng;
 
     use crate::bigint::big_less_than;
     use crate::fields::fp::FpConfig;
@@ -437,8 +441,8 @@ pub(crate) mod tests {
 
     #[derive(Default)]
     struct MyCircuit<F> {
-        a: Option<Fq>,
-        b: Option<Fq>,
+        a: Value<Fq>,
+        b: Value<Fq>,
         _marker: PhantomData<F>,
     }
 
@@ -541,10 +545,11 @@ pub(crate) mod tests {
     #[test]
     fn test_fp() {
         let k = 12;
-        let a = Fq::rand();
-        let b = Fq::rand();
+        let a = Fq::random(OsRng);
+        let b = Fq::random(OsRng);
 
-        let circuit = MyCircuit::<Fr> { a: Some(a), b: Some(b), _marker: PhantomData };
+        let circuit =
+            MyCircuit::<Fr> { a: Value::known(a), b: Value::known(b), _marker: PhantomData };
 
         let prover = MockProver::run(k, &circuit, vec![]).unwrap();
         //prover.assert_satisfied();

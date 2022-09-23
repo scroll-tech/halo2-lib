@@ -3,11 +3,14 @@ use num_bigint::{BigInt, BigUint};
 use std::cmp;
 
 use super::{CRTInteger, OverflowInteger};
-use crate::gates::{
-    Context, GateInstructions,
-    QuantumCell::{self, Constant, Existing, Witness},
-};
 use crate::utils::fe_to_bigint;
+use crate::{
+    gates::{
+        Context, GateInstructions,
+        QuantumCell::{self, Constant, Existing, Witness},
+    },
+    utils::value_to_option,
+};
 
 /// only use case is when coeffs has only a single 1, rest are 0
 pub fn assign<F: FieldExt>(
@@ -70,7 +73,7 @@ pub fn crt<F: FieldExt>(
         OverflowInteger::construct(out_limbs, max_limb_size, a[0].truncation.limb_bits, max_size);
     let a_native = a.iter().map(|x| Existing(&x.native)).collect();
     let (_, _, out_native, _) = gate.inner_product(ctx, &a_native, &coeffs_quantum)?;
-    let out_val = a.iter().zip(coeffs.iter()).fold(Some(BigInt::from(0)), |acc, (x, y)| {
+    let out_val = a.iter().zip(coeffs.iter()).fold(Value::known(BigInt::from(0)), |acc, (x, y)| {
         acc.zip(x.value.as_ref()).zip(y.value()).map(|((a, x), y)| a + x * fe_to_bigint(y))
     });
 

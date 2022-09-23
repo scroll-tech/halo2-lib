@@ -2,14 +2,13 @@ use std::marker::PhantomData;
 
 use ff::PrimeField;
 use halo2_proofs::{
-    arithmetic::{BaseExt, Field, FieldExt},
-    circuit::{AssignedCell, Layouter},
+    arithmetic::{Field, FieldExt},
+    circuit::{AssignedCell, Layouter, Value},
     plonk::Error,
 };
 use num_bigint::{BigInt, BigUint};
 use num_traits::Num;
 
-use crate::fields::fp::FpConfig;
 use crate::gates::{
     GateInstructions,
     QuantumCell::{Constant, Existing, Witness},
@@ -23,6 +22,7 @@ use crate::{
     },
     gates::{range::RangeConfig, Context},
 };
+use crate::{fields::fp::FpConfig, utils::value_to_option};
 
 use super::{FieldChip, FieldExtConstructor, FieldExtPoint, PrimeFieldChip, Selectable};
 
@@ -115,11 +115,11 @@ impl<'a, F, FpChip, Fp2> FieldChip<F> for Fp2Chip<'a, F, FpChip, Fp2>
 where
     F: FieldExt,
     FpChip::FieldType: PrimeField,
-    FpChip: PrimeFieldChip<F, WitnessType = Option<BigInt>, ConstantType = BigInt>,
+    FpChip: PrimeFieldChip<F, WitnessType = Value<BigInt>, ConstantType = BigInt>,
     Fp2: Field + FieldExtConstructor<FpChip::FieldType, 2>,
 {
     type ConstantType = Fp2;
-    type WitnessType = Vec<Option<BigInt>>;
+    type WitnessType = Vec<Value<BigInt>>;
     type FieldPoint = FieldExtPoint<FpChip::FieldPoint>;
     type FieldType = Fp2;
     type RangeChip = FpChip::RangeChip;
@@ -128,20 +128,20 @@ where
         self.fp_chip.range()
     }
 
-    fn get_assigned_value(x: &Self::FieldPoint) -> Option<Fp2> {
+    fn get_assigned_value(x: &Self::FieldPoint) -> Value<Fp2> {
         assert_eq!(x.coeffs.len(), 2);
         let c0 = FpChip::get_assigned_value(&x.coeffs[0]);
         let c1 = FpChip::get_assigned_value(&x.coeffs[1]);
         c0.zip(c1).map(|(c0, c1)| Fp2::new([c0, c1]))
     }
 
-    fn fe_to_witness(x: &Option<Fp2>) -> Vec<Option<BigInt>> {
-        match x.as_ref() {
-            None => vec![None, None],
+    fn fe_to_witness(x: &Value<Fp2>) -> Vec<Value<BigInt>> {
+        match value_to_option(x.clone()) {
+            None => vec![Value::unknown(), Value::unknown()],
             Some(x) => {
                 let coeffs = x.coeffs();
                 assert_eq!(coeffs.len(), 2);
-                coeffs.iter().map(|c| Some(BigInt::from(fe_to_biguint(c)))).collect()
+                coeffs.iter().map(|c| Value::known(BigInt::from(fe_to_biguint(c)))).collect()
             }
         }
     }
@@ -149,12 +149,12 @@ where
     fn load_private(
         &self,
         ctx: &mut Context<'_, F>,
-        coeffs: Vec<Option<BigInt>>,
+        coeffs: Vec<Value<BigInt>>,
     ) -> Result<Self::FieldPoint, Error> {
         assert_eq!(coeffs.len(), 2);
         let mut assigned_coeffs = Vec::with_capacity(2);
         for a in coeffs {
-            let assigned_coeff = self.fp_chip.load_private(ctx, a.clone())?;
+            let assigned_coeff = self.fp_chip.load_private(ctx, a)?;
             assigned_coeffs.push(assigned_coeff);
         }
         Ok(Self::FieldPoint::construct(assigned_coeffs))

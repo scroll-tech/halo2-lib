@@ -1,6 +1,6 @@
 use halo2_proofs::{
     arithmetic::FieldExt,
-    circuit::{layouter, AssignedCell, Cell, Layouter, Region},
+    circuit::{layouter, AssignedCell, Cell, Layouter, Region, Value},
     plonk::{Advice, Column, ConstraintSystem, Error, Fixed, Selector},
     poly::Rotation,
 };
@@ -165,15 +165,16 @@ impl<F: FieldExt> FlexGateConfig<F> {
             QuantumCell::Existing(acell) => {
                 acell.copy_advice(|| "gate: copy advice", &mut ctx.region, column, offset)
             }
-            QuantumCell::Witness(val) => ctx.region.assign_advice(
-                || "gate: assign advice",
-                column,
-                offset,
-                || val.ok_or(Error::Synthesis),
-            ),
+            QuantumCell::Witness(val) => {
+                ctx.region.assign_advice(|| "gate: assign advice", column, offset, || val)
+            }
             QuantumCell::Constant(c) => {
-                let acell =
-                    ctx.region.assign_advice(|| "gate: assign const", column, offset, || Ok(c))?;
+                let acell = ctx.region.assign_advice(
+                    || "gate: assign const",
+                    column,
+                    offset,
+                    || Value::known(c),
+                )?;
                 ctx.constants_to_assign.push((c, Some(acell.cell())));
                 Ok(acell)
             }
@@ -216,7 +217,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
                 || "",
                 self.basic_gates[gate_index].q_enable[0],
                 ((ctx.advice_rows[gate_index] as isize) + i) as usize,
-                || Ok(F::one()),
+                || Value::known(F::one()),
             )?;
 
             if self.strategy == GateStrategy::PlonkPlus {
@@ -226,7 +227,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
                         || "",
                         self.basic_gates[gate_index].q_enable[1],
                         ((ctx.advice_rows[gate_index] as isize) + i) as usize + j,
-                        || Ok(q_coeff[j]),
+                        || Value::known(q_coeff[j]),
                     )?;
                 }
             }
@@ -382,7 +383,10 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         if self.strategy == GateStrategy::PlonkPlus
             && vec_b.iter().all(|b| if let Constant(c) = b { true } else { false })
         {
-            let vec_b: Vec<F> = vec_b.iter().map(|c| c.value().unwrap().clone()).collect();
+            let vec_b: Vec<F> = vec_b
+                .iter()
+                .map(|b| if let Constant(c) = b { *c } else { unreachable!() })
+                .collect();
             let k = vec_a.len();
             let gate_segment = self.gate_len - 2;
 
@@ -427,11 +431,10 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
 
                 cells.extend(window.clone().map(|j| vec_a[j].clone()));
                 cells.extend((window.len()..gate_segment).map(|_| Constant(F::from(0))));
-                running_sum = Witness(
-                    window.into_iter().fold(running_sum.value().copied(), |sum: Option<F>, j| {
-                        sum.zip(vec_a[j].value()).map(|(s, &a)| s + a * vec_b[j])
-                    }),
-                );
+                running_sum =
+                    Witness(window.into_iter().fold(running_sum.value().copied(), |sum, j| {
+                        sum + Value::known(vec_b[j]) * vec_a[j].value()
+                    }));
                 cells.push(running_sum.clone());
             }
 
@@ -461,9 +464,9 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         let mut cells: Vec<QuantumCell<F>> = Vec::with_capacity(3 * vec_a.len() + 1);
         cells.push(QuantumCell::Constant(F::from(0)));
 
-        let mut sum = Some(F::zero());
+        let mut sum = Value::known(F::zero());
         for (a, b) in vec_a.iter().zip(vec_b.iter()) {
-            sum = sum.zip(a.value()).zip(b.value()).map(|((sum, a), b)| sum + *a * *b);
+            sum = sum + a.value().copied() * b.value();
 
             cells.push(a.clone());
             cells.push(b.clone());

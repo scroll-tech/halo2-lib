@@ -2,8 +2,8 @@ use std::marker::PhantomData;
 
 use ff::PrimeField;
 use halo2_proofs::{
-    arithmetic::{BaseExt, Field, FieldExt},
-    circuit::{AssignedCell, Layouter},
+    arithmetic::{Field, FieldExt},
+    circuit::{AssignedCell, Layouter, Value},
     plonk::Error,
 };
 use num_bigint::{BigInt, BigUint};
@@ -72,7 +72,7 @@ impl<'a, F: FieldExt, Fp: PrimeField> PrimeFieldChip<F> for FpOverflowChip<'a, F
 
 impl<'a, F: FieldExt, Fp: PrimeField> FieldChip<F> for FpOverflowChip<'a, F, Fp> {
     type ConstantType = BigInt;
-    type WitnessType = Option<BigInt>;
+    type WitnessType = Value<BigInt>;
     type FieldPoint = OverflowInteger<F>;
     type FieldType = Fp;
     type RangeChip = RangeConfig<F>;
@@ -81,18 +81,18 @@ impl<'a, F: FieldExt, Fp: PrimeField> FieldChip<F> for FpOverflowChip<'a, F, Fp>
         self.range
     }
 
-    fn get_assigned_value(x: &OverflowInteger<F>) -> Option<Fp> {
+    fn get_assigned_value(x: &OverflowInteger<F>) -> Value<Fp> {
         x.to_bigint().as_ref().map(|x| bigint_to_fe::<Fp>(x))
     }
 
-    fn fe_to_witness(x: &Option<Fp>) -> Option<BigInt> {
+    fn fe_to_witness(x: &Value<Fp>) -> Value<BigInt> {
         x.map(|x| BigInt::from(fe_to_biguint(&x)))
     }
 
     fn load_private(
         &self,
         ctx: &mut Context<'_, F>,
-        a: Option<BigInt>,
+        a: Value<BigInt>,
     ) -> Result<OverflowInteger<F>, Error> {
         let a_vec = decompose_bigint_option(&a, self.num_limbs, self.limb_bits);
         let limbs = self.range.gate().assign_region_smart(

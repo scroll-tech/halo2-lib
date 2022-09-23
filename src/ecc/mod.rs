@@ -4,9 +4,9 @@ use std::marker::PhantomData;
 use ff::PrimeField;
 use group::{Curve, Group};
 use halo2_proofs::{
-    arithmetic::{BaseExt, CurveAffine, Field, FieldExt},
-    circuit::{AssignedCell, Layouter},
-    pairing::bn256::{G1Affine, G1},
+    arithmetic::{CurveAffine, Field, FieldExt},
+    circuit::{AssignedCell, Layouter, Value},
+    halo2curves::bn256::{G1Affine, G1},
     plonk::{Advice, Column, ConstraintSystem, Error, Fixed},
 };
 use num_bigint::{BigInt, BigUint};
@@ -429,8 +429,8 @@ where
     let mut rng = rand::thread_rng();
     let base_point: GA = GA::CurveExt::random(&mut rng).to_affine();
     let base_point_coord = base_point.coordinates().unwrap();
-    let pt_x = FC::fe_to_witness(&Some(*base_point_coord.x()));
-    let pt_y = FC::fe_to_witness(&Some(*base_point_coord.y()));
+    let pt_x = FC::fe_to_witness(&Value::known(*base_point_coord.x()));
+    let pt_y = FC::fe_to_witness(&Value::known(*base_point_coord.y()));
     let base = {
         let x_overflow = chip.load_private(ctx, pt_x)?;
         let y_overflow = chip.load_private(ctx, pt_y)?;
@@ -612,7 +612,7 @@ impl<'a, F: FieldExt, FC: FieldChip<F>> EccChip<'a, F, FC> {
     pub fn load_private(
         &self,
         ctx: &mut Context<'_, F>,
-        point: (Option<FC::FieldType>, Option<FC::FieldType>),
+        point: (Value<FC::FieldType>, Value<FC::FieldType>),
     ) -> Result<EccPoint<F, FC::FieldPoint>, Error> {
         let (x, y) = (FC::fe_to_witness(&point.0), FC::fe_to_witness(&point.1));
 

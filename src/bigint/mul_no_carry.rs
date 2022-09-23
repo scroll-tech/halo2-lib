@@ -38,7 +38,7 @@ pub fn assign<F: FieldExt>(
             let mut enable_gates = Vec::new();
 
             let mut offset = 0;
-            let mut prod_val = Some(F::zero());
+            let mut prod_val = Value::known(F::zero());
             for j in startj..=i {
                 if j >= k_a {
                     break;
@@ -47,10 +47,7 @@ pub fn assign<F: FieldExt>(
 
                 let a_cell = &a.limbs[j];
                 let b_cell = &b.limbs[i - j];
-                prod_val = prod_val
-                    .zip(a_cell.value())
-                    .zip(b_cell.value())
-                    .map(|((sum, &a), &b)| sum + a * b);
+                prod_val = prod_val + a_cell.value().copied() * b_cell.value();
 
                 prod_computation.push(Existing(a_cell));
                 prod_computation.push(Existing(b_cell));
@@ -102,16 +99,13 @@ pub fn truncate<F: FieldExt>(
             let mut enable_gates = Vec::new();
 
             let mut offset = 0;
-            let mut prod_val = Some(F::zero());
+            let mut prod_val = Value::known(F::zero());
             for j in 0..std::cmp::min(i + 1, k) {
                 enable_gates.push(offset);
 
                 let a_cell = &a.limbs[j];
                 let b_cell = &b.limbs[i - j];
-                prod_val = prod_val
-                    .zip(a_cell.value())
-                    .zip(b_cell.value())
-                    .map(|((sum, &a), &b)| sum + a * b);
+                prod_val = prod_val + a_cell.value().copied() * b_cell.value();
 
                 prod_computation.push(Existing(a_cell));
                 prod_computation.push(Existing(b_cell));

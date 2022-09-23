@@ -3,15 +3,14 @@ use std::collections::{HashMap, HashSet};
 
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*, poly::Rotation};
 use num_bigint::{BigInt, BigUint};
+use num_traits::pow;
 
 use crate::gates::{
     flex_gate::{FlexGateConfig, GateStrategy},
     GateInstructions,
     QuantumCell::{self, Constant, Existing, Witness},
 };
-use crate::utils::{
-    bigint_to_fe, biguint_to_fe, decompose_biguint_option, decompose_option, fe_to_biguint,
-};
+use crate::utils::{bigint_to_fe, biguint_to_fe, decompose_option, fe_to_biguint};
 
 use super::{Context, RangeInstructions};
 
@@ -167,7 +166,7 @@ impl<F: FieldExt> RangeConfig<F> {
                         || "lookup table",
                         self.lookup,
                         idx as usize,
-                        || Ok(F::from(idx as u64)),
+                        || Value::known(F::from(idx as u64)),
                     )?;
                 }
                 Ok(())
@@ -345,8 +344,7 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
         }
     }
 
-    // Warning: This may fail silently if a or b have more than num_bits
-    // | a + 2^(num_bits) - b | b | 1 | a + 2^(num_bits) | - 2^(num_bits) | 1 | a |
+    /// Warning: This may fail silently if a or b have more than num_bits
     fn check_less_than(
         &self,
         ctx: &mut Context<'_, F>,
@@ -354,28 +352,44 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
         b: &AssignedCell<F, F>,
         num_bits: usize,
     ) -> Result<(), Error> {
-        let cells = vec![
-            Witness(
-                Some(biguint_to_fe::<F>(&(BigUint::from(1u64) << num_bits)))
-                    .zip(a.value())
-                    .zip(b.value())
-                    .map(|((x, av), bv)| *av + x - *bv),
-            ),
-            Existing(&b),
-            Constant(F::from(1)),
-            Witness(
-                Some(biguint_to_fe::<F>(&(BigUint::from(1u64) << num_bits)))
-                    .zip(a.value())
-                    .map(|(x, av)| *av + x),
-            ),
-            Constant(bigint_to_fe::<F>(&(BigInt::from(-1i64) * (BigInt::from(1u64) << num_bits)))),
-            Constant(F::from(1)),
-            Existing(&a),
-        ];
-        let assigned_cells =
-            self.gate.assign_region_smart(ctx, cells, vec![0, 3], vec![], vec![])?;
+        let pow_of_two = biguint_to_fe::<F>(&(BigUint::from(1u64) << num_bits));
+        let check_cell = match self.strategy {
+            RangeStrategy::Vertical => {
+                // | a + 2^(num_bits) - b | b | 1 | a + 2^(num_bits) | - 2^(num_bits) | 1 | a |
+                let cells = vec![
+                    Witness(Value::known(pow_of_two) + a.value() - b.value()),
+                    Existing(&b),
+                    Constant(F::from(1)),
+                    Witness(Value::known(pow_of_two) + a.value()),
+                    Constant(-pow_of_two),
+                    Constant(F::from(1)),
+                    Existing(&a),
+                ];
+                let assigned_cells =
+                    self.gate.assign_region_smart(ctx, cells, vec![0, 3], vec![], vec![])?;
+                assigned_cells[0].clone()
+            }
+            RangeStrategy::PlonkPlus => {
+                // | a | 1 | b | a + 2^{num_bits} - b |
+                // selectors:
+                // | 1 | 0 | 0 |
+                // | 0 | 2^{num_bits} | -1 |
+                let (assigned_cells, _) = self.gate.assign_region(
+                    ctx,
+                    vec![
+                        Existing(&a),
+                        Constant(F::from(1)),
+                        Existing(&b),
+                        Witness(Value::known(pow_of_two) + a.value() - b.value()),
+                    ],
+                    vec![(0, Some([F::zero(), pow_of_two, -F::one()]))],
+                    None,
+                )?;
+                assigned_cells[3].clone()
+            }
+        };
 
-        self.range_check(ctx, &assigned_cells[0], num_bits)?;
+        self.range_check(ctx, &check_cell, num_bits)?;
         Ok(())
     }
 
@@ -386,6 +400,7 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
         b: &AssignedCell<F, F>,
         num_bits: usize,
     ) -> Result<AssignedCell<F, F>, Error> {
+        // TODO: optimize this for PlonkPlus strategy
         let k = (num_bits + self.lookup_bits - 1) / self.lookup_bits;
         let padded_bits = k * self.lookup_bits;
 
@@ -396,21 +411,14 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
         enable_lookups.push(8);
 
         let mut cells = Vec::with_capacity(9 + 3 * k + 8);
-        let shifted_val = Some(biguint_to_fe::<F>(&(BigUint::from(1u64) << padded_bits)))
-            .zip(a.value())
-            .zip(b.value())
-            .map(|((x, av), bv)| *av + x - *bv);
+        let pow_padded_val =
+            Value::known(biguint_to_fe::<F>(&(BigUint::from(1u64) << padded_bits)));
+        let shifted_val = pow_padded_val + a.value() - b.value();
         cells.push(Witness(shifted_val));
         cells.push(Existing(&b));
         cells.push(Constant(F::from(1)));
-        cells.push(Witness(
-            Some(biguint_to_fe::<F>(&(BigUint::from(1u64) << padded_bits)))
-                .zip(a.value())
-                .map(|(x, av)| *av + x),
-        ));
-        cells.push(Constant(bigint_to_fe::<F>(
-            &(BigInt::from(-1i64) * (BigInt::from(1u64) << padded_bits)),
-        )));
+        cells.push(Witness(pow_padded_val + a.value()));
+        cells.push(Constant(-biguint_to_fe::<F>(&(BigUint::from(1u64) << padded_bits))));
         cells.push(Constant(F::from(1)));
         cells.push(Existing(&a));
         cells.push(Witness(shifted_val));
@@ -437,14 +445,14 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
 
             offset = offset + 3;
             if idx == k {
-                let is_zero = limb.clone().zip(Some(F::from(1))).map(|(x, _y)| {
+                let is_zero = limb.clone().map(|x| {
                     if x == BigUint::from(0u64) {
                         F::from(1)
                     } else {
                         F::from(0)
                     }
                 });
-                let inv = limb.clone().zip(Some(F::from(1))).map(|(x, _y)| {
+                let inv = limb.clone().map(|x| {
                     if x == BigUint::from(0u64) {
                         F::from(1)
                     } else {
@@ -454,11 +462,11 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
 
                 enable_gates.push(offset);
                 cells.push(Witness(is_zero));
-                cells.push(Witness(limb.as_ref().map(|bi| biguint_to_fe(bi))));
+                cells.push(Witness(limb.clone().map(|bi| biguint_to_fe(&bi))));
                 cells.push(Witness(inv));
                 cells.push(Constant(F::from(1)));
                 cells.push(Constant(F::from(0)));
-                cells.push(Witness(limb.as_ref().map(|bi| biguint_to_fe(bi))));
+                cells.push(Witness(limb.map(|bi| biguint_to_fe(&bi))));
                 cells.push(Witness(is_zero));
                 cells.push(Constant(F::from(0)));
             }
@@ -533,7 +541,7 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
         range_bits: usize,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
         // TODO: improve this using PlonkPlus strategy?
-        let bits = decompose_biguint_option(&a.value().map(|x| *x), range_bits, 1usize);
+        let bits = decompose_option(&a.value().map(|x| *x), range_bits, 1usize);
         let bit_cells = {
             let mut enable_gates = Vec::new();
             let mut cells = Vec::with_capacity(3 * range_bits - 2);

@@ -1,10 +1,7 @@
 use ff::{Field, PrimeField};
 use halo2_proofs::{
-    arithmetic::{BaseExt, FieldExt},
-    pairing::{
-        bn256,
-        bn256::{G1Affine, G2Affine, BN_X, SIX_U_PLUS_2_NAF},
-    },
+    arithmetic::FieldExt,
+    halo2curves::bn256::{self, G1Affine, G2Affine, BN_X, SIX_U_PLUS_2_NAF},
     plonk::{Advice, Column, ConstraintSystem, Error, Fixed},
 };
 use halo2curves::bn254::{Fq, Fq2, FROBENIUS_COEFF_FQ12_C1};
