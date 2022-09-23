@@ -192,7 +192,7 @@ where
                 [rounded_bitlen - window_bits * (idx + 1)..rounded_bitlen - window_bits * idx]
                 .to_vec(),
         )?;
-        let sum = ecc_add_unequal(chip, ctx, &curr_point, &add_point)?;
+        let sum = ecc_add_unequal(chip, ctx, &curr_point, &add_point, false)?;
         let zero_sum = select(chip, ctx, &curr_point, &sum, &is_zero_window[idx])?;
         curr_point = select(chip, ctx, &zero_sum, &add_point, &is_started[window_bits * idx])?;
     }

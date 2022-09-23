@@ -32,7 +32,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        FlexGateConfig::configure(meta, GateStrategy::Vertical, NUM_ADVICE, 1)
+        FlexGateConfig::configure(meta, GateStrategy::PlonkPlus, NUM_ADVICE, 1)
     }
 
     fn synthesize(
@@ -142,14 +142,7 @@ impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        range::RangeConfig::configure(
-            meta,
-            range::RangeStrategy::CustomVerticalShort,
-            NUM_ADVICE,
-            1,
-            1,
-            3,
-        )
+        range::RangeConfig::configure(meta, range::RangeStrategy::PlonkPlus, NUM_ADVICE, 1, 1, 3)
     }
 
     fn synthesize(

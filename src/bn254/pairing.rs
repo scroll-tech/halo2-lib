@@ -288,7 +288,7 @@ pub fn miller_loop_BN<'a, F: FieldExt>(
         if pseudo_binary_encoding[i] != 0 {
             let sign_Q = if pseudo_binary_encoding[i] == 1 { &Q } else { &neg_Q };
             f = fp12_multiply_with_line_unequal(ecc_chip.field_chip, ctx, &f, (&R, sign_Q), P)?;
-            R = ecc_chip.add_unequal(ctx, &R, sign_Q)?;
+            R = ecc_chip.add_unequal(ctx, &R, sign_Q, false)?;
         }
         if i == 0 {
             break;
@@ -306,7 +306,7 @@ pub fn miller_loop_BN<'a, F: FieldExt>(
     let Q_1 = twisted_frobenius(ecc_chip, ctx, Q, &c2, &c3)?;
     let neg_Q_2 = neg_twisted_frobenius(ecc_chip, ctx, &Q_1, &c2, &c3)?;
     f = fp12_multiply_with_line_unequal(ecc_chip.field_chip, ctx, &f, (&R, &Q_1), P)?;
-    R = ecc_chip.add_unequal(ctx, &R, &Q_1)?;
+    R = ecc_chip.add_unequal(ctx, &R, &Q_1, false)?;
     f = fp12_multiply_with_line_unequal(ecc_chip.field_chip, ctx, &f, (&R, &neg_Q_2), P)?;
 
     Ok(f)

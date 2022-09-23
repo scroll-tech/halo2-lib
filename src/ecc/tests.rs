@@ -96,7 +96,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
 
                 // test add_unequal
                 {
-                    let sum = chip.add_unequal(ctx, &P_assigned, &Q_assigned)?;
+                    let sum = chip.add_unequal(ctx, &P_assigned, &Q_assigned, false)?;
                     assert_eq!(sum.x.truncation.to_bigint(), sum.x.value);
                     assert_eq!(sum.y.truncation.to_bigint(), sum.y.value);
                     if self.P != None {

@@ -68,6 +68,16 @@ pub trait FieldChip<F: FieldExt> {
         b: &Self::FieldPoint,
     ) -> Result<Self::FieldPoint, Error>;
 
+    /// output: `a + c`
+    fn add_native_constant_no_carry(
+        &self,
+        ctx: &mut Context<'_, F>,
+        a: &Self::FieldPoint,
+        c: F,
+    ) -> Result<Self::FieldPoint, Error> {
+        unimplemented!()
+    }
+
     fn sub_no_carry(
         &self,
         ctx: &mut Context<'_, F>,
@@ -141,8 +151,7 @@ pub trait FieldChip<F: FieldExt> {
         ctx: &mut Context<'_, F>,
         a: &Self::FieldPoint,
     ) -> Result<AssignedCell<F, F>, Error> {
-        let carry = self.carry_mod(ctx, a)?;
-        self.is_soft_zero(ctx, &carry)
+        todo!()
     }
 
     fn is_equal(
@@ -151,9 +160,7 @@ pub trait FieldChip<F: FieldExt> {
         a: &Self::FieldPoint,
         b: &Self::FieldPoint,
     ) -> Result<AssignedCell<F, F>, Error> {
-        let diff = self.sub_no_carry(ctx, a, b)?;
-        let carry_res = self.carry_mod(ctx, &diff)?;
-        self.is_soft_zero(ctx, &carry_res)
+        todo!()
     }
 
     fn mul(

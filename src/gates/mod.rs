@@ -9,6 +9,8 @@ use num_bigint::BigUint;
 
 use crate::utils::fe_to_biguint;
 
+use self::{flex_gate::GateStrategy, range::RangeStrategy};
+
 pub mod flex_gate;
 pub mod range;
 
@@ -56,6 +58,12 @@ pub struct Context<'a, F: FieldExt> {
 
     #[cfg(feature = "display")]
     pub op_count: HashMap<String, usize>,
+}
+
+impl<'a, F: FieldExt> std::fmt::Display for Context<'a, F> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#?}", self)
+    }
 }
 
 // a single struct to package any configuration parameters we will need for constructing a new `Context`
@@ -125,7 +133,7 @@ impl<'a, F: FieldExt> Context<'a, F> {
                 self.region.constrain_equal(c_cell.cell(), cell.clone())?;
             }
         }
-        Ok((offset + 1, assigned.len()))
+        Ok((offset, assigned.len()))
     }
 
     /// call this at the very end of synthesize!
@@ -149,16 +157,18 @@ impl<'a, F: FieldExt> Context<'a, F> {
                 offset += 1;
             }
         }
-        Ok(offset + 1)
+        Ok(offset)
     }
 }
 
 pub trait GateInstructions<F: FieldExt> {
+    fn strategy(&self) -> GateStrategy;
     fn assign_region(
         &self,
         ctx: &mut Context<'_, F>,
         inputs: Vec<QuantumCell<F>>,
-        gate_offsets: Vec<usize>,
+        gate_offsets: Vec<(isize, Option<[F; 3]>)>,
+        gate_index: Option<usize>,
     ) -> Result<(Vec<AssignedCell<F, F>>, usize), Error>;
 
     fn assign_region_smart(
@@ -199,12 +209,37 @@ pub trait GateInstructions<F: FieldExt> {
         b: &QuantumCell<F>,
     ) -> Result<AssignedCell<F, F>, Error>;
 
+    fn div_unsafe(
+        &self,
+        ctx: &mut Context<'_, F>,
+        a: &QuantumCell<F>,
+        b: &QuantumCell<F>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        let c = a.value().zip(b.value()).map(|(&a, b)| a * b.invert().unwrap());
+        let assignments = self.assign_region_smart(
+            ctx,
+            vec![QuantumCell::Constant(F::from(0)), QuantumCell::Witness(c), b.clone(), a.clone()],
+            vec![0],
+            vec![],
+            vec![],
+        )?;
+        Ok(assignments[1].clone())
+    }
+
     fn inner_product(
         &self,
         ctx: &mut Context<'_, F>,
         vec_a: &Vec<QuantumCell<F>>,
         vec_b: &Vec<QuantumCell<F>>,
-    ) -> Result<(Vec<AssignedCell<F, F>>, Vec<AssignedCell<F, F>>, AssignedCell<F, F>), Error>;
+    ) -> Result<
+        (
+            Option<Vec<(AssignedCell<F, F>, usize)>>,
+            Option<Vec<(AssignedCell<F, F>, usize)>>,
+            AssignedCell<F, F>,
+            usize,
+        ),
+        Error,
+    >;
 
     fn or(
         &self,
@@ -255,6 +290,7 @@ pub trait RangeInstructions<F: FieldExt> {
     type Gate: GateInstructions<F>;
 
     fn gate(&self) -> &Self::Gate;
+    fn strategy(&self) -> RangeStrategy;
 
     fn lookup_bits(&self) -> usize;
 

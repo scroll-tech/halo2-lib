@@ -65,7 +65,14 @@ pub fn ecc_add_unequal<F: FieldExt, FC: FieldChip<F>>(
     ctx: &mut Context<'_, F>,
     P: &EccPoint<F, FC::FieldPoint>,
     Q: &EccPoint<F, FC::FieldPoint>,
+    is_strict: bool,
 ) -> Result<EccPoint<F, FC::FieldPoint>, Error> {
+    if is_strict {
+        // constrains that P.x != Q.x
+        let x_is_equal = chip.is_equal(ctx, &P.x, &Q.x)?;
+        ctx.constants_to_assign.push((F::from(0), Some(x_is_equal.cell())));
+    }
+
     let dx = chip.sub_no_carry(ctx, &Q.x, &P.x)?;
     let dy = chip.sub_no_carry(ctx, &Q.y, &P.y)?;
     let lambda = chip.divide(ctx, &dy, &dx)?;
@@ -88,13 +95,24 @@ pub fn ecc_add_unequal<F: FieldExt, FC: FieldChip<F>>(
 // Implements:
 //  Given P = (x_1, y_1) and Q = (x_2, y_2), ecc points over the field F_p
 //  Find ecc subtraction P - Q = (x_3, y_3)
+//  -Q = (x_2, -y_2)
+//  lambda = -(y_2+y_1)/(x_2-x_1) using constraint
+//  x_3 = lambda^2 - x_1 - x_2 (mod p)
+//  y_3 = lambda (x_1 - x_3) - y_1 mod p
 //  Assumes that P !=Q and Q != (P - Q)
 pub fn ecc_sub_unequal<F: FieldExt, FC: FieldChip<F>>(
     chip: &FC,
     ctx: &mut Context<'_, F>,
     P: &EccPoint<F, FC::FieldPoint>,
     Q: &EccPoint<F, FC::FieldPoint>,
+    is_strict: bool,
 ) -> Result<EccPoint<F, FC::FieldPoint>, Error> {
+    if is_strict {
+        // constrains that P.x != Q.x
+        let x_is_equal = chip.is_equal(ctx, &P.x, &Q.x)?;
+        ctx.constants_to_assign.push((F::from(0), Some(x_is_equal.cell())));
+    }
+
     let dx = chip.sub_no_carry(ctx, &Q.x, &P.x)?;
     let dy = chip.add_no_carry(ctx, &Q.y, &P.y)?;
 
@@ -292,7 +310,7 @@ where
             let double = ecc_double(chip, ctx, P /*, b*/)?;
             cached_points.push(double.clone());
         } else {
-            let new_point = ecc_add_unequal(chip, ctx, &cached_points[idx - 1], &P)?;
+            let new_point = ecc_add_unequal(chip, ctx, &cached_points[idx - 1], &P, false)?;
             cached_points.push(new_point.clone());
         }
     }
@@ -318,7 +336,7 @@ where
                 [rounded_bitlen - window_bits * (idx + 1)..rounded_bitlen - window_bits * idx]
                 .to_vec(),
         )?;
-        let mult_and_add = ecc_add_unequal(chip, ctx, &mult_point, &add_point)?;
+        let mult_and_add = ecc_add_unequal(chip, ctx, &mult_point, &add_point, false)?;
         let is_started_point = select(chip, ctx, &mult_point, &mult_and_add, &is_zero_window[idx])?;
 
         curr_point =
@@ -327,7 +345,23 @@ where
     Ok(curr_point.clone())
 }
 
+pub fn is_on_curve<F: FieldExt, FC: FieldChip<F>>(
+    chip: &FC,
+    ctx: &mut Context<'_, F>,
+    P: &EccPoint<F, FC::FieldPoint>,
+    b: F,
+) -> Result<(), Error> {
+    let lhs = chip.mul_no_carry(ctx, &P.y, &P.y)?;
+    let mut rhs = chip.mul(ctx, &P.x, &P.x)?;
+    rhs = chip.mul_no_carry(ctx, &rhs, &P.x)?;
+    rhs = chip.add_native_constant_no_carry(ctx, &rhs, b)?;
+    let diff = chip.sub_no_carry(ctx, &lhs, &rhs)?;
+    chip.check_carry_mod_to_zero(ctx, &diff)
+}
+
 // need to supply an extra generic `GA` implementing `CurveAffine` trait in order to generate random witness points on the curve in question
+// Using Simultaneous 2^w-Ary Method, see https://www.bmoeller.de/pdf/multiexp-sac2001.pdf
+// Random Accumlation point trick learned from halo2wrong: https://hackmd.io/ncuKqRXzR-Cw-Au2fGzsMg?view
 // Input:
 // - `scalars` is vector of same length as `P`
 // - each `scalar` in `scalars` satisfies same assumptions as in `scalar_multiply` above
@@ -388,6 +422,9 @@ where
         }
         is_zero_window_vec.push(is_zero_window);
     }
+
+    // load random GA point as witness
+    // note that while we load a random point, an adversary would load a specifically chosen point, so we must carefully handle edge cases with constraints
     let mut rng = rand::thread_rng();
     let base_point: GA = GA::CurveExt::random(&mut rng).to_affine();
     let base_point_coord = base_point.coordinates().unwrap();
@@ -398,6 +435,8 @@ where
         let y_overflow = chip.load_private(ctx, pt_y)?;
         EccPoint::construct(x_overflow, y_overflow)
     };
+    // for above reason we still need to constrain that the witness is on the curve
+    is_on_curve(chip, ctx, &base, b)?;
 
     // contains random base points [A, ..., 2^{w + k - 1} * A]
     let mut rand_start_vec = Vec::with_capacity(k);
@@ -410,9 +449,22 @@ where
     // contains (1 - 2^w) * [A, ..., 2^(k - 1) * A]
     let mut neg_mult_rand_start_vec = Vec::with_capacity(k);
     for idx in 0..k {
-        let diff =
-            ecc_sub_unequal(chip, ctx, &rand_start_vec[idx], &rand_start_vec[idx + window_bits])?;
+        let diff = ecc_sub_unequal(
+            chip,
+            ctx,
+            &rand_start_vec[idx],
+            &rand_start_vec[idx + window_bits],
+            false,
+        )?;
         neg_mult_rand_start_vec.push(diff.clone());
+    }
+
+    // add selector for whether P_i is the point at infinity (aka 0 in elliptic curve group)
+    // this can be checked by P_i.y == 0 iff P_i == O
+    let mut is_infinity = Vec::with_capacity(k);
+    for i in 0..k {
+        let is_zero = chip.is_zero(ctx, &P[i].y)?;
+        is_infinity.push(is_zero);
     }
 
     let cache_size = 1usize << window_bits;
@@ -421,14 +473,22 @@ where
         let mut cached_points = Vec::with_capacity(cache_size);
         cached_points.push(neg_mult_rand_start_vec[idx].clone());
         for cache_idx in 0..(cache_size - 1) {
-            let new_point = ecc_add_unequal(chip, ctx, &cached_points[cache_idx], &P[idx])?;
-            cached_points.push(new_point.clone());
+            // adversary could pick `A` so add equal case occurs, so we must use strict add_unequal
+            let mut new_point =
+                ecc_add_unequal(chip, ctx, &cached_points[cache_idx], &P[idx], true)?;
+            // special case for when P[idx] = O
+            new_point =
+                select(chip, ctx, &cached_points[cache_idx], &new_point, &is_infinity[idx])?;
+            cached_points.push(new_point);
         }
         cached_points_vec.push(cached_points);
     }
 
     // initialize at (2^{k + 1} - 1) * A
-    let start_point = ecc_sub_unequal(chip, ctx, &rand_start_vec[k], &rand_start_vec[0])?;
+    // note k can be large (e.g., 800) so 2^{k+1} may be larger than the order of A
+    // random fact: 2^{k + 1} - 1 can be prime: see Mersenne primes
+    // TODO: I don't see a way to rule out 2^{k+1} A = +-A case in general, so will use strict sub_unequal
+    let start_point = ecc_sub_unequal(chip, ctx, &rand_start_vec[k], &rand_start_vec[0], true)?;
     let mut curr_point = start_point.clone();
 
     // compute \sum_i x_i P_i + (2^{k + 1} - 1) * A
@@ -445,10 +505,11 @@ where
                     [rounded_bitlen - window_bits * (idx + 1)..rounded_bitlen - window_bits * idx]
                     .to_vec(),
             )?;
-            curr_point = ecc_add_unequal(chip, ctx, &curr_point, &add_point)?;
+            // this all needs strict add_unequal since A can be non-randomly chosen by adversary
+            curr_point = ecc_add_unequal(chip, ctx, &curr_point, &add_point, true)?;
         }
     }
-    curr_point = ecc_sub_unequal(chip, ctx, &curr_point, &start_point)?;
+    curr_point = ecc_sub_unequal(chip, ctx, &curr_point, &start_point, true)?;
 
     Ok(curr_point.clone())
 }
@@ -520,7 +581,7 @@ where
     // compute (x1, y1) = u1 * G + u2 * pubkey and check (r mod n) == x1 as integers
     // WARNING: For optimization reasons, does not reduce x1 mod n, which is
     //          invalid unless p is very close to n in size.
-    let sum = ecc_add_unequal(base_chip, ctx, &u1_mul, &u2_mul)?;
+    let sum = ecc_add_unequal(base_chip, ctx, &u1_mul, &u2_mul, false)?;
     let equal_check = base_chip.is_equal(ctx, &sum.x, &r_crt)?;
 
     // TODO: maybe the big_less_than is optional?
@@ -570,13 +631,28 @@ impl<'a, F: FieldExt, FC: FieldChip<F>> EccChip<'a, F, FC> {
         ))
     }
 
+    /// Assumes that P.x != Q.x
+    /// If `is_strict == true`, then actually constrains that `P.x != Q.x`
     pub fn add_unequal(
         &self,
         ctx: &mut Context<'_, F>,
         P: &EccPoint<F, FC::FieldPoint>,
         Q: &EccPoint<F, FC::FieldPoint>,
+        is_strict: bool,
     ) -> Result<EccPoint<F, FC::FieldPoint>, Error> {
-        ecc_add_unequal(self.field_chip, ctx, P, Q)
+        ecc_add_unequal(self.field_chip, ctx, P, Q, is_strict)
+    }
+
+    /// Assumes that P.x != Q.x
+    /// Otherwise will panic
+    pub fn sub_unequal(
+        &self,
+        ctx: &mut Context<'_, F>,
+        P: &EccPoint<F, FC::FieldPoint>,
+        Q: &EccPoint<F, FC::FieldPoint>,
+        is_strict: bool,
+    ) -> Result<EccPoint<F, FC::FieldPoint>, Error> {
+        ecc_sub_unequal(self.field_chip, ctx, P, Q, is_strict)
     }
 
     pub fn double(
@@ -585,6 +661,29 @@ impl<'a, F: FieldExt, FC: FieldChip<F>> EccChip<'a, F, FC> {
         P: &EccPoint<F, FC::FieldPoint>,
     ) -> Result<EccPoint<F, FC::FieldPoint>, Error> {
         ecc_double(self.field_chip, ctx, P)
+    }
+
+    pub fn is_equal(
+        &self,
+        ctx: &mut Context<'_, F>,
+        P: &EccPoint<F, FC::FieldPoint>,
+        Q: &EccPoint<F, FC::FieldPoint>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        // TODO: optimize
+        let x_is_equal = self.field_chip.is_equal(ctx, &P.x, &Q.x)?;
+        let y_is_equal = self.field_chip.is_equal(ctx, &P.y, &Q.y)?;
+        self.field_chip.range().gate().and(ctx, &Existing(&x_is_equal), &Existing(&y_is_equal))
+    }
+
+    pub fn assert_equal(
+        &self,
+        ctx: &mut Context<'_, F>,
+        P: &EccPoint<F, FC::FieldPoint>,
+        Q: &EccPoint<F, FC::FieldPoint>,
+    ) -> Result<(), Error> {
+        let is_equal = self.is_equal(ctx, P, Q)?;
+        ctx.constants_to_assign.push((F::from(1), Some(is_equal.cell())));
+        Ok(())
     }
 }
 

@@ -1,6 +1,2 @@
 degree,num_advice,num_lookup,num_fixed,lookup_bits,limb_bits,num_limbs,batch_size,window_bits,vk_size,proof_time,proof_size,verify_time
-17,93,12,1,16,88,3,100,4,6432,Instant { t: 1689418476819 },32128,Instant { t: 1691148221840 }
-18,47,6,1,17,88,3,100,4,3296,Instant { t: 1692585349549 },16384,Instant { t: 1694394362239 }
-19,23,3,1,18,90,3,100,4,1664,Instant { t: 1695950983022 },8288,Instant { t: 1697815773363 }
-20,12,2,1,18,90,3,100,4,928,Instant { t: 1699687891596 },4704,Instant { t: 1702011363121 }
-21,6,1,1,20,88,3,100,4,512,Instant { t: 1704243819604 },2496,Instant { t: 1706938844620 }
+17,114,15,1,16,88,3,100,4,11520,104.475823333s,50368,27.565666ms

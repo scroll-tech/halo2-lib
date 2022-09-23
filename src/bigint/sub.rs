@@ -9,6 +9,7 @@ use crate::gates::{
 };
 use crate::utils::bigint_to_fe;
 
+/// Should only be called on integers a, b in proper representation with all limbs having at most `a.limb_bits` number of bits
 pub fn assign<F: FieldExt>(
     range: &impl RangeInstructions<F>,
     ctx: &mut Context<'_, F>,
