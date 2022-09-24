@@ -388,98 +388,43 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
     ) -> Result<AssignedCell<F, F>, Error> {
         let k = (num_bits + self.lookup_bits - 1) / self.lookup_bits;
         let padded_bits = k * self.lookup_bits;
+        let pow_padded = biguint_to_fe::<F>(&(BigUint::from(1u64) << padded_bits));
 
-        let mut enable_lookups = Vec::new();
-        let mut enable_gates = Vec::new();
-        enable_gates.push(0);
-        enable_gates.push(3);
-        enable_lookups.push(8);
-
-        let mut cells = Vec::with_capacity(9 + 3 * k + 8);
-        let shifted_val = Some(biguint_to_fe::<F>(&(BigUint::from(1u64) << padded_bits)))
-            .zip(a.value())
-            .zip(b.value())
-            .map(|((x, av), bv)| *av + x - *bv);
-        cells.push(Witness(shifted_val));
-        cells.push(Existing(&b));
-        cells.push(Constant(F::from(1)));
-        cells.push(Witness(
-            Some(biguint_to_fe::<F>(&(BigUint::from(1u64) << padded_bits)))
-                .zip(a.value())
-                .map(|(x, av)| *av + x),
-        ));
-        cells.push(Constant(bigint_to_fe::<F>(
-            &(BigInt::from(-1i64) * (BigInt::from(1u64) << padded_bits)),
-        )));
-        cells.push(Constant(F::from(1)));
-        cells.push(Existing(&a));
-        cells.push(Witness(shifted_val));
-
-        let mut shift_val = shifted_val.as_ref().map(|fe| fe_to_biguint(fe));
-        let mask = BigUint::from(1u64 << self.lookup_bits);
-        let mut limb = shift_val.as_ref().map(|x| x.modpow(&BigUint::from(1u64), &mask));
-        cells.push(Witness(limb.as_ref().map(|x| biguint_to_fe(x))));
-
-        let mut offset = 9;
-        let mut running_sum = limb;
-        for idx in 1..(k + 1) {
-            shift_val = shift_val.map(|x| x >> self.lookup_bits);
-            limb = shift_val.as_ref().map(|x| x.modpow(&BigUint::from(1u64), &mask));
-            running_sum = running_sum
-                .zip(limb.as_ref())
-                .map(|(sum, x)| sum + (x << (idx * self.lookup_bits)));
-            let running_pow = biguint_to_fe(&(BigUint::from(1u64) << (idx * self.lookup_bits)));
-            cells.push(Constant(running_pow));
-            cells.push(Witness(limb.as_ref().map(|x| biguint_to_fe(x))));
-            cells.push(Witness(running_sum.as_ref().map(|sum| biguint_to_fe(sum))));
-            enable_gates.push(offset - 1);
-            enable_lookups.push(offset + 1);
-
-            offset = offset + 3;
-            if idx == k {
-                let is_zero = limb.clone().zip(Some(F::from(1))).map(|(x, _y)| {
-                    if x == BigUint::from(0u64) {
-                        F::from(1)
-                    } else {
-                        F::from(0)
-                    }
-                });
-                let inv = limb.clone().zip(Some(F::from(1))).map(|(x, _y)| {
-                    if x == BigUint::from(0u64) {
-                        F::from(1)
-                    } else {
-                        biguint_to_fe::<F>(&x).invert().unwrap()
-                    }
-                });
-
-                enable_gates.push(offset);
-                cells.push(Witness(is_zero));
-                cells.push(Witness(limb.as_ref().map(|bi| biguint_to_fe(bi))));
-                cells.push(Witness(inv));
-                cells.push(Constant(F::from(1)));
-                cells.push(Constant(F::from(0)));
-                cells.push(Witness(limb.as_ref().map(|bi| biguint_to_fe(bi))));
-                cells.push(Witness(is_zero));
-                cells.push(Constant(F::from(0)));
+        let shifted_val = a.value().zip(b.value()).map(|(&av, &bv)| av + pow_padded - bv);
+        let shifted_cell = match self.strategy {
+            RangeStrategy::Vertical => {
+                let assignments = self.gate.assign_region_smart(
+                    ctx,
+                    vec![
+                        Witness(shifted_val),
+                        Existing(&b),
+                        Constant(F::one()),
+                        Witness(a.value().map(|&av| av + pow_padded)),
+                        Constant(-pow_padded),
+                        Constant(F::one()),
+                        Existing(&a),
+                    ],
+                    vec![0, 3],
+                    vec![],
+                    vec![],
+                )?;
+                assignments[0].clone()
             }
-        }
-        let mut eq_list = vec![];
-        eq_list.push((0, 7));
-        // check limb equalities for idx = k
-        eq_list.push((9 + 3 * k - 2, 9 + 3 * k + 1));
-        eq_list.push((9 + 3 * k - 2, 9 + 3 * k + 5));
-        // check is_zero equalities
-        eq_list.push((9 + 3 * k, 9 + 3 * k + 6));
+            RangeStrategy::PlonkPlus => {
+                let (assignments, _) = self.gate.assign_region(
+                    ctx,
+                    vec![Existing(&a), Constant(pow_padded), Existing(&b), Witness(shifted_val)],
+                    vec![(0, Some([F::zero(), F::one(), -F::one()]))],
+                    None,
+                )?;
+                assignments.last().unwrap().clone()
+            }
+        };
 
-        // In the case there is only 1 advice column, we need to figure out what the starting offset in the column was before this function call
-        let offset_shift = if self.gate.basic_gates.len() == 1 { ctx.advice_rows[0] } else { 0 };
-
-        let assigned_cells =
-            self.gate.assign_region_smart(ctx, cells, enable_gates, eq_list, vec![])?;
-        for row in enable_lookups {
-            self.enable_lookup(ctx, assigned_cells[row].clone(), offset_shift + row)?;
-        }
-        Ok(assigned_cells[9 + 3 * k].clone())
+        // check whether a - b + 2^padded_bits < 2^padded_bits ?
+        // since assuming a, b < 2^padded_bits we are guaranteed a - b + 2^padded_bits < 2^{padded_bits + 1}
+        let limbs = self.range_check(ctx, &shifted_cell, padded_bits + self.lookup_bits)?;
+        self.is_zero(ctx, &limbs[k])
     }
 
     // | out | a | inv | 1 | 0 | a | out | 0
@@ -532,50 +477,61 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
         a: &AssignedCell<F, F>,
         range_bits: usize,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
-        // TODO: improve this using PlonkPlus strategy?
         let bits = decompose_biguint_option(&a.value().map(|x| *x), range_bits, 1usize);
-        let bit_cells = {
-            let mut enable_gates = Vec::new();
-            let mut cells = Vec::with_capacity(3 * range_bits - 2);
-            let mut running_sum = bits[0];
-            let mut running_pow = F::from(1u64);
-            cells.push(Witness(bits[0]));
-            let mut offset = 1;
-            for idx in 1..range_bits {
-                running_pow = running_pow * F::from(2u64);
-                running_sum = running_sum.zip(bits[idx]).map(|(x, b)| x + b * running_pow);
-                cells.push(Constant(running_pow));
-                cells.push(Witness(bits[idx]));
-                cells.push(Witness(running_sum));
+        let bit_cells = match self.strategy {
+            RangeStrategy::Vertical => {
+                let mut enable_gates = Vec::new();
+                let mut cells = Vec::with_capacity(3 * range_bits - 2);
+                let mut running_sum = bits[0];
+                let mut running_pow = F::from(1u64);
+                cells.push(Witness(bits[0]));
+                let mut offset = 1;
+                for idx in 1..range_bits {
+                    running_pow = running_pow * F::from(2u64);
+                    running_sum = running_sum.zip(bits[idx]).map(|(x, b)| x + b * running_pow);
+                    cells.push(Constant(running_pow));
+                    cells.push(Witness(bits[idx]));
+                    cells.push(Witness(running_sum));
 
-                enable_gates.push(offset - 1);
-                offset = offset + 3;
-            }
-            let last_idx = cells.len() - 1;
-            let assigned_cells = self.gate.assign_region_smart(
-                ctx,
-                cells,
-                enable_gates,
-                vec![],
-                vec![(a, last_idx)],
-            )?;
+                    enable_gates.push(offset - 1);
+                    offset = offset + 3;
+                }
+                let last_idx = cells.len() - 1;
+                let assigned_cells = self.gate.assign_region_smart(
+                    ctx,
+                    cells,
+                    enable_gates,
+                    vec![],
+                    vec![(a, last_idx)],
+                )?;
 
-            let mut assigned_bits = Vec::with_capacity(range_bits);
-            assigned_bits.push(assigned_cells[0].clone());
-            for idx in 1..range_bits {
-                assigned_bits.push(assigned_cells[3 * idx - 1].clone());
+                let mut assigned_bits = Vec::with_capacity(range_bits);
+                assigned_bits.push(assigned_cells[0].clone());
+                for idx in 1..range_bits {
+                    assigned_bits.push(assigned_cells[3 * idx - 1].clone());
+                }
+                assigned_bits
             }
-            assigned_bits
+            RangeStrategy::PlonkPlus => {
+                let (bit_cells, _, acc, _) = self.gate.inner_product(
+                    ctx,
+                    &bits.iter().map(|x| Witness(*x)).collect(),
+                    &(0..range_bits)
+                        .map(|i| Constant(biguint_to_fe(&(BigUint::from(1u64) << i))))
+                        .collect(),
+                )?;
+                ctx.region.constrain_equal(a.cell(), acc.cell())?;
+                bit_cells.unwrap().into_iter().map(|(x, _)| x).collect()
+            }
         };
-
-        for idx in 0..range_bits {
+        for bit_cell in &bit_cells {
             self.gate.assign_region_smart(
                 ctx,
                 vec![
                     Constant(F::from(0)),
-                    Existing(&bit_cells[idx]),
-                    Existing(&bit_cells[idx]),
-                    Existing(&bit_cells[idx]),
+                    Existing(&bit_cell),
+                    Existing(&bit_cell),
+                    Existing(&bit_cell),
                 ],
                 vec![0],
                 vec![],

@@ -1,2 +1,2 @@
 degree,num_advice,num_lookup,num_fixed,lookup_bits,limb_bits,num_limbs,batch_size,window_bits,vk_size,proof_time,proof_size,verify_time
-17,114,15,1,16,88,3,100,4,11520,104.475823333s,50368,27.565666ms
+17,103,12,1,16,88,3,100,4,7072,82.665767791s,35008,24.768083ms
