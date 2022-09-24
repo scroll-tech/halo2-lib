@@ -50,7 +50,7 @@ where
         let mut g = point.clone();
         new_points.push(g);
         for j in 1..radix {
-            g = ecc_double(chip, ctx, &new_points[j - 1])?;
+            g = ecc_double(chip, ctx, &new_points.last().unwrap())?;
             new_points.push(g);
         }
         let mut bits = Vec::with_capacity(scalar_bits);
@@ -161,22 +161,20 @@ pub fn multi_exp<F: FieldExt, FC, GA>(
     scalars: &Vec<Vec<AssignedCell<F, F>>>,
     curve_b: F,
     max_scalar_bits_per_cell: usize,
+    radix: usize,
+    clump_factor: usize,
 ) -> Result<EccPoint<F, FC::FieldPoint>, Error>
 where
     FC: FieldChip<F> + Selectable<F, Point = FC::FieldPoint>,
     GA: CurveAffine<Base = FC::FieldType>,
 {
-    let radix = (f64::from((max_scalar_bits_per_cell * scalars[0].len()) as u32)
-        / f64::from(points.len() as u32))
-    .sqrt()
-    .ceil() as usize;
     println!("radix: {}", radix);
 
     let (points, bool_scalars) =
         decompose(chip, ctx, points, scalars, max_scalar_bits_per_cell, radix)?;
     let t = bool_scalars.len();
 
-    let c = {
+    /*let c = {
         let m = points.len();
         let cost = |b: usize| -> usize { (m + b - 1) / b * ((1 << b) + t) };
         let c_max: usize = f64::from(points.len() as u32).log2().ceil() as usize;
@@ -187,7 +185,8 @@ where
             }
         }
         c_best
-    };
+    };*/
+    let c = clump_factor;
     println!("clumping factor: {}", c);
 
     let (mut agg, rand_point) =

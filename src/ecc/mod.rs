@@ -759,7 +759,7 @@ where
     where
         GA: CurveAffine<Base = FC::FieldType>,
     {
-        multi_scalar_multiply::<F, FC, GA>(
+        /*multi_scalar_multiply::<F, FC, GA>(
             self.field_chip,
             ctx,
             P,
@@ -767,8 +767,24 @@ where
             b,
             max_bits,
             window_bits,
+        )*/
+        let mut radix = (f64::from((max_bits * scalars[0].len()) as u32)
+            / f64::from(P.len() as u32))
+        .sqrt()
+        .floor() as usize;
+        if radix == 0 {
+            radix = 1;
+        }
+        pippenger::multi_exp::<F, FC, GA>(
+            self.field_chip,
+            ctx,
+            P,
+            scalars,
+            b,
+            max_bits,
+            radix,
+            window_bits,
         )
-        //pippenger::multi_exp::<F, FC, GA>(self.field_chip, ctx, P, scalars, b, max_bits)
     }
 }
 
