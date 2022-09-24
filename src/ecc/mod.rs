@@ -11,7 +11,6 @@ use halo2_proofs::{
 };
 use num_bigint::{BigInt, BigUint};
 use num_traits::{Num, One, Zero};
-use rand_core::OsRng;
 
 use crate::bigint::{
     add_no_carry, big_less_than, inner_product, mul_no_carry, scalar_mul_no_carry, select,
@@ -29,6 +28,7 @@ use crate::utils::{
 };
 
 pub mod fixed;
+pub mod pippenger;
 use fixed::{fixed_base_scalar_multiply, FixedEccPoint};
 
 // EccPoint and EccChip take in a generic `FieldChip` to implement generic elliptic curve operations on arbitrary field extensions (provided chip exists) for short Weierstrass curves (currently further assuming a4 = 0 for optimization purposes)
@@ -597,6 +597,50 @@ where
     Ok(res5)
 }
 
+pub fn get_naf(mut exp: Vec<u64>) -> Vec<i8> {
+    // https://en.wikipedia.org/wiki/Non-adjacent_form
+    // NAF for exp:
+    let mut naf: Vec<i8> = Vec::with_capacity(64 * exp.len());
+    let len = exp.len();
+
+    // generate the NAF for exp
+    for idx in 0..len {
+        let mut e: u64 = exp[idx];
+        for i in 0..64 {
+            if e & 1 == 1 {
+                let z = 2i8 - (e % 4) as i8;
+                e = e / 2;
+                if z == -1 {
+                    e += 1;
+                }
+                naf.push(z);
+            } else {
+                naf.push(0);
+                e = e / 2;
+            }
+        }
+        if e != 0 {
+            assert_eq!(e, 1);
+            let mut j = idx + 1;
+            while j < exp.len() && exp[j] == u64::MAX {
+                exp[j] = 0;
+                j += 1;
+            }
+            if j < exp.len() {
+                exp[j] += 1;
+            } else {
+                exp.push(1);
+            }
+        }
+    }
+    if exp.len() != len {
+        assert_eq!(len, exp.len() + 1);
+        assert!(exp[len] == 1);
+        naf.push(1);
+    }
+    naf
+}
+
 pub struct EccChip<'a, F: FieldExt, FC: FieldChip<F>> {
     pub field_chip: &'a FC,
     _marker: PhantomData<F>,
@@ -724,6 +768,7 @@ where
             max_bits,
             window_bits,
         )
+        //pippenger::multi_exp::<F, FC, GA>(self.field_chip, ctx, P, scalars, b, max_bits)
     }
 }
 

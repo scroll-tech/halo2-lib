@@ -531,8 +531,6 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
     }
 
     /// assumes sel is boolean
-    // | a - b | 1 | b | a |
-    // | b | sel | a - b | out |
     /// returns
     ///   a * sel + b * (1 - sel)
     fn select(
@@ -542,24 +540,53 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         b: &QuantumCell<F>,
         sel: &QuantumCell<F>,
     ) -> Result<AssignedCell<F, F>, Error> {
-        let cells = vec![
-            QuantumCell::Witness(a.value().zip(b.value()).map(|(av, bv)| (*av) - (*bv))),
-            QuantumCell::Constant(F::from(1)),
-            b.clone(),
-            a.clone(),
-            b.clone(),
-            sel.clone(),
-            QuantumCell::Witness(a.value().zip(b.value()).map(|(av, bv)| (*av) - (*bv))),
-            QuantumCell::Witness(
-                a.value()
-                    .zip(b.value())
-                    .zip(sel.value())
-                    .map(|((av, bv), sv)| (*av) * (*sv) + (*bv) * (F::from(1) - *sv)),
-            ),
-        ];
-        let assigned_cells =
-            self.assign_region_smart(ctx, cells, vec![0, 4], vec![(0, 6)], vec![])?;
-        Ok(assigned_cells.last().unwrap().clone())
+        let diff_val = a.value().zip(b.value()).map(|(av, bv)| (*av) - (*bv));
+        let out_val = a
+            .value()
+            .zip(b.value())
+            .zip(sel.value())
+            .map(|((av, bv), sv)| (*av) * (*sv) + (*bv) * (F::from(1) - *sv));
+        match self.strategy {
+            // | a - b | 1 | b | a |
+            // | b | sel | a - b | out |
+            GateStrategy::Vertical => {
+                let cells = vec![
+                    QuantumCell::Witness(diff_val),
+                    QuantumCell::Constant(F::from(1)),
+                    b.clone(),
+                    a.clone(),
+                    b.clone(),
+                    sel.clone(),
+                    QuantumCell::Witness(diff_val),
+                    QuantumCell::Witness(out_val),
+                ];
+                let assigned_cells =
+                    self.assign_region_smart(ctx, cells, vec![0, 4], vec![(0, 6)], vec![])?;
+                Ok(assigned_cells.last().unwrap().clone())
+            }
+            // | 0 | a | a - b | b | sel | a - b | out |
+            // selectors
+            // | 1 | 0 | 0     | 1 | 0   | 0
+            // | 0 | 1 | -1    | 1 | 0   | 0
+            GateStrategy::PlonkPlus => {
+                let (assignments, _) = self.assign_region(
+                    ctx,
+                    vec![
+                        Constant(F::from(0)),
+                        a.clone(),
+                        Witness(diff_val),
+                        b.clone(),
+                        sel.clone(),
+                        Witness(diff_val),
+                        Witness(out_val),
+                    ],
+                    vec![(0, Some([F::zero(), F::one(), -F::one()])), (3, None)],
+                    None,
+                )?;
+                ctx.region.constrain_equal(assignments[2].cell(), assignments[5].cell())?;
+                Ok(assignments.last().unwrap().clone())
+            }
+        }
     }
 
     /// returns: a || (b && c)

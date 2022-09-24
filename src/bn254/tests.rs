@@ -272,8 +272,8 @@ impl<F: FieldExt> Default for MSMCircuit<F> {
     }
 }
 
-impl<F: FieldExt> Circuit<F> for MSMCircuit<F> {
-    type Config = MSMConfig<F>;
+impl Circuit<Fr> for MSMCircuit<Fr> {
+    type Config = MSMConfig<Fr>;
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
@@ -285,7 +285,7 @@ impl<F: FieldExt> Circuit<F> for MSMCircuit<F> {
         }
     }
 
-    fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+    fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
         let mut folder = std::path::PathBuf::new();
         folder.push("./src/bn254");
         folder.push("configs/msm_circuit.config");
@@ -311,7 +311,7 @@ impl<F: FieldExt> Circuit<F> for MSMCircuit<F> {
     fn synthesize(
         &self,
         config: Self::Config,
-        mut layouter: impl Layouter<F>,
+        mut layouter: impl Layouter<Fr>,
     ) -> Result<(), Error> {
         assert_eq!(config.batch_size, self.scalars.len());
         assert_eq!(config.batch_size, self.bases.len());
@@ -340,19 +340,14 @@ impl<F: FieldExt> Circuit<F> for MSMCircuit<F> {
 
                 let mut scalars_assigned = Vec::new();
                 for scalar in &self.scalars {
-                    let decomposed = decompose_bigint_option(
-                        &scalar.map(|x| fe_to_biguint(&x).to_bigint().unwrap()),
-                        config.fp_chip.num_limbs,
-                        config.fp_chip.limb_bits,
-                    );
-                            let limbs = config.fp_chip.range.gate.assign_region_smart(
+                    let assignment = config.fp_chip.range.gate.assign_region_smart(
                                 ctx,
-                                decomposed.iter().map(|x| Witness(x.clone())).collect(),
+                                vec![Witness(scalar.clone())],
                                 vec![],
                                 vec![],
                                 vec![],
                             )?;
-                    scalars_assigned.push(limbs);
+                    scalars_assigned.push(vec![assignment.last().unwrap().clone()]);
                 }
 
                 let ecc_chip = EccChip::construct(&config.fp_chip);
@@ -372,8 +367,8 @@ impl<F: FieldExt> Circuit<F> for MSMCircuit<F> {
                     ctx,
                     &bases_assigned,
                     &scalars_assigned,
-                    F::from(3),
-                    config.fp_chip.limb_bits,
+                    Fr::from(3),
+                    254,
                     config.window_bits,
                 )?;
 
