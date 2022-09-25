@@ -812,4 +812,4 @@ where
 }
 
 #[cfg(test)]
-pub mod tests;
+pub(crate) mod tests;

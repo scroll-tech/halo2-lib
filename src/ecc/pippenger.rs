@@ -96,6 +96,7 @@ where
     // to avoid adding two points that are equal or negative of each other,
     // we use a trick from halo2wrong where we load a random GA point as witness
     // note that while we load a random point, an adversary could load a specifically chosen point, so we must carefully handle edge cases with constraints
+    // TODO: an alternate approach is to use Fiat-Shamir transform (with Poseidon) to hash all the inputs (points, bool_scalars, ...) to get the random point. This could be worth it for large MSMs as we get savings from `add_unequal` in "non-strict" mode. Perhaps not worth the trouble / security concern, though.
     let mut rng = rand::thread_rng();
     let rand_base = {
         let base_point: GA = GA::CurveExt::random(&mut rng).to_affine();
