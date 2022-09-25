@@ -88,7 +88,7 @@ impl<F: FieldExt> BasicGateConfig<F> {
         assert_eq!(self.q_enable.len(), 2);
         meta.create_gate("plonk plus", |meta| {
             // q_io * (a + q_left * b + q_right * c + q_mul * b * c - d)
-            // the gate is turned "off" as long as q_in = q_out = 0
+            // the gate is turned "off" as long as q_io = 0
             let q_io = meta.query_fixed(self.q_enable[0], Rotation::cur());
 
             let q_mul = meta.query_fixed(self.q_enable[1], Rotation::cur());
@@ -392,7 +392,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
 
             // Say a = [a0, .., a4] for example
             // Then to compute <a, b> we use transpose of
-            // | 0  | a0 | a1 | x | a2 | a3 | y | a4 | 0 | <a,c> |
+            // | 0  | a0 | a1 | x | a2 | a3 | y | a4 | 0 | <a,b> |
             // while letting q_enable equal transpose of
             // | *  |    |    | * |    |    | * |    |   |       |
             // | 0  | b0 | b1 | 0 | b2 | b3 | 0 | b4 | 0 |
@@ -462,18 +462,26 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         }
 
         let mut cells: Vec<QuantumCell<F>> = Vec::with_capacity(3 * vec_a.len() + 1);
-        cells.push(QuantumCell::Constant(F::from(0)));
-
+        let mut start_id = 0;
         let mut sum = Value::known(F::zero());
-        for (a, b) in vec_a.iter().zip(vec_b.iter()) {
-            sum = sum + a.value().copied() * b.value();
+        cells.push(Constant(F::from(0)));
+        if let Constant(c) = vec_b[0] {
+            if c == F::one() {
+                cells[0] = vec_a[0].clone();
+                sum = vec_a[0].value().copied();
+                start_id = 1;
+            }
+        }
+
+        for (a, b) in vec_a[start_id..].iter().zip(vec_b[start_id..].iter()) {
+            sum = sum.zip(a.value()).zip(b.value()).map(|((sum, &a), &b)| sum + a * b);
 
             cells.push(a.clone());
             cells.push(b.clone());
-            cells.push(QuantumCell::Witness(sum));
+            cells.push(Witness(sum));
         }
         let mut gate_offsets = Vec::with_capacity(vec_a.len());
-        for i in 0..vec_a.len() {
+        for i in 0..(vec_a.len() - start_id) {
             gate_offsets.push(3 * i);
         }
         let (assigned_cells, gate_index) = self.assign_region(
@@ -484,12 +492,16 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         )?;
         let mut a_assigned = Vec::with_capacity(vec_a.len());
         let mut b_assigned = Vec::with_capacity(vec_a.len());
-        for i in 0..vec_a.len() {
+        if start_id == 1 {
+            a_assigned.push((assigned_cells[0].clone(), 0));
+        }
+        for i in 0..(vec_a.len() - start_id) {
             a_assigned.push((assigned_cells[3 * i + 1].clone(), 3 * i + 1));
             b_assigned.push((assigned_cells[3 * i + 2].clone(), 3 * i + 2));
         }
+        let b_assigned = if start_id == 1 { None } else { Some(b_assigned) };
 
-        Ok((Some(a_assigned), Some(b_assigned), assigned_cells.last().unwrap().clone(), gate_index))
+        Ok((Some(a_assigned), b_assigned, assigned_cells.last().unwrap().clone(), gate_index))
     }
 
     // | 1 - b | 1 | b | 1 | b | a | 1 - b | out |
@@ -534,8 +546,6 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
     }
 
     /// assumes sel is boolean
-    // | a - b | 1 | b | a |
-    // | b | sel | a - b | out |
     /// returns
     ///   a * sel + b * (1 - sel)
     fn select(
@@ -545,24 +555,53 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         b: &QuantumCell<F>,
         sel: &QuantumCell<F>,
     ) -> Result<AssignedCell<F, F>, Error> {
-        let cells = vec![
-            QuantumCell::Witness(a.value().zip(b.value()).map(|(av, bv)| (*av) - (*bv))),
-            QuantumCell::Constant(F::from(1)),
-            b.clone(),
-            a.clone(),
-            b.clone(),
-            sel.clone(),
-            QuantumCell::Witness(a.value().zip(b.value()).map(|(av, bv)| (*av) - (*bv))),
-            QuantumCell::Witness(
-                a.value()
-                    .zip(b.value())
-                    .zip(sel.value())
-                    .map(|((av, bv), sv)| (*av) * (*sv) + (*bv) * (F::from(1) - *sv)),
-            ),
-        ];
-        let assigned_cells =
-            self.assign_region_smart(ctx, cells, vec![0, 4], vec![(0, 6)], vec![])?;
-        Ok(assigned_cells.last().unwrap().clone())
+        let diff_val = a.value().zip(b.value()).map(|(av, bv)| (*av) - (*bv));
+        let out_val = a
+            .value()
+            .zip(b.value())
+            .zip(sel.value())
+            .map(|((av, bv), sv)| (*av) * (*sv) + (*bv) * (F::from(1) - *sv));
+        match self.strategy {
+            // | a - b | 1 | b | a |
+            // | b | sel | a - b | out |
+            GateStrategy::Vertical => {
+                let cells = vec![
+                    QuantumCell::Witness(diff_val),
+                    QuantumCell::Constant(F::from(1)),
+                    b.clone(),
+                    a.clone(),
+                    b.clone(),
+                    sel.clone(),
+                    QuantumCell::Witness(diff_val),
+                    QuantumCell::Witness(out_val),
+                ];
+                let assigned_cells =
+                    self.assign_region_smart(ctx, cells, vec![0, 4], vec![(0, 6)], vec![])?;
+                Ok(assigned_cells.last().unwrap().clone())
+            }
+            // | 0 | a | a - b | b | sel | a - b | out |
+            // selectors
+            // | 1 | 0 | 0     | 1 | 0   | 0
+            // | 0 | 1 | -1    | 1 | 0   | 0
+            GateStrategy::PlonkPlus => {
+                let (assignments, _) = self.assign_region(
+                    ctx,
+                    vec![
+                        Constant(F::from(0)),
+                        a.clone(),
+                        Witness(diff_val),
+                        b.clone(),
+                        sel.clone(),
+                        Witness(diff_val),
+                        Witness(out_val),
+                    ],
+                    vec![(0, Some([F::zero(), F::one(), -F::one()])), (3, None)],
+                    None,
+                )?;
+                ctx.region.constrain_equal(assignments[2].cell(), assignments[5].cell())?;
+                Ok(assignments.last().unwrap().clone())
+            }
+        }
     }
 
     /// returns: a || (b && c)
@@ -610,46 +649,55 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
         let k = bits.len();
 
-        let mut inv_bits = Vec::with_capacity(k);
-        let mut assigned_bits = Vec::with_capacity(k);
-        for idx in 0..k {
-            let (inv_bit, bit) = {
-                let cells = vec![
-                    QuantumCell::Witness(bits[idx].value().map(|x| F::from(1) - x)),
-                    bits[idx].clone(),
-                    QuantumCell::Constant(F::from(1)),
-                    QuantumCell::Constant(F::from(1)),
-                ];
-                let assigned_cells =
-                    self.assign_region_smart(ctx, cells, vec![0], vec![], vec![])?;
-                (assigned_cells[0].clone(), assigned_cells[1].clone())
-            };
-            inv_bits.push(inv_bit.clone());
-            assigned_bits.push(bit.clone());
-        }
-
-        let mut indicator = Vec::with_capacity(2 * (1 << k) - 2);
+        let (inv_last_bit, last_bit) = {
+            let assignments = self.assign_region_smart(
+                ctx,
+                vec![
+                    Witness(bits[k - 1].value().map(|x| F::from(1) - x)),
+                    bits[k - 1].clone(),
+                    Constant(F::from(1)),
+                    Constant(F::from(1)),
+                ],
+                vec![0],
+                vec![],
+                vec![],
+            )?;
+            (assignments[0].clone(), assignments[1].clone())
+        };
+        let mut indicator: Vec<AssignedCell<F, F>> = Vec::with_capacity(2 * (1 << k) - 2);
         let mut offset = 0;
-        indicator.push(inv_bits[k - 1].clone());
-        indicator.push(assigned_bits[k - 1].clone());
+        indicator.push(inv_last_bit);
+        indicator.push(last_bit);
         for idx in 1..k {
             for old_idx in 0..(1 << idx) {
-                let inv_prod = self.mul(
+                let inv_prod_val = indicator[offset + old_idx]
+                    .value()
+                    .zip(bits[k - 1 - idx].value())
+                    .map(|(&a, &x)| a - a * x);
+                let assignments = self.assign_region_smart(
                     ctx,
-                    &QuantumCell::Existing(&indicator[offset + old_idx]),
-                    &QuantumCell::Existing(&inv_bits[k - 1 - idx]),
+                    vec![
+                        Witness(inv_prod_val),
+                        Existing(&indicator[offset + old_idx]),
+                        bits[k - 1 - idx].clone(),
+                        Existing(&indicator[offset + old_idx]),
+                    ],
+                    vec![0],
+                    vec![],
+                    vec![],
                 )?;
+                let inv_prod = assignments[0].clone();
                 indicator.push(inv_prod);
 
                 let prod = self.mul(
                     ctx,
-                    &QuantumCell::Existing(&indicator[offset + old_idx]),
-                    &QuantumCell::Existing(&assigned_bits[k - 1 - idx]),
+                    &Existing(&indicator[offset + old_idx]),
+                    &Existing(&assignments[2]),
                 )?;
                 indicator.push(prod);
             }
             offset = offset + (1 << idx);
         }
-        Ok(indicator[2 * (1 << k) - 2 - (1 << k)..].to_vec())
+        Ok(indicator[(1 << k) - 2..].to_vec())
     }
 }
