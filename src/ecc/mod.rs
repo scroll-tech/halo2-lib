@@ -669,16 +669,16 @@ impl<'a, F: FieldExt, FC: FieldChip<F>> EccChip<'a, F, FC> {
     }
 
     /// Does not constrain witness to lie on curve
-    pub fn load_from_curve<C>(
+    pub fn assign_point<C>(
         &self,
         ctx: &mut Context<'_, F>,
-        g: C,
+        g: Value<C>,
     ) -> Result<EccPoint<F, FC::FieldPoint>, Error>
     where
         C: CurveAffine<Base = FC::FieldType>,
     {
-        let coord = g.coordinates().unwrap();
-        self.load_private(ctx, (Value::known(*coord.x()), Value::known(*coord.y())))
+        let coord = g.map(|g| g.coordinates().unwrap());
+        self.load_private(ctx, (coord.map(|p| *p.x()), coord.map(|p| *p.y())))
     }
 
     pub fn load_random_point<C>(
@@ -690,10 +690,22 @@ impl<'a, F: FieldExt, FC: FieldChip<F>> EccChip<'a, F, FC> {
         C::Base: PrimeField,
     {
         let pt: C = C::CurveExt::random(OsRng).to_affine();
-        let assigned = self.load_from_curve(ctx, pt)?;
-        let b = biguint_to_fe::<F>(&fe_to_biguint(&C::b()));
-        is_on_curve(self.field_chip, ctx, &assigned, b)?;
+        let assigned = self.assign_point(ctx, Value::known(pt))?;
+        self.assert_is_on_curve::<C>(ctx, &assigned)?;
         Ok(assigned)
+    }
+
+    pub fn assert_is_on_curve<C>(
+        &self,
+        ctx: &mut Context<'_, F>,
+        P: &EccPoint<F, FC::FieldPoint>,
+    ) -> Result<(), Error>
+    where
+        C: CurveAffine<Base = FC::FieldType>,
+        C::Base: PrimeField,
+    {
+        let b = biguint_to_fe::<F>(&fe_to_biguint(&C::b()));
+        is_on_curve(self.field_chip, ctx, &P, b)
     }
 
     pub fn negate(
