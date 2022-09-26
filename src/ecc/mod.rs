@@ -830,7 +830,6 @@ where
         ctx: &mut Context<'_, F>,
         P: &FixedEccPoint<F, GA>,
         scalar: &Vec<AssignedCell<F, F>>,
-        b: F,
         max_bits: usize,
         window_bits: usize,
     ) -> Result<EccPoint<F, FC::FieldPoint>, Error>
@@ -840,7 +839,8 @@ where
         FC: PrimeFieldChip<F, FieldType = GA::Base, FieldPoint = CRTInteger<F>>
             + Selectable<F, Point = FC::FieldPoint>,
     {
-        fixed_base_scalar_multiply(self.field_chip, ctx, P, scalar, b, max_bits, window_bits)
+        let curve_b = biguint_to_fe::<F>(&fe_to_biguint(&GA::b()));
+        fixed_base_scalar_multiply(self.field_chip, ctx, P, scalar, curve_b, max_bits, window_bits)
     }
 }
 
