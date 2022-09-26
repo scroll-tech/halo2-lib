@@ -6,6 +6,7 @@ use halo2_proofs::{
 };
 use num_bigint::{BigInt, BigUint};
 use num_traits::{Num, One, Zero};
+use rand_core::OsRng;
 
 use super::{
     ecc_add_unequal, ecc_double, ecc_sub_unequal, get_naf, is_on_curve, select, select_from_bits,
@@ -97,9 +98,8 @@ where
     // we use a trick from halo2wrong where we load a random GA point as witness
     // note that while we load a random point, an adversary could load a specifically chosen point, so we must carefully handle edge cases with constraints
     // TODO: an alternate approach is to use Fiat-Shamir transform (with Poseidon) to hash all the inputs (points, bool_scalars, ...) to get the random point. This could be worth it for large MSMs as we get savings from `add_unequal` in "non-strict" mode. Perhaps not worth the trouble / security concern, though.
-    let mut rng = rand::thread_rng();
     let rand_base = {
-        let base_point: GA = GA::CurveExt::random(&mut rng).to_affine();
+        let base_point: GA = GA::CurveExt::random(OsRng).to_affine();
         let base_point_coord = base_point.coordinates().unwrap();
         let pt_x = FC::fe_to_witness(&Value::known(*base_point_coord.x()));
         let pt_y = FC::fe_to_witness(&Value::known(*base_point_coord.y()));

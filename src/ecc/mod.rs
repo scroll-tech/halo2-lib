@@ -11,11 +11,8 @@ use halo2_proofs::{
 };
 use num_bigint::{BigInt, BigUint};
 use num_traits::{Num, One, Zero};
+use rand_core::OsRng;
 
-use crate::bigint::{
-    add_no_carry, big_less_than, inner_product, mul_no_carry, scalar_mul_no_carry, select,
-    sub_no_carry, CRTInteger, FixedCRTInteger, OverflowInteger,
-};
 use crate::fields::{fp::FpConfig, fp_overflow::FpOverflowChip, Selectable};
 use crate::fields::{FieldChip, PrimeFieldChip};
 use crate::gates::{
@@ -25,6 +22,13 @@ use crate::gates::{
 };
 use crate::utils::{
     bigint_to_fe, decompose_bigint_option, decompose_biguint, fe_to_bigint, fe_to_biguint, modulus,
+};
+use crate::{
+    bigint::{
+        add_no_carry, big_less_than, inner_product, mul_no_carry, scalar_mul_no_carry, select,
+        sub_no_carry, CRTInteger, FixedCRTInteger, OverflowInteger,
+    },
+    utils::biguint_to_fe,
 };
 
 pub mod fixed;
@@ -664,6 +668,34 @@ impl<'a, F: FieldExt, FC: FieldChip<F>> EccChip<'a, F, FC> {
         Ok(EccPoint::construct(x_assigned, y_assigned))
     }
 
+    /// Does not constrain witness to lie on curve
+    pub fn load_from_curve<C>(
+        &self,
+        ctx: &mut Context<'_, F>,
+        g: C,
+    ) -> Result<EccPoint<F, FC::FieldPoint>, Error>
+    where
+        C: CurveAffine<Base = FC::FieldType>,
+    {
+        let coord = g.coordinates().unwrap();
+        self.load_private(ctx, (Value::known(*coord.x()), Value::known(*coord.y())))
+    }
+
+    pub fn load_random_point<C>(
+        &self,
+        ctx: &mut Context<'_, F>,
+    ) -> Result<EccPoint<F, FC::FieldPoint>, Error>
+    where
+        C: CurveAffine<Base = FC::FieldType>,
+        C::Base: PrimeField,
+    {
+        let pt: C = C::CurveExt::random(OsRng).to_affine();
+        let assigned = self.load_from_curve(ctx, pt)?;
+        let b = biguint_to_fe::<F>(&fe_to_biguint(&C::b()));
+        is_on_curve(self.field_chip, ctx, &assigned, b)?;
+        Ok(assigned)
+    }
+
     pub fn negate(
         &self,
         ctx: &mut Context<'_, F>,
@@ -752,19 +784,20 @@ where
         ctx: &mut Context<'_, F>,
         P: &Vec<EccPoint<F, FC::FieldPoint>>,
         scalars: &Vec<Vec<AssignedCell<F, F>>>,
-        b: F,
         max_bits: usize,
         window_bits: usize,
     ) -> Result<EccPoint<F, FC::FieldPoint>, Error>
     where
         GA: CurveAffine<Base = FC::FieldType>,
+        GA::Base: PrimeField,
     {
+        let curve_b = biguint_to_fe::<F>(&fe_to_biguint(&GA::b()));
         /*multi_scalar_multiply::<F, FC, GA>(
             self.field_chip,
             ctx,
             P,
             scalars,
-            b,
+            curve_b,
             max_bits,
             window_bits,
         )*/
@@ -780,7 +813,7 @@ where
             ctx,
             P,
             scalars,
-            b,
+            curve_b,
             max_bits,
             radix,
             window_bits,

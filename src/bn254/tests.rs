@@ -369,7 +369,6 @@ impl Circuit<Fr> for MSMCircuit<Fr> {
                     ctx,
                     &bases_assigned,
                     &scalars_assigned,
-                    Fr::from(3),
                     254,
                     config.window_bits,
                 )?;

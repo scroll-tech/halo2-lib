@@ -465,12 +465,10 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         let mut start_id = 0;
         let mut sum = Value::known(F::zero());
         cells.push(Constant(F::from(0)));
-        if let Constant(c) = vec_b[0] {
-            if c == F::one() {
-                cells[0] = vec_a[0].clone();
-                sum = vec_a[0].value().copied();
-                start_id = 1;
-            }
+        if matches!(vec_b[0], Constant(c) if c == F::one()) {
+            cells[0] = vec_a[0].clone();
+            sum = vec_a[0].value().copied();
+            start_id = 1;
         }
 
         for (a, b) in vec_a[start_id..].iter().zip(vec_b[start_id..].iter()) {
