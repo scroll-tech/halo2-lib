@@ -226,7 +226,7 @@ impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
                     config.is_less_than(ctx, &Existing(&b), &Existing(&a), self.lt_bits)?;
                 }
                 {
-                    config.is_equal(ctx, &b, &a)?;
+                    config.is_equal(ctx, &Existing(&b), &Existing(&a))?;
                 }
                 {
                     config.is_zero(ctx, &a)?;

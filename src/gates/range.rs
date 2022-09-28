@@ -471,14 +471,14 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
     fn is_equal(
         &self,
         ctx: &mut Context<'_, F>,
-        a: &AssignedCell<F, F>,
-        b: &AssignedCell<F, F>,
+        a: &QuantumCell<F>,
+        b: &QuantumCell<F>,
     ) -> Result<AssignedCell<F, F>, Error> {
         let cells = vec![
             Witness(a.value().zip(b.value()).map(|(av, bv)| *av - *bv)),
             Constant(F::from(1)),
-            Existing(&b),
-            Existing(&a),
+            b.clone(),
+            a.clone(),
         ];
         let assigned_cells = self.gate.assign_region_smart(ctx, cells, vec![0], vec![], vec![])?;
 

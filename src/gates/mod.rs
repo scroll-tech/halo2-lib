@@ -342,8 +342,8 @@ pub trait RangeInstructions<F: FieldExt> {
     fn is_equal(
         &self,
         ctx: &mut Context<'_, F>,
-        a: &AssignedCell<F, F>,
-        b: &AssignedCell<F, F>,
+        a: &QuantumCell<F>,
+        b: &QuantumCell<F>,
     ) -> Result<AssignedCell<F, F>, Error>;
 
     fn num_to_bits(
