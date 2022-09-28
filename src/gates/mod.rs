@@ -209,6 +209,15 @@ pub trait GateInstructions<F: FieldExt> {
         b: &QuantumCell<F>,
     ) -> Result<AssignedCell<F, F>, Error>;
 
+    /// a * b + c
+    fn mul_add(
+        &self,
+        ctx: &mut Context<'_, F>,
+        a: &QuantumCell<F>,
+        b: &QuantumCell<F>,
+        c: &QuantumCell<F>,
+    ) -> Result<AssignedCell<F, F>, Error>;
+
     fn div_unsafe(
         &self,
         ctx: &mut Context<'_, F>,
@@ -240,6 +249,13 @@ pub trait GateInstructions<F: FieldExt> {
         ),
         Error,
     >;
+
+    fn sum_products_with_coeff_and_var<'a>(
+        &self,
+        ctx: &mut Context<'_, F>,
+        values: &[(F, QuantumCell<F>, QuantumCell<F>)],
+        var: &QuantumCell<F>,
+    ) -> Result<AssignedCell<F, F>, Error>;
 
     fn or(
         &self,

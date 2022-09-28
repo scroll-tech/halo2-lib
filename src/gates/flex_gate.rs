@@ -358,6 +358,28 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         Ok(assigned_cells.last().unwrap().clone())
     }
 
+    fn mul_add(
+        &self,
+        ctx: &mut Context<'_, F>,
+        a: &QuantumCell<F>,
+        b: &QuantumCell<F>,
+        c: &QuantumCell<F>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        let assignments = self.assign_region_smart(
+            ctx,
+            vec![
+                c.clone(),
+                a.clone(),
+                b.clone(),
+                Witness(a.value().copied() * b.value() + c.value()),
+            ],
+            vec![0],
+            vec![],
+            vec![],
+        )?;
+        Ok(assignments.last().unwrap().clone())
+    }
+
     // Takes two vectors of `QuantumCell` and constrains a witness output to the inner product of `<vec_a, vec_b>`
     // outputs are vec<(a_cell, a_relative_index)>, vec<(b_cell, b_relative_index)>, out_cell, gate_index
     fn inner_product(
@@ -465,12 +487,10 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         let mut start_id = 0;
         let mut sum = Value::known(F::zero());
         cells.push(Constant(F::from(0)));
-        if let Constant(c) = vec_b[0] {
-            if c == F::one() {
-                cells[0] = vec_a[0].clone();
-                sum = vec_a[0].value().copied();
-                start_id = 1;
-            }
+        if matches!(vec_b[0], Constant(c) if c == F::one()) {
+            cells[0] = vec_a[0].clone();
+            sum = vec_a[0].value().copied();
+            start_id = 1;
         }
 
         for (a, b) in vec_a[start_id..].iter().zip(vec_b[start_id..].iter()) {
@@ -502,6 +522,56 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         let b_assigned = if start_id == 1 { None } else { Some(b_assigned) };
 
         Ok((Some(a_assigned), b_assigned, assigned_cells.last().unwrap().clone(), gate_index))
+    }
+
+    fn sum_products_with_coeff_and_var<'a>(
+        &self,
+        ctx: &mut Context<'_, F>,
+        values: &[(F, QuantumCell<F>, QuantumCell<F>)],
+        var: &QuantumCell<F>,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        let k = values.len();
+        match self.strategy {
+            GateStrategy::PlonkPlus => {
+                let mut cells = Vec::with_capacity(1 + 3 * k);
+                let mut gate_offsets = Vec::with_capacity(k);
+                let mut acc = var.value().copied();
+                cells.push(var.clone());
+                for (i, (c, a, b)) in values.iter().enumerate() {
+                    cells.append(&mut vec![
+                        a.clone(),
+                        b.clone(),
+                        Witness(acc + Value::known(*c) * a.value() * b.value()),
+                    ]);
+                    gate_offsets.push((3 * i as isize, Some([*c, F::zero(), F::zero()])));
+                }
+
+                let (assignments, _) = self.assign_region(ctx, cells, gate_offsets, None)?;
+                Ok(assignments.last().unwrap().clone())
+            }
+            GateStrategy::Vertical => {
+                let mut a = Vec::with_capacity(k + 1);
+                let mut b = Vec::with_capacity(k + 1);
+                let mut prod_pair = Vec::with_capacity(k);
+                a.push(var.clone());
+                b.push(Constant(F::one()));
+                for (c, va, vb) in values.iter() {
+                    if *c == F::one() {
+                        a.push(va.clone());
+                        b.push(vb.clone());
+                    } else if *c != F::zero() {
+                        let prod = self.mul(ctx, va, vb)?;
+                        prod_pair.push((c, prod));
+                    }
+                }
+                for (&c, prod) in prod_pair.iter() {
+                    a.push(Existing(&prod));
+                    b.push(Constant(c));
+                }
+                let (_, _, out, _) = self.inner_product(ctx, &a, &b)?;
+                Ok(out)
+            }
+        }
     }
 
     // | 1 - b | 1 | b | 1 | b | a | 1 - b | out |
