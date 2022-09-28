@@ -235,6 +235,13 @@ pub trait GateInstructions<F: FieldExt> {
         Ok(assignments[1].clone())
     }
 
+    fn assert_equal(
+        &self,
+        ctx: &mut Context<'_, F>,
+        a: &QuantumCell<F>,
+        b: &QuantumCell<F>,
+    ) -> Result<(), Error>;
+
     fn inner_product(
         &self,
         ctx: &mut Context<'_, F>,

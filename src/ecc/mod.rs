@@ -421,7 +421,7 @@ where
                 .map(|x| Existing(&x))
                 .collect();
             let bit_sum = chip.range().gate().inner_product(ctx, &ones_vec, &temp_bits)?;
-            let is_zero = chip.range().is_zero(ctx, &bit_sum.2)?;
+            let is_zero = RangeInstructions::is_zero(chip.range(), ctx, &bit_sum.2)?;
             is_zero_window.push(is_zero.clone());
         }
         is_zero_window_vec.push(is_zero_window);
@@ -769,8 +769,8 @@ impl<'a, F: FieldExt, FC: FieldChip<F>> EccChip<'a, F, FC> {
         P: &EccPoint<F, FC::FieldPoint>,
         Q: &EccPoint<F, FC::FieldPoint>,
     ) -> Result<(), Error> {
-        let is_equal = self.is_equal(ctx, P, Q)?;
-        ctx.constants_to_assign.push((F::from(1), Some(is_equal.cell())));
+        self.field_chip.assert_equal(ctx, &P.x, &Q.x)?;
+        self.field_chip.assert_equal(ctx, &P.y, &Q.y)?;
         Ok(())
     }
 }

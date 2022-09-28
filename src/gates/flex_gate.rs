@@ -380,6 +380,21 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         Ok(assignments.last().unwrap().clone())
     }
 
+    fn assert_equal(
+        &self,
+        ctx: &mut Context<'_, F>,
+        a: &QuantumCell<F>,
+        b: &QuantumCell<F>,
+    ) -> Result<(), Error> {
+        self.assign_region_smart(
+            ctx,
+            vec![a.clone(), b.clone(), Constant(-F::one()), Constant(F::zero())],
+            vec![0],
+            vec![],
+            vec![],
+        )?;
+        Ok(())
+    }
     // Takes two vectors of `QuantumCell` and constrains a witness output to the inner product of `<vec_a, vec_b>`
     // outputs are vec<(a_cell, a_relative_index)>, vec<(b_cell, b_relative_index)>, out_cell, gate_index
     fn inner_product(
@@ -538,15 +553,12 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
                 let mut acc = var.value().copied();
                 cells.push(var.clone());
                 for (i, (c, a, b)) in values.iter().enumerate() {
-                    cells.append(&mut vec![
-                        a.clone(),
-                        b.clone(),
-                        Witness(acc + Value::known(*c) * a.value() * b.value()),
-                    ]);
+                    acc = acc + Value::known(*c) * a.value() * b.value();
+                    cells.append(&mut vec![a.clone(), b.clone(), Witness(acc)]);
                     gate_offsets.push((3 * i as isize, Some([*c, F::zero(), F::zero()])));
                 }
-
                 let (assignments, _) = self.assign_region(ctx, cells, gate_offsets, None)?;
+
                 Ok(assignments.last().unwrap().clone())
             }
             GateStrategy::Vertical => {

@@ -387,6 +387,24 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpConfig<F, Fp> {
         // a.native and b.native are derived from `a.truncation, b.truncation`, so no need to check if they're equal
         big_is_equal::assign(self.range(), ctx, &a.truncation, &b.truncation)
     }
+
+    // assuming `a, b` have been range checked to be a proper BigInt
+    // constrain the witnesses `a, b` to be `< p`
+    // then assert `a == b` as BigInts
+    fn assert_equal(
+        &self,
+        ctx: &mut Context<'_, F>,
+        a: &Self::FieldPoint,
+        b: &Self::FieldPoint,
+    ) -> Result<(), Error> {
+        self.enforce_less_than_p(ctx, a)?;
+        self.enforce_less_than_p(ctx, b)?;
+        // a.native and b.native are derived from `a.truncation, b.truncation`, so no need to check if they're equal
+        for (limb_a, limb_b) in a.truncation.limbs.iter().zip(a.truncation.limbs.iter()) {
+            self.range.gate.assert_equal(ctx, &Existing(limb_a), &Existing(limb_b))?;
+        }
+        Ok(())
+    }
 }
 
 impl<F: FieldExt, Fp: PrimeField> Selectable<F> for FpConfig<F, Fp> {

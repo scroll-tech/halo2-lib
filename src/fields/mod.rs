@@ -163,6 +163,15 @@ pub trait FieldChip<F: FieldExt> {
         todo!()
     }
 
+    fn assert_equal(
+        &self,
+        ctx: &mut Context<'_, F>,
+        a: &Self::FieldPoint,
+        b: &Self::FieldPoint,
+    ) -> Result<(), Error> {
+        todo!()
+    }
+
     fn mul(
         &self,
         ctx: &mut Context<'_, F>,
