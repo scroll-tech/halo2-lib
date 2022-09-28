@@ -804,32 +804,36 @@ where
         GA::Base: PrimeField,
     {
         let curve_b = biguint_to_fe::<F>(&fe_to_biguint(&GA::b()));
-        /*multi_scalar_multiply::<F, FC, GA>(
-            self.field_chip,
-            ctx,
-            P,
-            scalars,
-            curve_b,
-            max_bits,
-            window_bits,
-        )*/
-        let mut radix = (f64::from((max_bits * scalars[0].len()) as u32)
-            / f64::from(P.len() as u32))
-        .sqrt()
-        .floor() as usize;
-        if radix == 0 {
-            radix = 1;
+        if P.len() < 25 {
+            multi_scalar_multiply::<F, FC, GA>(
+                self.field_chip,
+                ctx,
+                P,
+                scalars,
+                curve_b,
+                max_bits,
+                window_bits,
+            )
+        } else {
+            /*let mut radix = (f64::from((max_bits * scalars[0].len()) as u32)
+                / f64::from(P.len() as u32))
+            .sqrt()
+            .floor() as usize;
+            if radix == 0 {
+                radix = 1;
+            }*/
+            let radix = 1;
+            pippenger::multi_exp::<F, FC, GA>(
+                self.field_chip,
+                ctx,
+                P,
+                scalars,
+                curve_b,
+                max_bits,
+                radix,
+                window_bits,
+            )
         }
-        pippenger::multi_exp::<F, FC, GA>(
-            self.field_chip,
-            ctx,
-            P,
-            scalars,
-            curve_b,
-            max_bits,
-            radix,
-            window_bits,
-        )
     }
 }
 
