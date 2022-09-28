@@ -312,8 +312,8 @@ pub trait RangeInstructions<F: FieldExt> {
     fn is_less_than(
         &self,
         ctx: &mut Context<'_, F>,
-        a: &AssignedCell<F, F>,
-        b: &AssignedCell<F, F>,
+        a: &QuantumCell<F>,
+        b: &QuantumCell<F>,
         num_bits: usize,
     ) -> Result<AssignedCell<F, F>, Error>;
 

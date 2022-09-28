@@ -396,8 +396,8 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
     fn is_less_than(
         &self,
         ctx: &mut Context<'_, F>,
-        a: &AssignedCell<F, F>,
-        b: &AssignedCell<F, F>,
+        a: &QuantumCell<F>,
+        b: &QuantumCell<F>,
         num_bits: usize,
     ) -> Result<AssignedCell<F, F>, Error> {
         // TODO: optimize this for PlonkPlus strategy
@@ -412,12 +412,12 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
                     ctx,
                     vec![
                         Witness(shifted_val),
-                        Existing(&b),
+                        b.clone(),
                         Constant(F::one()),
                         Witness(a.value().map(|&av| av + pow_padded)),
                         Constant(-pow_padded),
                         Constant(F::one()),
-                        Existing(&a),
+                        a.clone(),
                     ],
                     vec![0, 3],
                     vec![],
@@ -428,7 +428,7 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
             RangeStrategy::PlonkPlus => {
                 let (assignments, _) = self.gate.assign_region(
                     ctx,
-                    vec![Existing(&a), Constant(pow_padded), Existing(&b), Witness(shifted_val)],
+                    vec![a.clone(), Constant(pow_padded), b.clone(), Witness(shifted_val)],
                     vec![(0, Some([F::zero(), F::one(), -F::one()]))],
                     None,
                 )?;
