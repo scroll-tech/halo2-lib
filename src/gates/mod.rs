@@ -242,6 +242,10 @@ pub trait GateInstructions<F: FieldExt> {
         b: &QuantumCell<F>,
     ) -> Result<(), Error>;
 
+    fn assert_is_const(&self, ctx: &mut Context<'_, F>, a: &AssignedCell<F, F>, constant: F) {
+        ctx.constants_to_assign.push((constant, Some(a.cell())));
+    }
+
     fn inner_product(
         &self,
         ctx: &mut Context<'_, F>,

@@ -708,6 +708,37 @@ impl<'a, F: FieldExt, FC: FieldChip<F>> EccChip<'a, F, FC> {
         is_on_curve(self.field_chip, ctx, &P, b)
     }
 
+    pub fn is_on_curve_or_infinity<C>(
+        &self,
+        ctx: &mut Context<'_, F>,
+        P: &EccPoint<F, FC::FieldPoint>,
+    ) -> Result<AssignedCell<F, F>, Error>
+    where
+        C: CurveAffine<Base = FC::FieldType>,
+        C::Base: PrimeField,
+    {
+        let b = biguint_to_fe::<F>(&fe_to_biguint(&C::b()));
+
+        let lhs = self.field_chip.mul_no_carry(ctx, &P.y, &P.y)?;
+        let mut rhs = self.field_chip.mul(ctx, &P.x, &P.x)?;
+        rhs = self.field_chip.mul_no_carry(ctx, &rhs, &P.x)?;
+        rhs = self.field_chip.add_native_constant_no_carry(ctx, &rhs, b)?;
+        let mut diff = self.field_chip.sub_no_carry(ctx, &lhs, &rhs)?;
+        diff = self.field_chip.carry_mod(ctx, &diff)?;
+
+        let is_on_curve = self.field_chip.is_zero(ctx, &diff)?;
+
+        let x_is_zero = self.field_chip.is_zero(ctx, &P.x)?;
+        let y_is_zero = self.field_chip.is_zero(ctx, &P.y)?;
+
+        self.field_chip.range().gate().or_and(
+            ctx,
+            &Existing(&is_on_curve),
+            &Existing(&x_is_zero),
+            &Existing(&y_is_zero),
+        )
+    }
+
     pub fn negate(
         &self,
         ctx: &mut Context<'_, F>,
