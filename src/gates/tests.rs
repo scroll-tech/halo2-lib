@@ -87,6 +87,11 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
                     config.mul(ctx, &Existing(&c_cell), &Existing(&b_cell))?;
                 }
 
+		// test idx_to_indicator
+		{
+		    config.idx_to_indicator(ctx, &Constant(F::from(3)), 4)?;
+		}
+
                 println!(
                     "maximum rows used by an advice column: {}",
                     ctx.advice_rows.iter().max().or(Some(&0)).unwrap(),

@@ -782,4 +782,48 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         }
         Ok(indicator[(1 << k) - 2..].to_vec())
     }
+
+    // returns vec with vec.len() == len such that:
+    //     vec[i] == 1{i == idx}
+    fn idx_to_indicator(
+        &self,
+        ctx: &mut Context<'_, F>,
+        idx: &QuantumCell<F>,
+	len: usize,
+    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+	let ind = self.assign_region_smart(
+	    ctx,
+	    (0..len).map(|i| {
+		Witness(idx.value().map(|x| {
+		    if F::from(i as u64) == *x {
+			F::from(1)
+		    } else {
+			F::from(0)
+		    }
+		}))
+	    }).collect(),
+	    vec![],
+	    vec![],
+	    vec![],
+	)?;
+
+	// check ind[i] * (i - idx) == 0
+	for i in 0..len {
+	    self.assign_region_smart(
+		ctx,
+		vec![Constant(F::from(0)),
+		     Existing(&ind[i]),
+		     idx.clone(),
+		     Witness(ind[i].value().zip(idx.value())
+			     .map(|(a, b)| (*a) * (*b))),
+		     Constant(-F::from(i as u64)),
+		     Existing(&ind[i]),
+		     Constant(F::from(0))],
+		vec![0, 3],
+		vec![],
+		vec![]
+	    )?;
+	}
+	Ok(ind)
+    }
 }

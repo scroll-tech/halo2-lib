@@ -307,6 +307,13 @@ pub trait GateInstructions<F: FieldExt> {
         ctx: &mut Context<'_, F>,
         bits: &Vec<QuantumCell<F>>,
     ) -> Result<Vec<AssignedCell<F, F>>, Error>;
+
+    fn idx_to_indicator(
+        &self,
+        ctx: &mut Context<'_, F>,
+        idx: &QuantumCell<F>,
+	len: usize,
+    ) -> Result<Vec<AssignedCell<F, F>>, Error>;
 }
 
 pub trait RangeInstructions<F: FieldExt> {
