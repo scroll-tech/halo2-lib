@@ -553,17 +553,17 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
 	    },
 	    GateStrategy::Vertical => {
 		let mut ret = Vec::new();
-		if k == 1 {
-		    let assigned = self.assign_region_smart(
-			ctx,
-			vec![vec_b[0].clone()],
-			vec![],
-			vec![],
-		    	vec![],
-		    )?;			    			    
-		    ret.push(assigned[0].clone());
-		} else {
-		    for idx in 1..k {
+		for idx in 0..k {
+		    if idx == 0 {
+			let assigned = self.assign_region_smart(
+			    ctx,
+			    vec![vec_b[0].clone()],
+			    vec![],
+			    vec![],
+		    	    vec![],
+			)?;			    			    
+			ret.push(assigned[0].clone());
+		    } else {
 			let assigned = self.assign_region_smart(
 			    ctx,
 			    vec![vec_b[idx].clone(),
