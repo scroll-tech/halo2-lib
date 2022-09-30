@@ -539,6 +539,50 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         Ok((Some(a_assigned), b_assigned, assigned_cells.last().unwrap().clone(), gate_index))
     }
 
+    fn accumulated_product(
+	&self,
+	ctx: &mut Context<'_, F>,
+	vec_a: &Vec<QuantumCell<F>>,
+        vec_b: &Vec<QuantumCell<F>>,
+    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+	assert_eq!(vec_a.len() + 1, vec_b.len());
+	let k = vec_b.len();
+	match self.strategy {
+	    GateStrategy::PlonkPlus => {
+		todo!();
+	    },
+	    GateStrategy::Vertical => {
+		let mut ret = Vec::new();
+		if k == 1 {
+		    let assigned = self.assign_region_smart(
+			ctx,
+			vec![vec_b[0].clone()],
+			vec![],
+			vec![],
+		    	vec![],
+		    )?;			    			    
+		    ret.push(assigned[0].clone());
+		} else {
+		    for idx in 1..k {
+			let assigned = self.assign_region_smart(
+			    ctx,
+			    vec![vec_b[idx].clone(),
+				 Existing(&ret[ret.len() - 1]),
+				 vec_a[idx - 1].clone(),
+				 Witness(ret[ret.len() - 1].value().copied() * vec_a[idx - 1].value().copied()
+					 + vec_b[idx].value())],
+			    vec![0],
+			    vec![],
+			    vec![]
+			)?;
+			ret.push(assigned[3].clone());
+		    }
+		}
+		Ok(ret)
+	    }
+	}	
+    }
+
     fn sum_products_with_coeff_and_var<'a>(
         &self,
         ctx: &mut Context<'_, F>,

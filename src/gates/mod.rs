@@ -261,6 +261,20 @@ pub trait GateInstructions<F: FieldExt> {
         Error,
     >;
 
+    // requires vec_b.len() == vec_a.len() + 1
+    // returns
+    // x_i = b_1 * (a_1...a_{i - 1})
+    //     + b_2 * (a_2...a_{i - 1})
+    //     + ...
+    //     + b_i
+    // Returns [x_1, ..., x_{vec_b.len()}]
+    fn accumulated_product(
+        &self,
+        ctx: &mut Context<'_, F>,
+        vec_a: &Vec<QuantumCell<F>>,
+        vec_b: &Vec<QuantumCell<F>>,
+    ) -> Result<Vec<AssignedCell<F, F>>, Error>;
+    
     fn sum_products_with_coeff_and_var<'a>(
         &self,
         ctx: &mut Context<'_, F>,
