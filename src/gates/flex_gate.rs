@@ -545,7 +545,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
 	vec_a: &Vec<QuantumCell<F>>,
         vec_b: &Vec<QuantumCell<F>>,
     ) -> Result<Vec<AssignedCell<F, F>>, Error> {
-	assert_eq!(vec_a.len() + 1, vec_b.len());
+	assert!(vec_a.len() + 1 == vec_b.len() || (vec_a.len() == 0 && vec_b.len() == 0));
 	let k = vec_b.len();
 	match self.strategy {
 	    GateStrategy::PlonkPlus => {
