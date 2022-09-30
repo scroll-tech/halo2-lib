@@ -332,6 +332,21 @@ pub trait GateInstructions<F: FieldExt> {
         idx: &QuantumCell<F>,
 	len: usize,
     ) -> Result<Vec<AssignedCell<F, F>>, Error>;
+
+    fn select_from_idx(
+	&self,
+	ctx: &mut Context<'_, F>,
+	cells: &Vec<QuantumCell<F>>,
+	idx: &QuantumCell<F>,	
+    ) -> Result<AssignedCell<F, F>, Error> {
+	let ind = self.idx_to_indicator(ctx, idx, cells.len())?;
+	let (_, _, res, _) = self.inner_product(
+	    ctx,
+	    cells,
+	    &ind.iter().map(|x| QuantumCell::Existing(&x)).collect()
+	)?;
+	Ok(res)
+    }
 }
 
 pub trait RangeInstructions<F: FieldExt> {
