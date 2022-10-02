@@ -5,16 +5,13 @@ use crate::{
 };
 use ff::PrimeField;
 use halo2_base::{
-    gates::{
-        Context, GateInstructions,
-        QuantumCell::{Constant, Existing},
-        RangeInstructions,
-    },
+    gates::{GateInstructions, RangeInstructions},
     utils::{bigint_to_fe, fe_to_biguint, modulus},
+    AssignedValue, Context,
+    QuantumCell::{Constant, Existing},
 };
 use halo2_proofs::{
     arithmetic::{CurveAffine, FieldExt},
-    circuit::AssignedCell,
     plonk::Error,
 };
 use std::marker::PhantomData;
@@ -78,7 +75,7 @@ pub fn fixed_base_scalar_multiply<'a, F, FC, GA>(
     chip: &FC,
     ctx: &mut Context<'_, F>,
     P: &FixedEccPoint<F, GA>,
-    scalar: &Vec<AssignedCell<F, F>>,
+    scalar: &Vec<AssignedValue<F>>,
     max_bits: usize,
     window_bits: usize,
 ) -> Result<EccPoint<F, FC::FieldPoint>, Error>

@@ -1,12 +1,14 @@
 use super::{FieldChip, FieldExtConstructor, FieldExtPoint, PrimeFieldChip};
 use ff::PrimeField;
 use halo2_base::{
-    gates::{Context, GateInstructions, QuantumCell::Existing, RangeInstructions},
+    gates::{GateInstructions, RangeInstructions},
     utils::{fe_to_biguint, value_to_option},
+    AssignedValue, Context,
+    QuantumCell::Existing,
 };
 use halo2_proofs::{
     arithmetic::{Field, FieldExt},
-    circuit::{AssignedCell, Value},
+    circuit::Value,
     plonk::Error,
 };
 use num_bigint::BigInt;
@@ -361,7 +363,7 @@ where
         &self,
         ctx: &mut Context<'_, F>,
         a: &Self::FieldPoint,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         let mut prev = None;
         for a_coeff in &a.coeffs {
             let coeff = self.fp_chip.is_soft_zero(ctx, a_coeff)?;
@@ -379,7 +381,7 @@ where
         &self,
         ctx: &mut Context<'_, F>,
         a: &Self::FieldPoint,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         let mut prev = None;
         for a_coeff in &a.coeffs {
             let coeff = self.fp_chip.is_soft_nonzero(ctx, a_coeff)?;
@@ -397,7 +399,7 @@ where
         &self,
         ctx: &mut Context<'_, F>,
         a: &Self::FieldPoint,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         let mut prev = None;
         for a_coeff in &a.coeffs {
             let coeff = self.fp_chip.is_zero(ctx, a_coeff)?;
@@ -416,7 +418,7 @@ where
         ctx: &mut Context<'_, F>,
         a: &Self::FieldPoint,
         b: &Self::FieldPoint,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         let mut acc = None;
         for (a_coeff, b_coeff) in a.coeffs.iter().zip(b.coeffs.iter()) {
             let coeff = self.fp_chip.is_equal(ctx, a_coeff, b_coeff)?;
@@ -443,8 +445,8 @@ pub(crate) mod tests {
     use super::*;
     use crate::fields::fp::{FpConfig, FpStrategy};
     use crate::fields::FieldChip;
-    use halo2_base::gates::ContextParams;
     use halo2_base::utils::modulus;
+    use halo2_base::ContextParams;
 
     #[derive(Default)]
     struct MyCircuit<F> {
@@ -469,13 +471,14 @@ pub(crate) mod tests {
             FpConfig::configure(
                 meta,
                 FpStrategy::Simple,
-                NUM_ADVICE,
-                1,
+                &[NUM_ADVICE],
+                &[1],
                 NUM_FIXED,
                 22,
                 88,
                 3,
                 modulus::<Fq>(),
+                "default".to_string(),
             )
         }
 
@@ -500,11 +503,7 @@ pub(crate) mod tests {
 
                     let mut aux = Context::new(
                         region,
-                        ContextParams {
-                            num_advice: NUM_ADVICE,
-                            using_simple_floor_planner,
-                            first_pass,
-                        },
+                        ContextParams { num_advice: vec![("default".to_string(), NUM_ADVICE)] },
                     );
                     let ctx = &mut aux;
 
@@ -525,7 +524,7 @@ pub(crate) mod tests {
                     println!("Using {} advice columns and {} fixed columns", NUM_ADVICE, NUM_FIXED);
                     println!(
                         "maximum rows used by an advice column: {}",
-                        ctx.advice_rows.iter().max().unwrap()
+                        ctx.advice_rows["default"].iter().max().unwrap()
                     );
                     // IMPORTANT: this assigns all constants to the fixed columns
                     // This is not optional.

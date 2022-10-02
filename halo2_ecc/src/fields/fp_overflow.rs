@@ -6,17 +6,14 @@ use crate::bigint::{
 };
 use ff::PrimeField;
 use halo2_base::{
-    gates::{
-        range::RangeConfig,
-        Context, GateInstructions,
-        QuantumCell::{Constant, Existing, Witness},
-        RangeInstructions,
-    },
+    gates::{range::RangeConfig, GateInstructions, RangeInstructions},
     utils::{bigint_to_fe, decompose_bigint, decompose_bigint_option, fe_to_biguint},
+    AssignedValue, Context,
+    QuantumCell::{Constant, Existing, Witness},
 };
 use halo2_proofs::{
     arithmetic::FieldExt,
-    circuit::{AssignedCell, Layouter, Value},
+    circuit::{Layouter, Value},
     plonk::Error,
 };
 use num_bigint::{BigInt, BigUint};
@@ -223,7 +220,7 @@ impl<'a, F: FieldExt, Fp: PrimeField> FieldChip<F> for FpOverflowChip<'a, F, Fp>
         &self,
         ctx: &mut Context<'_, F>,
         a: &OverflowInteger<F>,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         let is_carry_zero = big_is_zero::assign(self.range(), ctx, a)?;
 
         // underflow != 0 iff carry < p
@@ -240,7 +237,7 @@ impl<'a, F: FieldExt, Fp: PrimeField> FieldChip<F> for FpOverflowChip<'a, F, Fp>
         &self,
         ctx: &mut Context<'_, F>,
         a: &OverflowInteger<F>,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         let is_zero = big_is_zero::assign(self.range(), ctx, a)?;
         let is_nonzero = self.range.gate().not(ctx, &Existing(&is_zero))?;
 
@@ -263,7 +260,7 @@ impl<'a, F: FieldExt, Fp: PrimeField> Selectable<F> for FpOverflowChip<'a, F, Fp
         ctx: &mut Context<'_, F>,
         a: &OverflowInteger<F>,
         b: &OverflowInteger<F>,
-        sel: &AssignedCell<F, F>,
+        sel: &AssignedValue<F>,
     ) -> Result<OverflowInteger<F>, Error> {
         select::assign(self.range.gate(), ctx, a, b, sel)
     }
@@ -272,7 +269,7 @@ impl<'a, F: FieldExt, Fp: PrimeField> Selectable<F> for FpOverflowChip<'a, F, Fp
         &self,
         ctx: &mut Context<'_, F>,
         a: &Vec<OverflowInteger<F>>,
-        coeffs: &Vec<AssignedCell<F, F>>,
+        coeffs: &Vec<AssignedValue<F>>,
     ) -> Result<OverflowInteger<F>, Error> {
         inner_product::assign(self.range.gate(), ctx, a, coeffs)
     }

@@ -11,7 +11,7 @@ use halo2_proofs::{
 };
 use num_bigint::{BigInt, BigUint};
 use num_traits::Zero;
-use std::marker::PhantomData;
+use std::{marker::PhantomData, rc::Rc};
 
 pub mod add_no_carry;
 pub mod big_is_equal;
@@ -232,9 +232,11 @@ impl<F: FieldExt> FixedCRTInteger<F> {
 }
 
 #[derive(Clone, Debug, Default)]
+#[allow(dead_code)]
 pub struct BigIntConfig<F: FieldExt> {
     // everything is empty if strategy is `Simple` or `SimplePlus`
     strategy: BigIntStrategy,
+    context_id: Rc<String>,
     _marker: PhantomData<F>,
 }
 
@@ -245,12 +247,12 @@ impl<F: FieldExt> BigIntConfig<F> {
         _limb_bits: usize,
         _num_limbs: usize,
         _gate: &FlexGateConfig<F>,
-        // constants: Vec<Vec<BigUint>>, // collection of the constant vectors we want custom dot product gates for
+        context_id: String,
     ) -> Self {
         // let mut q_dot_constant = HashMap::new();
         match strategy {
             _ => {}
         }
-        Self { strategy, _marker: PhantomData }
+        Self { strategy, _marker: PhantomData, context_id: Rc::new(context_id) }
     }
 }

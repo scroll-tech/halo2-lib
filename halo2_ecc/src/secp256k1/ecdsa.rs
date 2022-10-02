@@ -23,7 +23,7 @@ use crate::{
     fields::{fp::FpStrategy, FieldChip, },
 };
 use halo2_base::{
-    gates::{Context, ContextParams},
+    Context, ContextParams,
     utils::{ biguint_to_fe, fe_to_biguint, modulus},
 };
 
@@ -79,13 +79,14 @@ impl<F: FieldExt> Circuit<F> for ECDSACircuit<F> {
         FpChip::<F>::configure(
             meta,
             params.strategy,
-            params.num_advice,
-            params.num_lookup_advice,
+            &[params.num_advice],
+            &[params.num_lookup_advice],
             params.num_fixed,
             params.lookup_bits,
             params.limb_bits,
             params.num_limbs,
             modulus::<Fp>(),
+            "ecdsa".to_string()
         )
     }
 
@@ -116,9 +117,7 @@ impl<F: FieldExt> Circuit<F> for ECDSACircuit<F> {
                 let mut aux = Context::new(
                     region,
                     ContextParams {
-                        num_advice,
-                        using_simple_floor_planner,
-                        first_pass,
+                        num_advice: vec![("ecdsa".to_string(), num_advice)],
                     },
                 );
                 let ctx = &mut aux;
@@ -165,7 +164,7 @@ impl<F: FieldExt> Circuit<F> for ECDSACircuit<F> {
                 let num_lookup_advice = fp_chip.range.lookup_advice.len();
 
                 println!("Using:\nadvice columns: {}\nspecial lookup advice columns: {}\nfixed columns: {}\nlookup bits: {}\nlimb bits: {}\nnum limbs: {}", num_advice, num_lookup_advice, num_fixed, lookup_bits, limb_bits, num_limbs);
-                let advice_rows = ctx.advice_rows.iter();
+                let advice_rows = ctx.advice_rows["ecdsa"].iter();
                 println!(
                     "maximum rows used by an advice column: {}",
                         advice_rows.clone().max().or(Some(&0)).unwrap(),

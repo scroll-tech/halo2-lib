@@ -5,10 +5,7 @@ use crate::fields::fp2::Fp2Chip;
 use ff::PrimeField;
 use group::Group;
 use halo2_base::utils::bigint_to_fe;
-use halo2_base::{
-    gates::{range::RangeStrategy, ContextParams},
-    utils::value_to_option,
-};
+use halo2_base::{gates::range::RangeStrategy, utils::value_to_option, ContextParams};
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::*,
@@ -41,13 +38,14 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         FpConfig::configure(
             meta,
             FpStrategy::Simple,
-            NUM_ADVICE,
-            1,
+            &[NUM_ADVICE],
+            &[1],
             NUM_FIXED,
             22,
             88,
             3,
             modulus::<Fq>(),
+            "default".to_string(),
         )
     }
 
@@ -72,11 +70,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
 
                 let mut aux = Context::new(
                     region,
-                    ContextParams {
-                        num_advice: NUM_ADVICE,
-                        using_simple_floor_planner,
-                        first_pass,
-                    },
+                    ContextParams { num_advice: vec![("default".to_string(), NUM_ADVICE)] },
                 );
                 let ctx = &mut aux;
 
@@ -128,7 +122,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
                 println!("Using {} advice columns and {} fixed columns", NUM_ADVICE, NUM_FIXED);
                 println!(
                     "maximum rows used by an advice column: {}",
-                    ctx.advice_rows.iter().max().unwrap()
+                    ctx.advice_rows["default"].iter().max().unwrap()
                 );
                 let (const_rows, _, _) = chip.field_chip.finalize(ctx)?;
                 println!("maximum rows used by a fixed column: {}", const_rows);

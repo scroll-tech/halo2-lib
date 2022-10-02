@@ -5,16 +5,14 @@ use crate::fields::{FieldChip, PrimeFieldChip};
 use ff::PrimeField;
 use group::{Curve, Group};
 use halo2_base::{
-    gates::{
-        Context, GateInstructions,
-        QuantumCell::{Constant, Existing},
-        RangeInstructions,
-    },
+    gates::{GateInstructions, RangeInstructions},
     utils::{biguint_to_fe, fe_to_biguint, modulus},
+    AssignedValue, Context,
+    QuantumCell::{Constant, Existing},
 };
 use halo2_proofs::{
     arithmetic::{CurveAffine, FieldExt},
-    circuit::{AssignedCell, Value},
+    circuit::Value,
     plonk::Error,
 };
 use num_bigint::BigInt;
@@ -175,7 +173,7 @@ pub fn select<F: FieldExt, FC>(
     ctx: &mut Context<'_, F>,
     P: &EccPoint<F, FC::FieldPoint>,
     Q: &EccPoint<F, FC::FieldPoint>,
-    sel: &AssignedCell<F, F>,
+    sel: &AssignedValue<F>,
 ) -> Result<EccPoint<F, FC::FieldPoint>, Error>
 where
     FC: FieldChip<F> + Selectable<F, Point = FC::FieldPoint>,
@@ -191,7 +189,7 @@ pub fn inner_product<F: FieldExt, FC>(
     chip: &FC,
     ctx: &mut Context<'_, F>,
     points: &Vec<EccPoint<F, FC::FieldPoint>>,
-    coeffs: &Vec<AssignedCell<F, F>>,
+    coeffs: &Vec<AssignedValue<F>>,
 ) -> Result<EccPoint<F, FC::FieldPoint>, Error>
 where
     FC: FieldChip<F> + Selectable<F, Point = FC::FieldPoint>,
@@ -211,7 +209,7 @@ pub fn select_from_bits<F: FieldExt, FC>(
     chip: &FC,
     ctx: &mut Context<'_, F>,
     points: &Vec<EccPoint<F, FC::FieldPoint>>,
-    sel: &Vec<AssignedCell<F, F>>,
+    sel: &Vec<AssignedValue<F>>,
 ) -> Result<EccPoint<F, FC::FieldPoint>, Error>
 where
     FC: FieldChip<F> + Selectable<F, Point = FC::FieldPoint>,
@@ -236,7 +234,7 @@ pub fn scalar_multiply<F: FieldExt, FC>(
     chip: &FC,
     ctx: &mut Context<'_, F>,
     P: &EccPoint<F, FC::FieldPoint>,
-    scalar: &Vec<AssignedCell<F, F>>,
+    scalar: &Vec<AssignedValue<F>>,
     max_bits: usize,
     window_bits: usize,
 ) -> Result<EccPoint<F, FC::FieldPoint>, Error>
@@ -362,7 +360,7 @@ pub fn multi_scalar_multiply<F: FieldExt, FC, GA>(
     chip: &FC,
     ctx: &mut Context<'_, F>,
     P: &Vec<EccPoint<F, FC::FieldPoint>>,
-    scalars: &Vec<Vec<AssignedCell<F, F>>>,
+    scalars: &Vec<Vec<AssignedValue<F>>>,
     b: F,
     max_bits: usize,
     window_bits: usize,
@@ -521,7 +519,7 @@ pub fn ecdsa_verify_no_pubkey_check<F: FieldExt, CF: PrimeField, SF: PrimeField,
     msghash: &OverflowInteger<F>,
     var_window_bits: usize,
     fixed_window_bits: usize,
-) -> Result<AssignedCell<F, F>, Error>
+) -> Result<AssignedValue<F>, Error>
 where
     GA: CurveAffine<Base = CF, ScalarExt = SF>,
 {
@@ -692,7 +690,7 @@ impl<'a, F: FieldExt, FC: FieldChip<F>> EccChip<'a, F, FC> {
         &self,
         ctx: &mut Context<'_, F>,
         P: &EccPoint<F, FC::FieldPoint>,
-    ) -> Result<AssignedCell<F, F>, Error>
+    ) -> Result<AssignedValue<F>, Error>
     where
         C: CurveAffine<Base = FC::FieldType>,
         C::Base: PrimeField,
@@ -767,7 +765,7 @@ impl<'a, F: FieldExt, FC: FieldChip<F>> EccChip<'a, F, FC> {
         ctx: &mut Context<'_, F>,
         P: &EccPoint<F, FC::FieldPoint>,
         Q: &EccPoint<F, FC::FieldPoint>,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         // TODO: optimize
         let x_is_equal = self.field_chip.is_equal(ctx, &P.x, &Q.x)?;
         let y_is_equal = self.field_chip.is_equal(ctx, &P.y, &Q.y)?;
@@ -794,7 +792,7 @@ where
         &self,
         ctx: &mut Context<'_, F>,
         P: &EccPoint<F, FC::FieldPoint>,
-        scalar: &Vec<AssignedCell<F, F>>,
+        scalar: &Vec<AssignedValue<F>>,
         max_bits: usize,
         window_bits: usize,
     ) -> Result<EccPoint<F, FC::FieldPoint>, Error> {
@@ -805,7 +803,7 @@ where
         &self,
         ctx: &mut Context<'_, F>,
         P: &Vec<EccPoint<F, FC::FieldPoint>>,
-        scalars: &Vec<Vec<AssignedCell<F, F>>>,
+        scalars: &Vec<Vec<AssignedValue<F>>>,
         max_bits: usize,
         window_bits: usize,
     ) -> Result<EccPoint<F, FC::FieldPoint>, Error>
@@ -855,7 +853,7 @@ where
         &self,
         ctx: &mut Context<'_, F>,
         P: &FixedEccPoint<F, GA>,
-        scalar: &Vec<AssignedCell<F, F>>,
+        scalar: &Vec<AssignedValue<F>>,
         max_bits: usize,
         window_bits: usize,
     ) -> Result<EccPoint<F, FC::FieldPoint>, Error>

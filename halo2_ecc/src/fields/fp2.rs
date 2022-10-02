@@ -1,12 +1,14 @@
 use super::{FieldChip, FieldExtConstructor, FieldExtPoint, PrimeFieldChip, Selectable};
 use ff::PrimeField;
 use halo2_base::{
-    gates::{Context, GateInstructions, QuantumCell::Existing, RangeInstructions},
+    gates::{GateInstructions, RangeInstructions},
     utils::{fe_to_biguint, value_to_option},
+    AssignedValue, Context,
+    QuantumCell::Existing,
 };
 use halo2_proofs::{
     arithmetic::{Field, FieldExt},
-    circuit::{AssignedCell, Value},
+    circuit::Value,
     plonk::Error,
 };
 use num_bigint::BigInt;
@@ -82,7 +84,7 @@ where
         ctx: &mut Context<'_, F>,
         a: &FieldExtPoint<FpChip::FieldPoint>,
         b: &FieldExtPoint<FpChip::FieldPoint>,
-        sel: &AssignedCell<F, F>,
+        sel: &AssignedValue<F>,
     ) -> Result<FieldExtPoint<FpChip::FieldPoint>, Error>
     where
         FpChip: Selectable<F, Point = FpChip::FieldPoint>,
@@ -299,7 +301,7 @@ where
         &self,
         ctx: &mut Context<'_, F>,
         a: &Self::FieldPoint,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         let mut prev = None;
         for a_coeff in &a.coeffs {
             let coeff = self.fp_chip.is_soft_zero(ctx, a_coeff)?;
@@ -317,7 +319,7 @@ where
         &self,
         ctx: &mut Context<'_, F>,
         a: &Self::FieldPoint,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         let mut prev = None;
         for a_coeff in &a.coeffs {
             let coeff = self.fp_chip.is_soft_nonzero(ctx, a_coeff)?;
@@ -335,7 +337,7 @@ where
         &self,
         ctx: &mut Context<'_, F>,
         a: &Self::FieldPoint,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         let mut prev = None;
         for a_coeff in &a.coeffs {
             let coeff = self.fp_chip.is_zero(ctx, a_coeff)?;
@@ -354,7 +356,7 @@ where
         ctx: &mut Context<'_, F>,
         a: &Self::FieldPoint,
         b: &Self::FieldPoint,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         let mut acc = None;
         for (a_coeff, b_coeff) in a.coeffs.iter().zip(b.coeffs.iter()) {
             let coeff = self.fp_chip.is_equal(ctx, a_coeff, b_coeff)?;

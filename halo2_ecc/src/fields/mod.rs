@@ -1,8 +1,8 @@
 use ff::PrimeField;
-use halo2_base::gates::{Context, RangeInstructions};
+use halo2_base::{gates::RangeInstructions, AssignedValue, Context};
 use halo2_proofs::{
     arithmetic::{Field, FieldExt},
-    circuit::{AssignedCell, Value},
+    circuit::Value,
     plonk::Error,
 };
 use std::fmt::Debug;
@@ -131,7 +131,7 @@ pub trait FieldChip<F: FieldExt> {
         &self,
         ctx: &mut Context<'_, F>,
         a: &Self::FieldPoint,
-    ) -> Result<AssignedCell<F, F>, Error>;
+    ) -> Result<AssignedValue<F>, Error>;
 
     // Constrains that the underlying big integer is in [1, p - 1].
     // For field extensions, checks coordinate-wise.
@@ -139,13 +139,13 @@ pub trait FieldChip<F: FieldExt> {
         &self,
         ctx: &mut Context<'_, F>,
         a: &Self::FieldPoint,
-    ) -> Result<AssignedCell<F, F>, Error>;
+    ) -> Result<AssignedValue<F>, Error>;
 
     fn is_zero(
         &self,
         _ctx: &mut Context<'_, F>,
         _a: &Self::FieldPoint,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         todo!()
     }
 
@@ -154,7 +154,7 @@ pub trait FieldChip<F: FieldExt> {
         _ctx: &mut Context<'_, F>,
         _a: &Self::FieldPoint,
         _b: &Self::FieldPoint,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         todo!()
     }
 
@@ -232,14 +232,14 @@ pub trait Selectable<F: FieldExt> {
         ctx: &mut Context<'_, F>,
         a: &Self::Point,
         b: &Self::Point,
-        sel: &AssignedCell<F, F>,
+        sel: &AssignedValue<F>,
     ) -> Result<Self::Point, Error>;
 
     fn inner_product(
         &self,
         ctx: &mut Context<'_, F>,
         a: &Vec<Self::Point>,
-        coeffs: &Vec<AssignedCell<F, F>>,
+        coeffs: &Vec<AssignedValue<F>>,
     ) -> Result<Self::Point, Error>;
 }
 

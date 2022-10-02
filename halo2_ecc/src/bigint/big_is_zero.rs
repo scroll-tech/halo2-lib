@@ -4,7 +4,7 @@ use halo2_base::{
     AssignedValue, Context,
     QuantumCell::Existing,
 };
-use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
+use halo2_proofs::{arithmetic::FieldExt, plonk::Error};
 
 // given OverflowInteger<F> `a`, returns whether `a == 0`
 pub fn assign<F: FieldExt>(

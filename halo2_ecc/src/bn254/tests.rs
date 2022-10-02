@@ -70,12 +70,13 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
         PairingChip::configure(
             meta,
             params.strategy,
-            params.num_advice,
-            params.num_lookup_advice,
+            &[params.num_advice],
+            &[params.num_lookup_advice],
             params.num_fixed,
             params.lookup_bits,
             params.limb_bits,
             params.num_limbs,
+            "default".to_string(),
         )
     }
 
@@ -101,9 +102,7 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
                 let mut aux = Context::new(
                     region,
                     ContextParams {
-                        num_advice: config.range.gate.num_advice,
-                        using_simple_floor_planner,
-                        first_pass,
+                        num_advice: vec![("default".to_string(), config.range.gate.num_advice)],
                     },
                 );
                 let ctx = &mut aux;
@@ -169,7 +168,7 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
                     let num_limbs = config.num_limbs;
 
                     println!("Using:\nadvice columns: {}\nspecial lookup advice columns: {}\nfixed columns: {}\nlookup bits: {}\nlimb bits: {}\nnum limbs: {}", num_advice, num_lookup_advice, num_fixed, lookup_bits, limb_bits, num_limbs);
-                    let advice_rows = ctx.advice_rows.iter();
+                    let advice_rows = ctx.advice_rows["default"].iter();
                     println!(
                         "maximum rows used by an advice column: {}",
                             advice_rows.clone().max().or(Some(&0)).unwrap(),
@@ -229,8 +228,8 @@ impl<F: FieldExt> MSMConfig<F> {
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
         strategy: FpStrategy,
-        num_advice: usize,
-        num_lookup_advice: usize,
+        num_advice: &[usize],
+        num_lookup_advice: &[usize],
         num_fixed: usize,
         lookup_bits: usize,
         limb_bits: usize,
@@ -238,6 +237,7 @@ impl<F: FieldExt> MSMConfig<F> {
         p: BigUint,
         batch_size: usize,
         window_bits: usize,
+        context_id: String,
     ) -> Self {
         let fp_chip = FpChip::<F>::configure(
             meta,
@@ -249,6 +249,7 @@ impl<F: FieldExt> MSMConfig<F> {
             limb_bits,
             num_limbs,
             p,
+            context_id,
         );
         MSMConfig { fp_chip, batch_size, window_bits }
     }
@@ -296,8 +297,8 @@ impl Circuit<Fr> for MSMCircuit<Fr> {
         MSMConfig::configure(
             meta,
             params.strategy,
-            params.num_advice,
-            params.num_lookup_advice,
+            &[params.num_advice],
+            &[params.num_lookup_advice],
             params.num_fixed,
             params.lookup_bits,
             params.limb_bits,
@@ -305,6 +306,7 @@ impl Circuit<Fr> for MSMCircuit<Fr> {
             BigUint::from_str_radix(&Fq::MODULUS[2..], 16).unwrap(),
             params.batch_size,
             params.window_bits,
+            "default".to_string(),
         )
     }
 
@@ -331,9 +333,7 @@ impl Circuit<Fr> for MSMCircuit<Fr> {
                 let mut aux = Context::new(
                     region,
                     ContextParams {
-                        num_advice: config.fp_chip.range.gate.num_advice,
-                        using_simple_floor_planner,
-                        first_pass,
+                        num_advice: vec![(config.fp_chip.range.context_id.clone(), config.fp_chip.range.gate.num_advice)],
                     },
                 );
                 let ctx = &mut aux;
@@ -397,7 +397,7 @@ impl Circuit<Fr> for MSMCircuit<Fr> {
                     let num_limbs = config.fp_chip.num_limbs;
 
                     println!("Using:\nadvice columns: {}\nspecial lookup advice columns: {}\nfixed columns: {}\nlookup bits: {}\nlimb bits: {}\nnum limbs: {}", num_advice, num_lookup_advice, num_fixed, lookup_bits, limb_bits, num_limbs);
-                    let advice_rows = ctx.advice_rows.iter();
+                    let advice_rows = ctx.advice_rows["default"].iter();
                     println!(
                         "maximum rows used by an advice column: {}",
                             advice_rows.clone().max().or(Some(&0)).unwrap(),

@@ -8,15 +8,15 @@ use ff::PrimeField;
 use halo2_base::{
     gates::{
         range::{RangeConfig, RangeStrategy},
-        Context, GateInstructions, QuantumCell,
-        QuantumCell::{Constant, Existing, Witness},
-        RangeInstructions,
+        GateInstructions, RangeInstructions,
     },
     utils::{bigint_to_fe, decompose_bigint, decompose_bigint_option, fe_to_bigint, fe_to_biguint},
+    AssignedValue, Context,
+    QuantumCell::{self, Constant, Existing, Witness},
 };
 use halo2_proofs::{
     arithmetic::FieldExt,
-    circuit::{AssignedCell, Layouter, Value},
+    circuit::{Layouter, Value},
     plonk::{ConstraintSystem, Error},
 };
 use num_bigint::{BigInt, BigUint};
@@ -44,13 +44,14 @@ impl<F: FieldExt, Fp: PrimeField> FpConfig<F, Fp> {
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
         strategy: FpStrategy,
-        num_advice: usize,
-        num_lookup_advice: usize,
+        num_advice: &[usize],
+        num_lookup_advice: &[usize],
         num_fixed: usize,
         lookup_bits: usize,
         limb_bits: usize,
         num_limbs: usize,
         p: BigUint,
+        gate_context_id: String,
     ) -> Self {
         let range = RangeConfig::<F>::configure(
             meta,
@@ -62,6 +63,7 @@ impl<F: FieldExt, Fp: PrimeField> FpConfig<F, Fp> {
             num_lookup_advice,
             num_fixed,
             lookup_bits,
+            gate_context_id.clone(),
         );
 
         let bigint_chip = BigIntConfig::<F>::configure(
@@ -73,6 +75,7 @@ impl<F: FieldExt, Fp: PrimeField> FpConfig<F, Fp> {
             limb_bits,
             num_limbs,
             &range.gate,
+            "unused".to_string(),
         );
         FpConfig { range, bigint_chip, limb_bits, num_limbs, p, _marker: PhantomData }
     }
@@ -114,7 +117,7 @@ impl<F: FieldExt, Fp: PrimeField> FpConfig<F, Fp> {
         Ok(())
     }
 
-    pub fn finalize(&self, ctx: &mut Context<'_, F>) -> Result<(usize, usize, usize), Error> {
+    pub fn finalize(&self, ctx: &mut Context<'_, F>) -> Result<(usize, usize, Vec<usize>), Error> {
         self.range.finalize(ctx)
     }
 }
@@ -325,7 +328,7 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpConfig<F, Fp> {
         &self,
         ctx: &mut Context<'_, F>,
         a: &CRTInteger<F>,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         let is_zero = big_is_zero::crt(self.range(), ctx, a)?;
 
         // underflow != 0 iff carry < p
@@ -342,7 +345,7 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpConfig<F, Fp> {
         &self,
         ctx: &mut Context<'_, F>,
         a: &CRTInteger<F>,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         let is_zero = big_is_zero::crt(self.range(), ctx, a)?;
         let is_nonzero = self.range.gate().not(ctx, &Existing(&is_zero))?;
 
@@ -363,7 +366,7 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpConfig<F, Fp> {
         &self,
         ctx: &mut Context<'_, F>,
         a: &CRTInteger<F>,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         self.enforce_less_than_p(ctx, a)?;
         big_is_zero::crt(self.range(), ctx, a)
     }
@@ -376,7 +379,7 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpConfig<F, Fp> {
         ctx: &mut Context<'_, F>,
         a: &Self::FieldPoint,
         b: &Self::FieldPoint,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         self.enforce_less_than_p(ctx, a)?;
         self.enforce_less_than_p(ctx, b)?;
         // a.native and b.native are derived from `a.truncation, b.truncation`, so no need to check if they're equal
@@ -410,7 +413,7 @@ impl<F: FieldExt, Fp: PrimeField> Selectable<F> for FpConfig<F, Fp> {
         ctx: &mut Context<'_, F>,
         a: &CRTInteger<F>,
         b: &CRTInteger<F>,
-        sel: &AssignedCell<F, F>,
+        sel: &AssignedValue<F>,
     ) -> Result<CRTInteger<F>, Error> {
         select::crt(self.range.gate(), ctx, a, b, sel)
     }
@@ -419,7 +422,7 @@ impl<F: FieldExt, Fp: PrimeField> Selectable<F> for FpConfig<F, Fp> {
         &self,
         ctx: &mut Context<'_, F>,
         a: &Vec<CRTInteger<F>>,
-        coeffs: &Vec<AssignedCell<F, F>>,
+        coeffs: &Vec<AssignedValue<F>>,
     ) -> Result<CRTInteger<F>, Error> {
         inner_product::crt(self.range.gate(), ctx, a, coeffs)
     }
@@ -441,8 +444,8 @@ pub(crate) mod tests {
 
     use crate::fields::fp::FpConfig;
     use crate::fields::FieldChip;
-    use halo2_base::gates::{Context, ContextParams};
     use halo2_base::utils::{fe_to_bigint, modulus};
+    use halo2_base::{Context, ContextParams};
 
     use super::FpStrategy;
 
@@ -468,13 +471,14 @@ pub(crate) mod tests {
             FpConfig::configure(
                 meta,
                 FpStrategy::SimplePlus,
-                NUM_ADVICE,
-                1,
+                &[NUM_ADVICE],
+                &[1],
                 NUM_FIXED,
                 11,
                 88,
                 3,
                 modulus::<Fq>(),
+                "default".to_string(),
             )
         }
 
@@ -498,11 +502,7 @@ pub(crate) mod tests {
 
                     let mut aux = Context::new(
                         region,
-                        ContextParams {
-                            num_advice: NUM_ADVICE,
-                            using_simple_floor_planner,
-                            first_pass,
-                        },
+                        ContextParams { num_advice: vec![("default".to_string(), NUM_ADVICE)] },
                     );
                     let ctx = &mut aux;
 
@@ -534,10 +534,10 @@ pub(crate) mod tests {
                     */
 
                     println!("Using {} advice columns and {} fixed columns", NUM_ADVICE, NUM_FIXED);
-                    println!("total cells: {}", ctx.advice_rows.iter().sum::<usize>());
+                    println!("total cells: {}", ctx.advice_rows["default"].iter().sum::<usize>());
                     println!(
                         "maximum rows used by an advice column: {}",
-                        ctx.advice_rows.iter().max().unwrap()
+                        ctx.advice_rows["default"].iter().max().unwrap()
                     );
                     // IMPORTANT: this assigns all constants to the fixed columns
                     // This is not optional.

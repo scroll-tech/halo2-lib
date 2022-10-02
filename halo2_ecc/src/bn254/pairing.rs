@@ -364,12 +364,13 @@ impl<'a, F: FieldExt> PairingChip<'a, F> {
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
         strategy: FpStrategy,
-        num_advice: usize,
-        num_lookup_advice: usize,
+        num_advice: &[usize],
+        num_lookup_advice: &[usize],
         num_fixed: usize,
         lookup_bits: usize,
         limb_bits: usize,
         num_limbs: usize,
+        context_id: String,
     ) -> FpChip<F> {
         FpChip::configure(
             meta,
@@ -381,6 +382,7 @@ impl<'a, F: FieldExt> PairingChip<'a, F> {
             limb_bits,
             num_limbs,
             BigUint::from_str_radix(&Fq::MODULUS[2..], 16).unwrap(),
+            context_id,
         )
     }
 

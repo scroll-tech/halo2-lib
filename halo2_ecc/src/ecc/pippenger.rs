@@ -3,10 +3,13 @@ use super::{
 };
 use crate::fields::{FieldChip, Selectable};
 use group::{Curve, Group};
-use halo2_base::gates::{Context, GateInstructions, RangeInstructions};
+use halo2_base::{
+    gates::{GateInstructions, RangeInstructions},
+    AssignedValue, Context,
+};
 use halo2_proofs::{
     arithmetic::{CurveAffine, FieldExt},
-    circuit::{AssignedCell, Value},
+    circuit::Value,
     plonk::Error,
 };
 use rand_core::OsRng;
@@ -21,10 +24,10 @@ pub fn decompose<F, FC>(
     chip: &FC,
     ctx: &mut Context<'_, F>,
     points: &Vec<EccPoint<F, FC::FieldPoint>>,
-    scalars: &Vec<Vec<AssignedCell<F, F>>>,
+    scalars: &Vec<Vec<AssignedValue<F>>>,
     max_scalar_bits_per_cell: usize,
     radix: usize,
-) -> Result<(Vec<EccPoint<F, FC::FieldPoint>>, Vec<Vec<AssignedCell<F, F>>>), Error>
+) -> Result<(Vec<EccPoint<F, FC::FieldPoint>>, Vec<Vec<AssignedValue<F>>>), Error>
 where
     F: FieldExt,
     FC: FieldChip<F>,
@@ -68,7 +71,7 @@ pub fn multi_product<F: FieldExt, FC, GA>(
     chip: &FC,
     ctx: &mut Context<'_, F>,
     points: &Vec<EccPoint<F, FC::FieldPoint>>,
-    bool_scalars: &Vec<Vec<AssignedCell<F, F>>>,
+    bool_scalars: &Vec<Vec<AssignedValue<F>>>,
     curve_b: F,
     clumping_factor: usize,
 ) -> Result<(Vec<EccPoint<F, FC::FieldPoint>>, EccPoint<F, FC::FieldPoint>), Error>
@@ -151,7 +154,7 @@ pub fn multi_exp<F: FieldExt, FC, GA>(
     chip: &FC,
     ctx: &mut Context<'_, F>,
     points: &Vec<EccPoint<F, FC::FieldPoint>>,
-    scalars: &Vec<Vec<AssignedCell<F, F>>>,
+    scalars: &Vec<Vec<AssignedValue<F>>>,
     curve_b: F,
     max_scalar_bits_per_cell: usize,
     radix: usize,
