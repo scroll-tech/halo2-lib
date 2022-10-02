@@ -1,16 +1,11 @@
-use std::fmt::Debug;
-
-use crate::{
-    bigint::CRTInteger,
-    gates::{Context, RangeInstructions},
-};
 use ff::PrimeField;
+use halo2_base::gates::{Context, RangeInstructions};
 use halo2_proofs::{
     arithmetic::{Field, FieldExt},
     circuit::{AssignedCell, Value},
     plonk::Error,
 };
-use num_bigint::BigUint;
+use std::fmt::Debug;
 
 pub mod fp;
 pub mod fp12;
@@ -71,9 +66,9 @@ pub trait FieldChip<F: FieldExt> {
     /// output: `a + c`
     fn add_native_constant_no_carry(
         &self,
-        ctx: &mut Context<'_, F>,
-        a: &Self::FieldPoint,
-        c: F,
+        _ctx: &mut Context<'_, F>,
+        _a: &Self::FieldPoint,
+        _c: F,
     ) -> Result<Self::FieldPoint, Error> {
         unimplemented!()
     }
@@ -148,26 +143,26 @@ pub trait FieldChip<F: FieldExt> {
 
     fn is_zero(
         &self,
-        ctx: &mut Context<'_, F>,
-        a: &Self::FieldPoint,
+        _ctx: &mut Context<'_, F>,
+        _a: &Self::FieldPoint,
     ) -> Result<AssignedCell<F, F>, Error> {
         todo!()
     }
 
     fn is_equal(
         &self,
-        ctx: &mut Context<'_, F>,
-        a: &Self::FieldPoint,
-        b: &Self::FieldPoint,
+        _ctx: &mut Context<'_, F>,
+        _a: &Self::FieldPoint,
+        _b: &Self::FieldPoint,
     ) -> Result<AssignedCell<F, F>, Error> {
         todo!()
     }
 
     fn assert_equal(
         &self,
-        ctx: &mut Context<'_, F>,
-        a: &Self::FieldPoint,
-        b: &Self::FieldPoint,
+        _ctx: &mut Context<'_, F>,
+        _a: &Self::FieldPoint,
+        _b: &Self::FieldPoint,
     ) -> Result<(), Error> {
         todo!()
     }

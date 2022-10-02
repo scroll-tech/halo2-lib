@@ -1,15 +1,14 @@
+use super::{
+    AssignedValue, Context, GateInstructions,
+    QuantumCell::{self, Constant, Existing, Witness},
+};
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Value},
     plonk::{Advice, Column, ConstraintSystem, Error, Fixed},
     poly::Rotation,
 };
-use std::marker::PhantomData;
-
-use super::{
-    Context, GateInstructions,
-    QuantumCell::{self, Constant, Existing, Witness},
-};
+use std::{borrow::Borrow, marker::PhantomData, rc::Rc};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum GateStrategy {
@@ -105,6 +104,7 @@ pub struct FlexGateConfig<F: FieldExt> {
     pub num_advice: usize,
     strategy: GateStrategy,
     gate_len: usize,
+    pub context_id: Rc<String>,
 }
 
 impl<F: FieldExt> FlexGateConfig<F> {
@@ -113,6 +113,7 @@ impl<F: FieldExt> FlexGateConfig<F> {
         strategy: GateStrategy,
         num_advice: usize,
         num_fixed: usize,
+        context_id: String,
     ) -> Self {
         let mut constants = Vec::with_capacity(num_fixed);
         for _i in 0..num_fixed {
@@ -128,7 +129,14 @@ impl<F: FieldExt> FlexGateConfig<F> {
                     let gate = BasicGateConfig::configure(meta, strategy);
                     basic_gates.push(gate);
                 }
-                Self { basic_gates, constants, num_advice, strategy, gate_len: 4 }
+                Self {
+                    basic_gates,
+                    constants,
+                    num_advice,
+                    strategy,
+                    gate_len: 4,
+                    context_id: Rc::new(context_id),
+                }
             }
         }
     }
@@ -155,7 +163,7 @@ impl<F: FieldExt> FlexGateConfig<F> {
     ) -> Result<AssignedCell<F, F>, Error> {
         match input {
             QuantumCell::Existing(acell) => {
-                acell.copy_advice(|| "gate: copy advice", &mut ctx.region, column, offset)
+                acell.assigned.copy_advice(|| "gate: copy advice", &mut ctx.region, column, offset)
             }
             QuantumCell::Witness(val) => {
                 ctx.region.assign_advice(|| "gate: assign advice", column, offset, || val)
@@ -172,6 +180,22 @@ impl<F: FieldExt> FlexGateConfig<F> {
             }
         }
     }
+
+    /// returns leftmost `i` where `advice_rows[context_id][i]` is minimum amongst all `i` where `column[i]` is in phase `phase`
+    fn min_gate_index_in(&self, ctx: &Context<'_, F>, phase: u8) -> usize {
+        let advice_rows = ctx
+            .advice_rows
+            .get::<String>(Rc::borrow(&self.context_id))
+            .expect(format!("context_id {} should have advice rows", self.context_id).as_str());
+
+        self.basic_gates
+            .iter()
+            .enumerate()
+            .filter(|(_, basic_gate)| basic_gate.value.column_type().phase() == phase)
+            .min_by(|(i, _), (j, _)| advice_rows[*i].cmp(&advice_rows[*j]))
+            .map(|(i, _)| i)
+            .expect(format!("Should exist advice column in phase {}", phase).as_str())
+    }
 }
 
 impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
@@ -184,31 +208,56 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
     /// * second coordinate should only be set if using strategy PlonkPlus; if not set, default to [1, 0, 0]
     /// * allow the index in `gate_offsets` to be negative in case we want to do advanced overlapping
     /// * gate_index can either be set if you know the specific column you want to assign to, or None if you want to auto-select index
+    /// * only selects from advice columns in `ctx.current_phase`
     fn assign_region(
         &self,
         ctx: &mut Context<'_, F>,
         inputs: Vec<QuantumCell<F>>,
         gate_offsets: Vec<(isize, Option<[F; 3]>)>,
         gate_index: Option<usize>,
-        // offset: usize, // It's useless to have an offset here since the function auto-selects what column to put stuff into
-    ) -> Result<(Vec<AssignedCell<F, F>>, usize), Error> {
-        let gate_index = if let Some(id) = gate_index { id } else { ctx.min_gate_index() };
+    ) -> Result<Vec<AssignedValue<F>>, Error> {
+        self.assign_region_in(ctx, inputs, gate_offsets, gate_index, ctx.current_phase())
+    }
 
-        let mut assigned_cells = Vec::with_capacity(inputs.len());
+    // same as `assign_region` except you can specify the `phase` to assign in
+    fn assign_region_in(
+        &self,
+        ctx: &mut Context<'_, F>,
+        inputs: Vec<QuantumCell<F>>,
+        gate_offsets: Vec<(isize, Option<[F; 3]>)>,
+        gate_index: Option<usize>,
+        phase: u8,
+    ) -> Result<Vec<AssignedValue<F>>, Error> {
+        let gate_index = if let Some(id) = gate_index {
+            assert_eq!(phase, self.basic_gates[id].value.column_type().phase());
+            id
+        } else {
+            self.min_gate_index_in(ctx, phase)
+        };
+        let row_offset =
+            ctx.advice_rows.get::<String>(Rc::borrow(&self.context_id)).unwrap()[gate_index];
+
+        let mut assignments = Vec::with_capacity(inputs.len());
         for (i, input) in inputs.iter().enumerate() {
             let assigned_cell = self.assign_cell(
                 ctx,
                 input.clone(),
                 self.basic_gates[gate_index].value,
-                ctx.advice_rows[gate_index] + i,
+                row_offset + i,
             )?;
-            assigned_cells.push(assigned_cell);
+            assignments.push(AssignedValue::new(
+                assigned_cell,
+                self.context_id.clone(),
+                gate_index,
+                row_offset + i,
+                phase,
+            ));
         }
         for (i, q_coeff) in &gate_offsets {
             ctx.region.assign_fixed(
                 || "",
                 self.basic_gates[gate_index].q_enable[0],
-                ((ctx.advice_rows[gate_index] as isize) + i) as usize,
+                (row_offset as isize + i) as usize,
                 || Value::known(F::one()),
             )?;
 
@@ -218,16 +267,17 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
                     ctx.region.assign_fixed(
                         || "",
                         self.basic_gates[gate_index].q_enable[1],
-                        ((ctx.advice_rows[gate_index] as isize) + i) as usize + j,
+                        ((row_offset as isize) + i) as usize + j,
                         || Value::known(q_coeff[j]),
                     )?;
                 }
             }
         }
 
-        ctx.advice_rows[gate_index] += inputs.len();
+        ctx.advice_rows.get_mut::<String>(Rc::borrow(&self.context_id)).unwrap()[gate_index] +=
+            inputs.len();
 
-        Ok((assigned_cells, gate_index))
+        Ok(assignments)
     }
 
     /// Only call this if ctx.region is not in shape mode, i.e., if not using simple layouter or ctx.first_pass = false
@@ -242,35 +292,31 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         inputs: Vec<QuantumCell<F>>,
         gate_offsets: Vec<usize>,
         equality_offsets: Vec<(usize, usize)>,
-        external_equality: Vec<(&AssignedCell<F, F>, usize)>,
-    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
-        let assigned_cells = match self.strategy {
-            GateStrategy::Vertical | GateStrategy::PlonkPlus => {
-                self.assign_region(
+        external_equality: Vec<(&AssignedValue<F>, usize)>,
+    ) -> Result<Vec<AssignedValue<F>>, Error> {
+        let assignments = match self.strategy {
+            GateStrategy::Vertical | GateStrategy::PlonkPlus => self
+                .assign_region(
                     ctx,
                     inputs,
                     gate_offsets.iter().map(|i| (*i as isize, None)).collect(),
                     None,
                 )
-                .expect("assign region should not fail")
-                .0
-            }
+                .expect("assign region should not fail"),
         };
-
         for (offset1, offset2) in equality_offsets {
             ctx.region.constrain_equal(
-                assigned_cells[offset1].clone().cell(),
-                assigned_cells[offset2].clone().cell(),
+                assignments[offset1].clone().cell(),
+                assignments[offset2].clone().cell(),
             )?;
         }
-        for (assigned_cell, eq_offset) in external_equality {
-            ctx.region
-                .constrain_equal(assigned_cell.cell(), assigned_cells[eq_offset].clone().cell())?;
+        for (assigned, eq_offset) in external_equality {
+            ctx.region.constrain_equal(assigned.cell(), assignments[eq_offset].cell())?;
         }
-        Ok(assigned_cells)
+        Ok(assignments)
     }
 
-    fn load_zero(&self, ctx: &mut Context<'_, F>) -> Result<AssignedCell<F, F>, Error> {
+    fn load_zero(&self, ctx: &mut Context<'_, F>) -> Result<AssignedValue<F>, Error> {
         if let Some(zcell) = &ctx.zero_cell {
             return Ok(zcell.clone());
         }
@@ -287,7 +333,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         ctx: &mut Context<'_, F>,
         a: &QuantumCell<F>,
         b: &QuantumCell<F>,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         let cells: Vec<QuantumCell<F>> = vec![
             a.clone(),
             b.clone(),
@@ -305,7 +351,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         ctx: &mut Context<'_, F>,
         a: &QuantumCell<F>,
         b: &QuantumCell<F>,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         let cells: Vec<QuantumCell<F>> = vec![
             a.clone(),
             b.clone(),
@@ -317,11 +363,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
     }
 
     // | 0 | a | -1 | -a |
-    fn neg(
-        &self,
-        ctx: &mut Context<'_, F>,
-        a: &QuantumCell<F>,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    fn neg(&self, ctx: &mut Context<'_, F>, a: &QuantumCell<F>) -> Result<AssignedValue<F>, Error> {
         let cells: Vec<QuantumCell<F>> = vec![
             QuantumCell::Constant(F::from(0)),
             a.clone(),
@@ -339,7 +381,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         ctx: &mut Context<'_, F>,
         a: &QuantumCell<F>,
         b: &QuantumCell<F>,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         let cells: Vec<QuantumCell<F>> = vec![
             QuantumCell::Constant(F::from(0)),
             a.clone(),
@@ -356,7 +398,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         a: &QuantumCell<F>,
         b: &QuantumCell<F>,
         c: &QuantumCell<F>,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         let assignments = self.assign_region_smart(
             ctx,
             vec![
@@ -388,19 +430,14 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         Ok(())
     }
     // Takes two vectors of `QuantumCell` and constrains a witness output to the inner product of `<vec_a, vec_b>`
-    // outputs are vec<(a_cell, a_relative_index)>, vec<(b_cell, b_relative_index)>, out_cell, gate_index
+    // outputs are vec<(a_cell, a_relative_index)>, vec<(b_cell, b_relative_index)>, out_cell
     fn inner_product(
         &self,
         ctx: &mut Context<'_, F>,
         vec_a: &Vec<QuantumCell<F>>,
         vec_b: &Vec<QuantumCell<F>>,
     ) -> Result<
-        (
-            Option<Vec<(AssignedCell<F, F>, usize)>>,
-            Option<Vec<(AssignedCell<F, F>, usize)>>,
-            AssignedCell<F, F>,
-            usize,
-        ),
+        (Option<Vec<AssignedValue<F>>>, Option<Vec<AssignedValue<F>>>, AssignedValue<F>),
         Error,
     > {
         assert_eq!(vec_a.len(), vec_b.len());
@@ -431,14 +468,8 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
             let start_ida: usize = if vec_b[0] == F::one() { 1 } else { 0 };
             if start_ida == 1 && k == 1 {
                 // this is just a0 * 1 = a0; you're doing nothing, why are you calling this function?
-                let (assignment, gate_index) =
-                    self.assign_region(ctx, vec![vec_a[0].clone()], vec![], None)?;
-                return Ok((
-                    Some(vec![(assignment[0].clone(), 0)]),
-                    None,
-                    assignment[0].clone(),
-                    gate_index,
-                ));
+                let assignment = self.assign_region(ctx, vec![vec_a[0].clone()], vec![], None)?;
+                return Ok((Some(assignment.clone()), None, assignment[0].clone()));
             }
             let k_chunks = (k - start_ida + gate_segment - 1) / gate_segment;
             let mut cells = Vec::with_capacity(1 + (gate_segment + 1) * k_chunks);
@@ -467,27 +498,26 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
                 cells.push(running_sum.clone());
             }
 
-            let (assignments, gate_index) = self.assign_region(ctx, cells, gate_offsets, None)?;
+            let assignments = self.assign_region(ctx, cells, gate_offsets, None)?;
             let mut a_assigned = Vec::with_capacity(k);
             if start_ida == 1 {
-                a_assigned.push((assignments[0].clone(), 0));
+                a_assigned.push(assignments[0].clone());
             }
             for i in start_ida..k {
                 let chunk = (i - start_ida) / gate_segment;
-                a_assigned.push((
+                a_assigned.push(
                     assignments[1 + chunk * (gate_segment + 1) + ((i - start_ida) % gate_segment)]
                         .clone(),
-                    1 + chunk * (gate_segment + 1) + ((i - start_ida) % gate_segment),
-                ))
+                );
             }
-            return Ok((Some(a_assigned), None, assignments.last().unwrap().clone(), gate_index));
+            return Ok((Some(a_assigned), None, assignments.last().unwrap().clone()));
         }
 
         if self.strategy == GateStrategy::PlonkPlus
             && vec_a.iter().all(|a| if matches!(a, Constant(_)) { true } else { false })
         {
-            let (b, a, out, id) = self.inner_product(ctx, vec_b, vec_a)?;
-            return Ok((a, b, out, id));
+            let (b, a, out) = self.inner_product(ctx, vec_b, vec_a)?;
+            return Ok((a, b, out));
         }
 
         let mut cells: Vec<QuantumCell<F>> = Vec::with_capacity(3 * vec_a.len() + 1);
@@ -511,7 +541,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         for i in 0..(vec_a.len() - start_id) {
             gate_offsets.push(3 * i);
         }
-        let (assigned_cells, gate_index) = self.assign_region(
+        let assignments = self.assign_region(
             ctx,
             cells,
             gate_offsets.iter().map(|i| (*i as isize, None)).collect(),
@@ -520,15 +550,15 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         let mut a_assigned = Vec::with_capacity(vec_a.len());
         let mut b_assigned = Vec::with_capacity(vec_a.len());
         if start_id == 1 {
-            a_assigned.push((assigned_cells[0].clone(), 0));
+            a_assigned.push(assignments[0].clone());
         }
         for i in 0..(vec_a.len() - start_id) {
-            a_assigned.push((assigned_cells[3 * i + 1].clone(), 3 * i + 1));
-            b_assigned.push((assigned_cells[3 * i + 2].clone(), 3 * i + 2));
+            a_assigned.push(assignments[3 * i + 1].clone());
+            b_assigned.push(assignments[3 * i + 2].clone());
         }
         let b_assigned = if start_id == 1 { None } else { Some(b_assigned) };
 
-        Ok((Some(a_assigned), b_assigned, assigned_cells.last().unwrap().clone(), gate_index))
+        Ok((Some(a_assigned), b_assigned, assignments.last().unwrap().clone()))
     }
 
     fn accumulated_product(
@@ -536,7 +566,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         ctx: &mut Context<'_, F>,
         vec_a: &Vec<QuantumCell<F>>,
         vec_b: &Vec<QuantumCell<F>>,
-    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+    ) -> Result<Vec<AssignedValue<F>>, Error> {
         assert!(vec_a.len() + 1 == vec_b.len() || (vec_a.len() == 0 && vec_b.len() == 0));
         let k = vec_b.len();
         match self.strategy {
@@ -585,7 +615,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         ctx: &mut Context<'_, F>,
         values: &[(F, QuantumCell<F>, QuantumCell<F>)],
         var: &QuantumCell<F>,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         let k = values.len();
         match self.strategy {
             GateStrategy::PlonkPlus => {
@@ -598,7 +628,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
                     cells.append(&mut vec![a.clone(), b.clone(), Witness(acc)]);
                     gate_offsets.push((3 * i as isize, Some([*c, F::zero(), F::zero()])));
                 }
-                let (assignments, _) = self.assign_region(ctx, cells, gate_offsets, None)?;
+                let assignments = self.assign_region(ctx, cells, gate_offsets, None)?;
 
                 Ok(assignments.last().unwrap().clone())
             }
@@ -621,7 +651,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
                     a.push(Existing(&prod));
                     b.push(Constant(c));
                 }
-                let (_, _, out, _) = self.inner_product(ctx, &a, &b)?;
+                let (_, _, out) = self.inner_product(ctx, &a, &b)?;
                 Ok(out)
             }
         }
@@ -633,7 +663,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         ctx: &mut Context<'_, F>,
         a: &QuantumCell<F>,
         b: &QuantumCell<F>,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         let cells: Vec<QuantumCell<F>> = vec![
             QuantumCell::Witness(b.value().map(|x| F::from(1) - *x)),
             QuantumCell::Constant(F::from(1)),
@@ -657,7 +687,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         ctx: &mut Context<'_, F>,
         a: &QuantumCell<F>,
         b: &QuantumCell<F>,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         let cells: Vec<QuantumCell<F>> = vec![
             QuantumCell::Constant(F::from(0)),
             a.clone(),
@@ -677,7 +707,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         a: &QuantumCell<F>,
         b: &QuantumCell<F>,
         sel: &QuantumCell<F>,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         let diff_val = a.value().zip(b.value()).map(|(av, bv)| (*av) - (*bv));
         let out_val = a
             .value()
@@ -707,7 +737,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
             // | 1 | 0 | 0     | 1 | 0   | 0
             // | 0 | 1 | -1    | 1 | 0   | 0
             GateStrategy::PlonkPlus => {
-                let (assignments, _) = self.assign_region(
+                let assignments = self.assign_region(
                     ctx,
                     vec![
                         Constant(F::from(0)),
@@ -735,7 +765,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         a: &QuantumCell<F>,
         b: &QuantumCell<F>,
         c: &QuantumCell<F>,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         let cells: Vec<QuantumCell<F>> = vec![
             QuantumCell::Witness(
                 b.value().zip(c.value()).map(|(bv, cv)| F::from(1) - (*bv) * (*cv)),
@@ -769,7 +799,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         &self,
         ctx: &mut Context<'_, F>,
         bits: &Vec<QuantumCell<F>>,
-    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+    ) -> Result<Vec<AssignedValue<F>>, Error> {
         let k = bits.len();
 
         let (inv_last_bit, last_bit) = {
@@ -787,7 +817,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
             )?;
             (assignments[0].clone(), assignments[1].clone())
         };
-        let mut indicator: Vec<AssignedCell<F, F>> = Vec::with_capacity(2 * (1 << k) - 2);
+        let mut indicator: Vec<AssignedValue<F>> = Vec::with_capacity(2 * (1 << k) - 2);
         let mut offset = 0;
         indicator.push(inv_last_bit);
         indicator.push(last_bit);
@@ -831,7 +861,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         ctx: &mut Context<'_, F>,
         idx: &QuantumCell<F>,
         len: usize,
-    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+    ) -> Result<Vec<AssignedValue<F>>, Error> {
         let ind = self.assign_region_smart(
             ctx,
             (0..len)

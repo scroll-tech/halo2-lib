@@ -1,6 +1,8 @@
 use super::{CRTInteger, OverflowInteger};
-use halo2_base::gates::{Context, GateInstructions, QuantumCell::Existing, RangeInstructions};
-use halo2_proofs::arithmetic::{Field, FieldExt};
+use halo2_base::gates::{
+    AssignedValue, Context, GateInstructions, QuantumCell::Existing, RangeInstructions,
+};
+use halo2_proofs::{arithmetic::FieldExt, plonk::Error};
 
 // given OverflowInteger<F>'s `a` and `b` of the same shape,
 // returns whether `a == b`
@@ -9,7 +11,7 @@ pub fn assign<F: FieldExt>(
     ctx: &mut Context<'_, F>,
     a: &OverflowInteger<F>,
     b: &OverflowInteger<F>,
-) -> Result<AssignedCell<F, F>, Error> {
+) -> Result<AssignedValue<F>, Error> {
     let k_a = a.limbs.len();
     let k_b = b.limbs.len();
     let limb_bits_a = a.limb_bits;
@@ -17,7 +19,6 @@ pub fn assign<F: FieldExt>(
     assert_eq!(k_a, k_b);
     assert_eq!(limb_bits_a, limb_bits_b);
     let k = k_a;
-    let limb_bits = limb_bits_a;
 
     let mut eq = Vec::with_capacity(k);
     for idx in 0..k {
@@ -39,7 +40,7 @@ pub fn crt<F: FieldExt>(
     ctx: &mut Context<'_, F>,
     a: &CRTInteger<F>,
     b: &CRTInteger<F>,
-) -> Result<AssignedCell<F, F>, Error> {
+) -> Result<AssignedValue<F>, Error> {
     let out_trunc = assign(range, ctx, &a.truncation, &b.truncation)?;
     let out_native = range.is_equal(ctx, &Existing(&a.native), &Existing(&b.native))?;
     let out = range.gate().and(ctx, &Existing(&out_trunc), &Existing(&out_native))?;

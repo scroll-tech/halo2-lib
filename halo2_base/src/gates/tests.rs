@@ -1,17 +1,13 @@
-use std::cmp::max;
-
-use halo2_proofs::{
-    arithmetic::FieldExt, circuit::floor_planner::V1, circuit::*, dev::MockProver,
-    halo2curves::bn256::Fr, plonk::*, poly::Rotation,
-};
-
 use super::{
     flex_gate::{FlexGateConfig, GateStrategy},
     range, GateInstructions, RangeInstructions,
 };
-use crate::gates::{
+use crate::{
     Context, ContextParams,
-    QuantumCell::{self, Constant, Existing, Witness},
+    QuantumCell::{Constant, Existing, Witness},
+};
+use halo2_proofs::{
+    arithmetic::FieldExt, circuit::*, dev::MockProver, halo2curves::bn256::Fr, plonk::*,
 };
 
 #[derive(Default)]
@@ -32,7 +28,13 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        FlexGateConfig::configure(meta, GateStrategy::PlonkPlus, NUM_ADVICE, 1)
+        FlexGateConfig::configure(
+            meta,
+            GateStrategy::PlonkPlus,
+            NUM_ADVICE,
+            1,
+            "default".to_string(),
+        )
     }
 
     fn synthesize(
@@ -53,11 +55,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
 
                 let mut aux = Context::new(
                     region,
-                    ContextParams {
-                        num_advice: NUM_ADVICE,
-                        using_simple_floor_planner,
-                        first_pass,
-                    },
+                    ContextParams { num_advice: vec![("default".to_string(), NUM_ADVICE)] },
                 );
                 let ctx = &mut aux;
 
@@ -87,14 +85,14 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
                     config.mul(ctx, &Existing(&c_cell), &Existing(&b_cell))?;
                 }
 
-		// test idx_to_indicator
-		{
-		    config.idx_to_indicator(ctx, &Constant(F::from(3)), 4)?;
-		}
+                // test idx_to_indicator
+                {
+                    config.idx_to_indicator(ctx, &Constant(F::from(3)), 4)?;
+                }
 
                 println!(
                     "maximum rows used by an advice column: {}",
-                    ctx.advice_rows.iter().max().or(Some(&0)).unwrap(),
+                    ctx.advice_rows["default"].iter().max().or(Some(&0)).unwrap(),
                 );
                 let (const_rows, _) = config.finalize(ctx)?;
                 println!("maximum rows used by a fixed column: {}", const_rows);
@@ -155,7 +153,15 @@ impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
-        range::RangeConfig::configure(meta, range::RangeStrategy::PlonkPlus, NUM_ADVICE, 1, 1, 3)
+        range::RangeConfig::configure(
+            meta,
+            range::RangeStrategy::PlonkPlus,
+            NUM_ADVICE,
+            1,
+            1,
+            3,
+            "default".to_string(),
+        )
     }
 
     fn synthesize(
@@ -174,11 +180,7 @@ impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
             |region| {
                 let mut aux = Context::new(
                     region,
-                    ContextParams {
-                        num_advice: NUM_ADVICE,
-                        using_simple_floor_planner,
-                        first_pass,
-                    },
+                    ContextParams { num_advice: vec![("default".to_string(), NUM_ADVICE)] },
                 );
                 if using_simple_floor_planner {
                     first_pass = !first_pass;
@@ -207,11 +209,7 @@ impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
 
                 let mut aux = Context::new(
                     region,
-                    ContextParams {
-                        num_advice: NUM_ADVICE,
-                        using_simple_floor_planner,
-                        first_pass,
-                    },
+                    ContextParams { num_advice: vec![("default".to_string(), NUM_ADVICE)] },
                 );
                 if using_simple_floor_planner {
                     first_pass = !first_pass;
@@ -239,7 +237,7 @@ impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
 
                 println!(
                     "maximum rows used by an advice column: {}",
-                    ctx.advice_rows.iter().max().unwrap()
+                    ctx.advice_rows["default"].iter().max().unwrap()
                 );
 
                 let (const_rows, _, _) = config.finalize(ctx)?;

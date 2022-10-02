@@ -1,28 +1,23 @@
 #![allow(non_snake_case)]
-use ff::PrimeField;
+use super::{Fp12Chip, Fp2Chip, FpChip, FpPoint, FqPoint};
+use crate::{
+    ecc::{EccChip, EccPoint},
+    fields::{fp::FpStrategy, fp12::mul_no_carry_w6},
+    fields::{FieldChip, FieldExtPoint},
+};
+use halo2_base::{
+    gates::Context,
+    utils::{biguint_to_fe, fe_to_biguint},
+};
 use halo2_proofs::{
     arithmetic::FieldExt,
-    circuit::{Layouter, Value},
+    circuit::Value,
     halo2curves::bn256::{self, G1Affine, G2Affine, SIX_U_PLUS_2_NAF},
-    plonk::{Advice, Column, ConstraintSystem, Error, Fixed},
+    plonk::{ConstraintSystem, Error},
 };
 use halo2curves::bn254::{Fq, Fq2, FROBENIUS_COEFF_FQ12_C1};
 use num_bigint::{BigInt, BigUint};
-use num_traits::{Num, One, Zero};
-use std::marker::PhantomData;
-
-use super::{Fp12Chip, Fp2Chip, FpChip, FpPoint, FqPoint};
-use crate::{
-    bigint::CRTInteger,
-    ecc::{EccChip, EccPoint},
-    fields::{fp::FpStrategy, fp12::mul_no_carry_w6},
-    fields::{FieldChip, FieldExtPoint, PrimeFieldChip},
-    gates::{Context, GateInstructions, RangeInstructions},
-    utils::{
-        bigint_to_fe, biguint_to_fe, decompose_bigint_option, decompose_biguint, fe_to_bigint,
-        fe_to_biguint, modulus,
-    },
-};
+use num_traits::Num;
 
 const XI_0: u64 = 9;
 

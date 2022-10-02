@@ -1,13 +1,12 @@
-use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
-use num_bigint::BigInt;
-
 use super::{CRTInteger, OverflowInteger};
-use crate::gates::{
-    Context, GateInstructions,
+use halo2_base::gates::{
+    AssignedValue, Context, GateInstructions,
     QuantumCell::{Constant, Existing, Witness},
     RangeInstructions,
 };
-use crate::utils::bigint_to_fe;
+use halo2_base::utils::bigint_to_fe;
+use halo2_proofs::{arithmetic::FieldExt, plonk::Error};
+use num_bigint::BigInt;
 
 /// Should only be called on integers a, b in proper representation with all limbs having at most `a.limb_bits` number of bits
 pub fn assign<F: FieldExt>(
@@ -15,24 +14,34 @@ pub fn assign<F: FieldExt>(
     ctx: &mut Context<'_, F>,
     a: &OverflowInteger<F>,
     b: &OverflowInteger<F>,
-) -> Result<(OverflowInteger<F>, AssignedCell<F, F>), Error> {
+) -> Result<(OverflowInteger<F>, AssignedValue<F>), Error> {
     assert_eq!(a.limb_bits, b.limb_bits);
     assert_eq!(a.limbs.len(), b.limbs.len());
     let k = a.limbs.len();
     let mut out_limbs = Vec::with_capacity(k);
 
-    let mut borrow: Option<AssignedCell<F, F>> = None;
+    let mut borrow: Option<AssignedValue<F>> = None;
     let limb_base = bigint_to_fe::<F>(&(BigInt::from(1) << a.limb_bits));
     for i in 0..k {
         let (bottom, lt) = match borrow {
             None => {
-                let lt = range.is_less_than(ctx, &Existing(&a.limbs[i]), &Existing(&b.limbs[i]), a.limb_bits)?;
+                let lt = range.is_less_than(
+                    ctx,
+                    &Existing(&a.limbs[i]),
+                    &Existing(&b.limbs[i]),
+                    a.limb_bits,
+                )?;
                 (b.limbs[i].clone(), lt)
             }
             Some(borrow) => {
                 let b_plus_borrow =
                     range.gate().add(ctx, &Existing(&b.limbs[i]), &Existing(&borrow))?;
-                let lt = range.is_less_than(ctx, &Existing(&a.limbs[i]), &Existing(&b_plus_borrow), a.limb_bits + 1)?;
+                let lt = range.is_less_than(
+                    ctx,
+                    &Existing(&a.limbs[i]),
+                    &Existing(&b_plus_borrow),
+                    a.limb_bits + 1,
+                )?;
                 (b_plus_borrow, lt)
             }
         };
@@ -78,7 +87,7 @@ pub fn crt<F: FieldExt>(
     ctx: &mut Context<'_, F>,
     a: &CRTInteger<F>,
     b: &CRTInteger<F>,
-) -> Result<(CRTInteger<F>, AssignedCell<F, F>), Error> {
+) -> Result<(CRTInteger<F>, AssignedValue<F>), Error> {
     assert_eq!(a.truncation.limbs.len(), b.truncation.limbs.len());
     let (out_trunc, underflow) = assign(range, ctx, &a.truncation, &b.truncation)?;
     let out_native = range.gate().sub(ctx, &Existing(&a.native), &Existing(&b.native))?;

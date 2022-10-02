@@ -1,19 +1,19 @@
-use std::{collections::HashMap, io::ErrorKind, marker::PhantomData};
-
-use halo2_base::gates::{
-    flex_gate::FlexGateConfig,
-    Context, GateInstructions,
-    QuantumCell::{self, Constant, Existing},
+use halo2_base::{
+    gates::{
+        flex_gate::FlexGateConfig,
+        AssignedValue, Context, GateInstructions,
+        QuantumCell::{Constant, Existing},
+    },
+    utils::{bigint_to_fe, biguint_to_fe, decompose_bigint, fe_to_bigint, fe_to_biguint},
 };
-use halo2_base::utils::{biguint_to_fe, fe_to_bigint};
 use halo2_proofs::{
-    arithmetic::{Field, FieldExt},
+    arithmetic::FieldExt,
     circuit::Value,
-    plonk::{Advice, Column, ConstraintSystem, Error, Expression, Selector},
-    poly::Rotation,
+    plonk::{ConstraintSystem, Error},
 };
 use num_bigint::{BigInt, BigUint};
 use num_traits::Zero;
+use std::marker::PhantomData;
 
 pub mod add_no_carry;
 pub mod big_is_equal;
@@ -23,7 +23,6 @@ pub mod carry_mod;
 pub mod check_carry_mod_to_zero;
 pub mod check_carry_to_zero;
 pub mod inner_product;
-// pub mod mod_reduce;
 pub mod mul_no_carry;
 pub mod negative;
 pub mod scalar_mul_and_add_no_carry;
@@ -49,7 +48,7 @@ impl Default for BigIntStrategy {
 
 #[derive(Clone, Debug)]
 pub struct OverflowInteger<F: FieldExt> {
-    pub limbs: Vec<AssignedCell<F, F>>,
+    pub limbs: Vec<AssignedValue<F>>,
     pub max_limb_size: BigUint, // max absolute value of integer value of a limb
     pub limb_bits: usize,
     pub max_size: BigUint, // theoretical max absolute value of `value` allowed. This needs to be < 2^t * n / 2
@@ -57,7 +56,7 @@ pub struct OverflowInteger<F: FieldExt> {
 
 impl<F: FieldExt> OverflowInteger<F> {
     pub fn construct(
-        limbs: Vec<AssignedCell<F, F>>,
+        limbs: Vec<AssignedValue<F>>,
         max_limb_size: BigUint,
         limb_bits: usize,
         max_size: BigUint,
@@ -75,15 +74,15 @@ impl<F: FieldExt> OverflowInteger<F> {
         gate: &impl GateInstructions<F>,
         chip: &BigIntConfig<F>,
         ctx: &mut Context<'_, F>,
-        limbs: &Vec<AssignedCell<F, F>>,
+        limbs: &Vec<AssignedValue<F>>,
         limb_bits: usize,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         let k = limbs.len();
         let n = limb_bits;
         let mut pows = Vec::with_capacity(k);
         let mut running_pow = F::from(1);
         let limb_base: F = biguint_to_fe(&(BigUint::from(1u32) << n));
-        for i in 0..k {
+        for _ in 0..k {
             pows.push(Constant(running_pow));
             running_pow = running_pow * &limb_base;
         }
@@ -158,14 +157,14 @@ pub struct CRTInteger<F: FieldExt> {
     // the IMPLICIT ASSUMPTION: `value (mod 2^t) = truncation` && `value (mod n) = native`
     // this struct should only be used if the implicit assumption above is satisfied
     pub truncation: OverflowInteger<F>,
-    pub native: AssignedCell<F, F>,
+    pub native: AssignedValue<F>,
     pub value: Value<BigInt>,
 }
 
 impl<F: FieldExt> CRTInteger<F> {
     pub fn construct(
         truncation: OverflowInteger<F>,
-        native: AssignedCell<F, F>,
+        native: AssignedValue<F>,
         value: Value<BigInt>,
     ) -> Self {
         Self { truncation, native, value }
@@ -243,11 +242,11 @@ pub struct BigIntConfig<F: FieldExt> {
 
 impl<F: FieldExt> BigIntConfig<F> {
     pub fn configure(
-        meta: &mut ConstraintSystem<F>,
+        _meta: &mut ConstraintSystem<F>,
         strategy: BigIntStrategy,
-        limb_bits: usize,
-        num_limbs: usize,
-        gate: &FlexGateConfig<F>,
+        _limb_bits: usize,
+        _num_limbs: usize,
+        _gate: &FlexGateConfig<F>,
         // constants: Vec<Vec<BigUint>>, // collection of the constant vectors we want custom dot product gates for
     ) -> Self {
         // let mut q_dot_constant = HashMap::new();

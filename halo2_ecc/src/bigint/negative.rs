@@ -1,8 +1,6 @@
-use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
-use std::cmp;
-
 use super::OverflowInteger;
-use crate::gates::{Context, GateInstructions, QuantumCell::Existing};
+use halo2_base::gates::{Context, GateInstructions, QuantumCell::Existing};
+use halo2_proofs::{arithmetic::FieldExt, plonk::Error};
 
 pub fn assign<F: FieldExt>(
     gate: &impl GateInstructions<F>,

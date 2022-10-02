@@ -1,15 +1,14 @@
-use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
-use num_traits::Signed;
-use std::cmp;
-
 use super::{CRTInteger, OverflowInteger};
-use crate::{
+use halo2_base::{
     gates::{
         Context, GateInstructions,
         QuantumCell::{Constant, Existing, Witness},
     },
     utils::fe_to_bigint,
 };
+use halo2_proofs::{arithmetic::FieldExt, plonk::Error};
+use num_traits::Signed;
+use std::cmp;
 
 /// compute a * c + b = b + a * c
 // this is uniquely suited for our simple gate

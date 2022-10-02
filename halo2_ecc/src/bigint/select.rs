@@ -1,17 +1,16 @@
-use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
+use super::{CRTInteger, OverflowInteger};
+use halo2_base::gates::{AssignedValue, Context, GateInstructions, QuantumCell::Existing};
+use halo2_base::utils::fe_to_bigint;
+use halo2_proofs::{arithmetic::FieldExt, plonk::Error};
 use num_bigint::BigInt;
 use std::cmp;
-
-use super::{CRTInteger, OverflowInteger};
-use crate::gates::{Context, GateInstructions, QuantumCell::Existing};
-use crate::utils::{fe_to_bigint, value_to_option};
 
 pub fn assign<F: FieldExt>(
     gate: &impl GateInstructions<F>,
     ctx: &mut Context<'_, F>,
     a: &OverflowInteger<F>,
     b: &OverflowInteger<F>,
-    sel: &AssignedCell<F, F>,
+    sel: &AssignedValue<F>,
 ) -> Result<OverflowInteger<F>, Error> {
     assert_eq!(a.limb_bits, b.limb_bits);
     let k = cmp::min(a.limbs.len(), b.limbs.len());
@@ -35,7 +34,7 @@ pub fn crt<F: FieldExt>(
     ctx: &mut Context<'_, F>,
     a: &CRTInteger<F>,
     b: &CRTInteger<F>,
-    sel: &AssignedCell<F, F>,
+    sel: &AssignedValue<F>,
 ) -> Result<CRTInteger<F>, Error> {
     assert_eq!(a.truncation.limb_bits, b.truncation.limb_bits);
     let k = cmp::min(a.truncation.limbs.len(), b.truncation.limbs.len());

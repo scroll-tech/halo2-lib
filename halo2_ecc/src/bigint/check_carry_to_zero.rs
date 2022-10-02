@@ -1,19 +1,15 @@
-use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
-use num_bigint::BigInt;
-use num_bigint::BigUint;
-use num_traits::One;
-use serde::de::value;
-
 use super::OverflowInteger;
-use crate::gates::{
+use halo2_base::gates::{
     Context, GateInstructions,
-    QuantumCell::{self, Constant, Existing, Witness},
+    QuantumCell::{Constant, Existing, Witness},
     RangeInstructions,
 };
-use crate::utils::biguint_to_fe;
-use crate::utils::fe_to_bigint;
-use crate::utils::value_to_option;
-use crate::utils::{bigint_to_fe, modulus as native_modulus};
+use halo2_base::utils::{
+    bigint_to_fe, biguint_to_fe, fe_to_bigint, modulus as native_modulus, value_to_option,
+};
+use halo2_proofs::{arithmetic::FieldExt, circuit::Value, plonk::Error};
+use num_bigint::{BigInt, BigUint};
+use num_traits::One;
 
 // checks there exist d_i = -c_i so that
 // a_0 = c_0 * 2^n

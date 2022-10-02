@@ -1,10 +1,18 @@
-use crate::gates::{
-    flex_gate::{FlexGateConfig, GateStrategy},
-    GateInstructions,
+use crate::{
+    gates::{
+        flex_gate::{FlexGateConfig, GateStrategy},
+        GateInstructions,
+    },
+    utils::{biguint_to_fe, decompose_option, fe_to_biguint},
+    AssignedValue,
     QuantumCell::{self, Constant, Existing, Witness},
 };
-use crate::utils::{biguint_to_fe, decompose_option, fe_to_biguint};
-use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*, poly::Rotation};
+use halo2_proofs::{
+    arithmetic::FieldExt,
+    circuit::{Layouter, Value},
+    plonk::{Advice, Column, ConstraintSystem, Error, Selector, TableColumn},
+    poly::Rotation,
+};
 use num_bigint::BigUint;
 
 use super::{Context, RangeInstructions};
@@ -36,6 +44,7 @@ pub struct RangeConfig<F: FieldExt> {
     // pub q_range: HashMap<usize, Vec<Selector>>,
     pub gate: FlexGateConfig<F>,
     strategy: RangeStrategy,
+    pub context_id: String,
 }
 
 /*
@@ -69,6 +78,7 @@ impl<F: FieldExt> RangeConfig<F> {
         mut num_lookup_advice: usize,
         num_fixed: usize,
         lookup_bits: usize,
+        context_id: String,
     ) -> Self {
         assert!(lookup_bits <= 28);
         let lookup = meta.lookup_table_column();
@@ -81,24 +91,8 @@ impl<F: FieldExt> RangeConfig<F> {
             },
             num_advice,
             num_fixed,
+            context_id.clone(),
         );
-
-        /*
-        let mut q_range = HashMap::new();
-        if range_strategy == RangeStrategy::CustomVerticalShort {
-            // we only use range length 3 because range length `k` requires Rotation(0..=k)
-            // to minimize the different polynomial evaluation SETS we only use Rotation(0..=3), since that is what is used in our basic vertical gate
-            for k in 3..4 {
-                let mut selectors = Vec::with_capacity(gate.basic_gates.len());
-                for gate in &gate.basic_gates {
-                    let q = meta.selector();
-                    selectors.push(q);
-                    create_vertical_range_gate(meta, k as i32, lookup_bits, gate.value, q);
-                }
-                q_range.insert(k, selectors);
-            }
-        }
-        */
 
         if num_advice == 1 {
             num_lookup_advice = 0;
@@ -115,9 +109,9 @@ impl<F: FieldExt> RangeConfig<F> {
                 q_lookup: Vec::new(),
                 lookup,
                 lookup_bits,
-                // q_range,
                 gate,
                 strategy: range_strategy,
+                context_id,
             }
         } else {
             let q = meta.complex_selector();
@@ -129,6 +123,7 @@ impl<F: FieldExt> RangeConfig<F> {
                 // q_range,
                 gate,
                 strategy: range_strategy,
+                context_id,
             }
         };
         config.create_lookup(meta);
@@ -172,9 +167,9 @@ impl<F: FieldExt> RangeConfig<F> {
 
     /// call this at the very end of synthesize!
     /// returns (total number of constants assigned, total number of lookup cells assigned)
-    pub fn finalize(&self, ctx: &mut Context<'_, F>) -> Result<(usize, usize, usize), Error> {
+    pub fn finalize(&self, ctx: &mut Context<'_, F>) -> Result<(usize, usize, Vec<usize>), Error> {
         let (c_rows, c_count) = self.gate.finalize(ctx)?;
-        let lookup_rows = ctx.copy_and_lookup_cells(&self.lookup_advice)?;
+        let lookup_rows = ctx.copy_and_lookup_cells(&[self.lookup_advice.clone()])?;
         Ok((c_rows, c_count, lookup_rows))
     }
 
@@ -184,13 +179,12 @@ impl<F: FieldExt> RangeConfig<F> {
     fn enable_lookup(
         &self,
         ctx: &mut Context<'_, F>,
-        acell: AssignedCell<F, F>,
-        offset: usize,
+        acell: AssignedValue<F>,
     ) -> Result<(), Error> {
         if self.q_lookup.len() > 0 {
             // currently we only use non-specialized lookup columns if there is only a single advice column
             assert_eq!(self.gate.basic_gates.len(), 1);
-            self.q_lookup[0].enable(&mut ctx.region, offset)?;
+            self.q_lookup[0].enable(&mut ctx.region, acell.row())?;
         } else {
             // offset is not used in this case
             ctx.cells_to_lookup.push(acell);
@@ -202,18 +196,15 @@ impl<F: FieldExt> RangeConfig<F> {
     fn range_check_simple(
         &self,
         ctx: &mut Context<'_, F>,
-        a: &AssignedCell<F, F>,
+        a: &AssignedValue<F>,
         range_bits: usize,
-    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+    ) -> Result<Vec<AssignedValue<F>>, Error> {
         let k = (range_bits + self.lookup_bits - 1) / self.lookup_bits;
         // println!("range check {} bits {} len", range_bits, k);
         let rem_bits = range_bits % self.lookup_bits;
 
-        // In the case there is only 1 advice column, we need to figure out what the starting offset in the column was before this function call
-        let offset_shift = if self.gate.basic_gates.len() == 1 { ctx.advice_rows[0] } else { 0 };
-
         let limbs = decompose_option(&a.value().map(|x| *x), k, self.lookup_bits);
-        let (limbs_assigned, _, acc, _) = self.gate.inner_product(
+        let (limbs_assigned, _, acc) = self.gate.inner_product(
             ctx,
             &limbs.into_iter().map(|limb| Witness(limb)).collect(),
             &(0..k)
@@ -227,11 +218,7 @@ impl<F: FieldExt> RangeConfig<F> {
 
         // range check all the limbs
         for i in 0..k {
-            self.enable_lookup(
-                ctx,
-                limbs_assigned[i].0.clone(),
-                offset_shift + limbs_assigned[i].1,
-            )?;
+            self.enable_lookup(ctx, limbs_assigned[i].clone())?;
         }
 
         // additional constraints for the last limb if rem_bits != 0
@@ -243,9 +230,9 @@ impl<F: FieldExt> RangeConfig<F> {
                 ctx,
                 vec![
                     Constant(F::zero()),
-                    Existing(&limbs_assigned[k - 1].0),
-                    Existing(&limbs_assigned[k - 1].0),
-                    Existing(&limbs_assigned[k - 1].0),
+                    Existing(&limbs_assigned[k - 1]),
+                    Existing(&limbs_assigned[k - 1]),
+                    Existing(&limbs_assigned[k - 1]),
                 ],
                 vec![0],
                 vec![],
@@ -253,31 +240,30 @@ impl<F: FieldExt> RangeConfig<F> {
             )?;
         } else if rem_bits > 1 {
             let mult_val = biguint_to_fe(&(BigUint::from(1u64) << (self.lookup_bits - rem_bits)));
-            let offset = if self.gate.basic_gates.len() == 1 { ctx.advice_rows[0] } else { 0 };
-            let (assignments, _) = self.gate.assign_region(
+            let assignments = self.gate.assign_region(
                 ctx,
                 vec![
                     Constant(F::zero()),
-                    Existing(&limbs_assigned[k - 1].0),
+                    Existing(&limbs_assigned[k - 1]),
                     Constant(mult_val),
-                    Witness(limbs_assigned[k - 1].0.value().map(|limb| mult_val * limb)),
+                    Witness(limbs_assigned[k - 1].value().map(|limb| mult_val * limb)),
                 ],
                 vec![(0, None)],
                 None,
             )?;
-            self.enable_lookup(ctx, assignments.last().unwrap().clone(), offset + 3)?;
+            self.enable_lookup(ctx, assignments.last().unwrap().clone())?;
         }
 
-        Ok(limbs_assigned.into_iter().map(|limb| limb.0).collect())
+        Ok(limbs_assigned)
     }
 
     /// assume `a` has been range checked already to `limb_bits` bits
     pub fn get_last_bit(
         &self,
         ctx: &mut Context<'_, F>,
-        a: &AssignedCell<F, F>,
+        a: &AssignedValue<F>,
         limb_bits: usize,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         let a_v = a.value();
         let bit_v = a_v.map(|a| {
             let a_big = fe_to_biguint(a);
@@ -319,9 +305,9 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
     fn range_check(
         &self,
         ctx: &mut Context<'_, F>,
-        a: &AssignedCell<F, F>,
+        a: &AssignedValue<F>,
         range_bits: usize,
-    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+    ) -> Result<Vec<AssignedValue<F>>, Error> {
         assert_ne!(range_bits, 0);
         #[cfg(feature = "display")]
         {
@@ -343,8 +329,8 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
     fn check_less_than(
         &self,
         ctx: &mut Context<'_, F>,
-        a: &AssignedCell<F, F>,
-        b: &AssignedCell<F, F>,
+        a: &AssignedValue<F>,
+        b: &AssignedValue<F>,
         num_bits: usize,
     ) -> Result<(), Error> {
         let pow_of_two = biguint_to_fe::<F>(&(BigUint::from(1u64) << num_bits));
@@ -369,7 +355,7 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
                 // selectors:
                 // | 1 | 0 | 0 |
                 // | 0 | 2^{num_bits} | -1 |
-                let (assigned_cells, _) = self.gate.assign_region(
+                let assigned_cells = self.gate.assign_region(
                     ctx,
                     vec![
                         Existing(&a),
@@ -394,7 +380,7 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
         a: &QuantumCell<F>,
         b: &QuantumCell<F>,
         num_bits: usize,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         // TODO: optimize this for PlonkPlus strategy
         let k = (num_bits + self.lookup_bits - 1) / self.lookup_bits;
         let padded_bits = k * self.lookup_bits;
@@ -421,7 +407,7 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
                 assignments[0].clone()
             }
             RangeStrategy::PlonkPlus => {
-                let (assignments, _) = self.gate.assign_region(
+                let assignments = self.gate.assign_region(
                     ctx,
                     vec![a.clone(), Constant(pow_padded), b.clone(), Witness(shifted_val)],
                     vec![(0, Some([F::zero(), F::one(), -F::one()]))],
@@ -441,8 +427,8 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
     fn is_zero(
         &self,
         ctx: &mut Context<'_, F>,
-        a: &AssignedCell<F, F>,
-    ) -> Result<AssignedCell<F, F>, Error> {
+        a: &AssignedValue<F>,
+    ) -> Result<AssignedValue<F>, Error> {
         let is_zero =
             a.value().map(|x| if (*x).is_zero_vartime() { F::from(1) } else { F::from(0) });
         let inv =
@@ -468,7 +454,7 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
         ctx: &mut Context<'_, F>,
         a: &QuantumCell<F>,
         b: &QuantumCell<F>,
-    ) -> Result<AssignedCell<F, F>, Error> {
+    ) -> Result<AssignedValue<F>, Error> {
         let cells = vec![
             Witness(a.value().zip(b.value()).map(|(av, bv)| *av - *bv)),
             Constant(F::from(1)),
@@ -484,9 +470,9 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
     fn num_to_bits(
         &self,
         ctx: &mut Context<'_, F>,
-        a: &AssignedCell<F, F>,
+        a: &AssignedValue<F>,
         range_bits: usize,
-    ) -> Result<Vec<AssignedCell<F, F>>, Error> {
+    ) -> Result<Vec<AssignedValue<F>>, Error> {
         let bits = decompose_option(&a.value().copied(), range_bits, 1usize);
         let bit_cells = match self.strategy {
             RangeStrategy::Vertical => {
@@ -523,7 +509,7 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
                 assigned_bits
             }
             RangeStrategy::PlonkPlus => {
-                let (bit_cells, _, acc, _) = self.gate.inner_product(
+                let (bit_cells, _, acc) = self.gate.inner_product(
                     ctx,
                     &bits.iter().map(|x| Witness(*x)).collect(),
                     &(0..range_bits)
@@ -531,7 +517,7 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
                         .collect(),
                 )?;
                 ctx.region.constrain_equal(a.cell(), acc.cell())?;
-                bit_cells.unwrap().into_iter().map(|(x, _)| x).collect()
+                bit_cells.unwrap()
             }
         };
         for bit_cell in &bit_cells {

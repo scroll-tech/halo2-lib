@@ -1,33 +1,23 @@
 #![allow(non_snake_case)]
-use std::marker::PhantomData;
-
+use crate::{
+    bigint::{CRTInteger, FixedCRTInteger},
+    fields::{PrimeFieldChip, Selectable},
+};
 use ff::PrimeField;
-use group::Group;
-use halo2_proofs::{
-    arithmetic::{CurveAffine, Field, FieldExt},
-    circuit::{AssignedCell, Layouter},
-    plonk::{Advice, Column, ConstraintSystem, Error, Fixed},
-};
-use num_bigint::{BigInt, BigUint};
-use num_traits::{Num, One, Zero};
-use rand_core::OsRng;
-
-use crate::gates::QuantumCell::{self, Constant, Existing, Witness};
-use crate::utils::{
-    bigint_to_fe, decompose_bigint_option, decompose_biguint, fe_to_bigint, fe_to_biguint, modulus,
-};
-use crate::{
-    bigint::{
-        add_no_carry, inner_product, mul_no_carry, scalar_mul_no_carry, sub_no_carry, CRTInteger,
-        FixedCRTInteger, OverflowInteger,
+use halo2_base::{
+    gates::{
+        Context, GateInstructions,
+        QuantumCell::{Constant, Existing},
+        RangeInstructions,
     },
-    fields::PrimeFieldChip,
+    utils::{bigint_to_fe, fe_to_biguint, modulus},
 };
-use crate::{fields::FieldChip, gates::RangeInstructions};
-use crate::{
-    fields::{fp::FpConfig, Selectable},
-    gates::{Context, GateInstructions},
+use halo2_proofs::{
+    arithmetic::{CurveAffine, FieldExt},
+    circuit::AssignedCell,
+    plonk::Error,
 };
+use std::marker::PhantomData;
 
 use super::{ecc_add_unequal, select, select_from_bits, EccPoint};
 
@@ -89,7 +79,6 @@ pub fn fixed_base_scalar_multiply<'a, F, FC, GA>(
     ctx: &mut Context<'_, F>,
     P: &FixedEccPoint<F, GA>,
     scalar: &Vec<AssignedCell<F, F>>,
-    b: F,
     max_bits: usize,
     window_bits: usize,
 ) -> Result<EccPoint<F, FC::FieldPoint>, Error>
@@ -110,10 +99,10 @@ where
     // cached_points[i][j] holds j * 2^(i * w) for j in {0, ..., 2^w - 1}
     let mut cached_points = Vec::with_capacity(num_windows);
     let base_pt = GA::from_xy(bigint_to_fe(&P.x.value), bigint_to_fe(&P.y.value)).unwrap();
-    let base_pt_assigned = P.assign(chip, ctx)?;
+    // let base_pt_assigned = P.assign(chip, ctx)?;
 
     let mut increment = base_pt;
-    for i in 0..num_windows {
+    for _i in 0..num_windows {
         let mut cache_vec = Vec::with_capacity(1usize << window_bits);
         let mut curr = increment;
 
@@ -125,7 +114,7 @@ where
         let increment_assigned = increment_fixed.assign(chip, ctx)?;
         cache_vec.push(increment_assigned.clone());
         cache_vec.push(increment_assigned.clone());
-        for j in 2..(1usize << window_bits) {
+        for _j in 2..(1usize << window_bits) {
             curr = GA::from(curr + increment);
             let curr_fixed =
                 FixedEccPoint::from_g1(&curr, P.x.truncation.limbs.len(), P.x.truncation.limb_bits);
@@ -143,7 +132,7 @@ where
     }
     let mut rounded_bits = bits;
     let zero_cell = chip.range().gate().load_zero(ctx)?;
-    for idx in 0..(rounded_bitlen - total_bits) {
+    for _ in 0..(rounded_bitlen - total_bits) {
         rounded_bits.push(zero_cell.clone());
     }
 
@@ -162,7 +151,7 @@ where
     // is_zero_window[idx] is 0/1 depending on whether bits [rounded_bitlen - window_bits * (idx + 1), rounded_bitlen - window_bits * idx) are all 0
     let mut is_zero_window = Vec::with_capacity(num_windows);
     let mut ones_vec = Vec::with_capacity(window_bits);
-    for idx in 0..window_bits {
+    for _ in 0..window_bits {
         ones_vec.push(Constant(F::from(1)));
     }
     for idx in 0..num_windows {

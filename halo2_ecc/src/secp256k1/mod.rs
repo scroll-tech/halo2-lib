@@ -1,8 +1,7 @@
-use halo2_proofs::arithmetic::FieldExt;
 use halo2curves::secp256k1::{Fp, Fq};
 
 use crate::ecc;
-use crate::fields::{fp, fp_overflow, PrimeFieldChip};
+use crate::fields::{fp, fp_overflow};
 
 #[allow(dead_code)]
 type FqOverflowChip<'a, F> = fp_overflow::FpOverflowChip<'a, F, Fq>;

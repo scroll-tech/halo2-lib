@@ -1,30 +1,16 @@
-use std::marker::PhantomData;
-
+use super::{FieldChip, FieldExtConstructor, FieldExtPoint, PrimeFieldChip, Selectable};
 use ff::PrimeField;
+use halo2_base::{
+    gates::{Context, GateInstructions, QuantumCell::Existing, RangeInstructions},
+    utils::{fe_to_biguint, value_to_option},
+};
 use halo2_proofs::{
     arithmetic::{Field, FieldExt},
-    circuit::{AssignedCell, Layouter, Value},
+    circuit::{AssignedCell, Value},
     plonk::Error,
 };
-use num_bigint::{BigInt, BigUint};
-use num_traits::Num;
-
-use crate::gates::{
-    GateInstructions,
-    QuantumCell::{Constant, Existing, Witness},
-    RangeInstructions,
-};
-use crate::utils::{bigint_to_fe, decompose_bigint_option, fe_to_biguint};
-use crate::{
-    bigint::{
-        add_no_carry, carry_mod, check_carry_mod_to_zero, mul_no_carry, scalar_mul_no_carry,
-        sub_no_carry, CRTInteger, OverflowInteger,
-    },
-    gates::{range::RangeConfig, Context},
-};
-use crate::{fields::fp::FpConfig, utils::value_to_option};
-
-use super::{FieldChip, FieldExtConstructor, FieldExtPoint, PrimeFieldChip, Selectable};
+use num_bigint::BigInt;
+use std::marker::PhantomData;
 
 /// Represent Fp2 point as `FieldExtPoint` with degree = 2
 /// `Fp2 = Fp[u] / (u^2 + 1)`

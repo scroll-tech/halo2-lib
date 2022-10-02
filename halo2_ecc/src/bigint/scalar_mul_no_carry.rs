@@ -1,14 +1,13 @@
-use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
-use num_bigint::BigUint;
-use num_traits::Signed;
-
 use super::{CRTInteger, OverflowInteger};
-use crate::gates::{
-    Context, GateInstructions,
-    QuantumCell::{self, Constant, Existing, Witness},
+use halo2_base::{
+    gates::{
+        Context, GateInstructions,
+        QuantumCell::{Constant, Existing},
+    },
+    utils::fe_to_bigint,
 };
-use crate::utils::modulus as native_modulus;
-use crate::utils::*;
+use halo2_proofs::{arithmetic::FieldExt, plonk::Error};
+use num_traits::Signed;
 
 pub fn assign<F: FieldExt>(
     gate: &impl GateInstructions<F>,

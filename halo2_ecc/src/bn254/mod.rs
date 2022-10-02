@@ -1,11 +1,8 @@
-use halo2_proofs::arithmetic::FieldExt;
-use halo2curves::bn254::{Fq, Fq12, Fq2, Fq6};
-
 use crate::{
-    bigint::{CRTInteger, OverflowInteger},
-    fields::{fp, fp12, fp2, fp_overflow, FieldExtConstructor, FieldExtPoint},
-    utils::{biguint_to_fe, fe_to_biguint},
+    bigint::CRTInteger,
+    fields::{fp, fp12, fp2, FieldExtConstructor, FieldExtPoint},
 };
+use halo2curves::bn254::{Fq, Fq12, Fq2, Fq6};
 
 pub mod final_exp;
 pub mod pairing;

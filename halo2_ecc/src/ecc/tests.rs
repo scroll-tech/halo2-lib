@@ -1,15 +1,14 @@
 #![allow(unused_assignments, unused_imports, unused_variables)]
-use std::marker::PhantomData;
-
+use super::*;
 use crate::fields::fp::{FpConfig, FpStrategy};
 use crate::fields::fp2::Fp2Chip;
-use crate::gates::range::RangeStrategy;
-use crate::gates::ContextParams;
-use crate::utils::value_to_option;
-
-use super::*;
 use ff::PrimeField;
 use group::Group;
+use halo2_base::utils::bigint_to_fe;
+use halo2_base::{
+    gates::{range::RangeStrategy, ContextParams},
+    utils::value_to_option,
+};
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::*,
@@ -18,6 +17,7 @@ use halo2_proofs::{
     plonk::*,
 };
 use num_bigint::{BigInt, RandBigInt};
+use std::marker::PhantomData;
 
 #[derive(Default)]
 pub struct MyCircuit<F> {

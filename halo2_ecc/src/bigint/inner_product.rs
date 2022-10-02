@@ -1,23 +1,18 @@
-use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
+use super::{CRTInteger, OverflowInteger};
+use halo2_base::{
+    gates::{AssignedValue, Context, GateInstructions, QuantumCell::Existing},
+    utils::fe_to_bigint,
+};
+use halo2_proofs::{arithmetic::FieldExt, circuit::Value, plonk::Error};
 use num_bigint::{BigInt, BigUint};
 use std::cmp;
-
-use super::{CRTInteger, OverflowInteger};
-use crate::utils::fe_to_bigint;
-use crate::{
-    gates::{
-        Context, GateInstructions,
-        QuantumCell::{self, Constant, Existing, Witness},
-    },
-    utils::value_to_option,
-};
 
 /// only use case is when coeffs has only a single 1, rest are 0
 pub fn assign<F: FieldExt>(
     gate: &impl GateInstructions<F>,
     ctx: &mut Context<'_, F>,
     a: &Vec<OverflowInteger<F>>,
-    coeffs: &Vec<AssignedCell<F, F>>,
+    coeffs: &Vec<AssignedValue<F>>,
 ) -> Result<OverflowInteger<F>, Error> {
     let length = coeffs.len();
     let k = a[0].limbs.len();
@@ -46,7 +41,7 @@ pub fn crt<F: FieldExt>(
     gate: &impl GateInstructions<F>,
     ctx: &mut Context<'_, F>,
     a: &Vec<CRTInteger<F>>,
-    coeffs: &Vec<AssignedCell<F, F>>,
+    coeffs: &Vec<AssignedValue<F>>,
 ) -> Result<CRTInteger<F>, Error> {
     let length = coeffs.len();
     let k = a[0].truncation.limbs.len();

@@ -1,27 +1,20 @@
-use std::ops::Shl;
-
-use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
-use num_bigint::BigInt;
-use num_bigint::BigUint;
-use num_bigint::Sign;
-use num_traits::{One, Zero};
-
 use super::BigIntConfig;
 use super::{check_carry_to_zero, CRTInteger, OverflowInteger};
-use crate::bigint::carry_mod::get_carry_witness;
-use crate::bigint::mul_no_carry;
-use crate::bigint::BigIntStrategy;
-use crate::gates::{
+use crate::bigint::{carry_mod::get_carry_witness, BigIntStrategy};
+use halo2_base::gates::AssignedValue;
+use halo2_base::gates::{
     Context, GateInstructions,
     QuantumCell::{self, Constant, Existing, Witness},
     RangeInstructions,
 };
-use crate::utils::bigint_to_fe;
-use crate::utils::biguint_to_fe;
-use crate::utils::decompose_bigint_option;
-use crate::utils::decompose_biguint;
-use crate::utils::modulus as native_modulus;
-use crate::utils::value_to_option;
+use halo2_base::utils::{
+    biguint_to_fe, decompose_bigint_option, decompose_biguint, modulus as native_modulus,
+    value_to_option,
+};
+use halo2_proofs::{arithmetic::FieldExt, circuit::Value, plonk::Error};
+use num_bigint::BigUint;
+use num_traits::{One, Zero};
+use std::ops::Shl;
 
 // Input `a` is `OverflowInteger` of length `k` with "signed" limbs
 // Check that `a = 0 (mod modulus)`
@@ -79,9 +72,9 @@ pub fn assign<F: FieldExt>(
     if k_prod != k {
         println!("check_carry_mod_to_zero, k_prod: {}, k: {}", k_prod, k);
     }
-    let mut mod_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(mod_vec.len());
-    let mut quot_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(m);
-    let mut check_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(k_prod);
+    let mut mod_assigned: Vec<AssignedValue<F>> = Vec::with_capacity(mod_vec.len());
+    let mut quot_assigned: Vec<AssignedValue<F>> = Vec::with_capacity(m);
+    let mut check_assigned: Vec<AssignedValue<F>> = Vec::with_capacity(k_prod);
 
     for i in 0..k_prod {
         let (mod_cell, quot_cell, check_cell) = {
@@ -274,8 +267,8 @@ pub fn crt<F: FieldExt>(
     // 2. for prod[i] we can compute prod - a by using the transpose of
     //    | prod | -1 | a | prod - a |
 
-    let mut quot_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(k);
-    let mut check_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(k);
+    let mut quot_assigned: Vec<AssignedValue<F>> = Vec::with_capacity(k);
+    let mut check_assigned: Vec<AssignedValue<F>> = Vec::with_capacity(k);
 
     match chip.strategy {
         BigIntStrategy::Simple => {
@@ -363,7 +356,7 @@ pub fn crt<F: FieldExt>(
 
     // Check `0 + modulus * quotient - a = 0` in native field
     // | 0 | modulus | quotient | a |
-    let native_computation = range.gate().assign_region_smart(
+    let _native_computation = range.gate().assign_region_smart(
         ctx,
         vec![
             Constant(F::from(0)),

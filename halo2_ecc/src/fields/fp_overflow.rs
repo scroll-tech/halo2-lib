@@ -1,31 +1,27 @@
-use std::marker::PhantomData;
-
+use super::{FieldChip, PrimeFieldChip, Selectable};
+use crate::bigint::{
+    add_no_carry, big_is_zero, carry_mod, check_carry_mod_to_zero, inner_product, mul_no_carry,
+    scalar_mul_and_add_no_carry, scalar_mul_no_carry, select, sub, sub_no_carry, BigIntConfig,
+    CRTInteger, OverflowInteger,
+};
 use ff::PrimeField;
+use halo2_base::{
+    gates::{
+        range::RangeConfig,
+        Context, GateInstructions,
+        QuantumCell::{Constant, Existing, Witness},
+        RangeInstructions,
+    },
+    utils::{bigint_to_fe, decompose_bigint, decompose_bigint_option, fe_to_biguint},
+};
 use halo2_proofs::{
-    arithmetic::{Field, FieldExt},
+    arithmetic::FieldExt,
     circuit::{AssignedCell, Layouter, Value},
     plonk::Error,
 };
 use num_bigint::{BigInt, BigUint};
-use num_traits::{Num, Signed};
-
-use super::{FieldChip, PrimeFieldChip, Selectable};
-use crate::bigint::{
-    add_no_carry, big_is_equal, big_is_zero, carry_mod, check_carry_mod_to_zero, inner_product,
-    mul_no_carry, scalar_mul_and_add_no_carry, scalar_mul_no_carry, select, sub, sub_no_carry,
-    BigIntConfig, CRTInteger, FixedCRTInteger, OverflowInteger,
-};
-use crate::fields::fp::FpConfig;
-use crate::gates::range::RangeConfig;
-use crate::gates::{
-    Context, GateInstructions,
-    QuantumCell::{Constant, Existing, Witness},
-    RangeInstructions,
-};
-use crate::utils::{
-    bigint_to_fe, decompose_bigint, decompose_bigint_option, decompose_biguint, fe_to_biguint,
-    modulus,
-};
+use num_traits::Signed;
+use std::marker::PhantomData;
 
 #[derive(Debug)]
 pub struct FpOverflowChip<'a, F: FieldExt, Fp: PrimeField> {
@@ -216,8 +212,6 @@ impl<'a, F: FieldExt, Fp: PrimeField> FieldChip<F> for FpOverflowChip<'a, F, Fp>
 
     fn range_check(&self, ctx: &mut Context<'_, F>, a: &OverflowInteger<F>) -> Result<(), Error> {
         let n = a.limb_bits;
-        let k = a.limbs.len();
-
         // range check limbs of `a` are in [0, 2^n)
         for cell in a.limbs.iter() {
             self.range.range_check(ctx, cell, n)?;
@@ -234,7 +228,7 @@ impl<'a, F: FieldExt, Fp: PrimeField> FieldChip<F> for FpOverflowChip<'a, F, Fp>
 
         // underflow != 0 iff carry < p
         let p = self.load_constant(ctx, BigInt::from(self.p.clone()))?;
-        let (diff, underflow) = sub::assign(self.range(), ctx, a, &p)?;
+        let (_, underflow) = sub::assign(self.range(), ctx, a, &p)?;
         let is_underflow_zero = self.range.is_zero(ctx, &underflow)?;
         let range_check = self.range.gate().not(ctx, &Existing(&is_underflow_zero))?;
 
@@ -252,7 +246,7 @@ impl<'a, F: FieldExt, Fp: PrimeField> FieldChip<F> for FpOverflowChip<'a, F, Fp>
 
         // underflow != 0 iff carry < p
         let p = self.load_constant(ctx, BigInt::from(self.p.clone()))?;
-        let (diff, underflow) = sub::assign(self.range(), ctx, a, &p)?;
+        let (_, underflow) = sub::assign(self.range(), ctx, a, &p)?;
         let is_underflow_zero = self.range.is_zero(ctx, &underflow)?;
         let range_check = self.range.gate().not(ctx, &Existing(&is_underflow_zero))?;
 

@@ -1,22 +1,15 @@
+use super::{
+    ecc_add_unequal, ecc_double, ecc_sub_unequal, is_on_curve, select, select_from_bits, EccPoint,
+};
+use crate::fields::{FieldChip, Selectable};
 use group::{Curve, Group};
+use halo2_base::gates::{Context, GateInstructions, RangeInstructions};
 use halo2_proofs::{
-    arithmetic::{CurveAffine, Field, FieldExt},
+    arithmetic::{CurveAffine, FieldExt},
     circuit::{AssignedCell, Value},
     plonk::Error,
 };
-use num_bigint::{BigInt, BigUint};
-use num_traits::{Num, One, Zero};
 use rand_core::OsRng;
-
-use super::{
-    ecc_add_unequal, ecc_double, ecc_sub_unequal, get_naf, is_on_curve, select, select_from_bits,
-    EccPoint,
-};
-use crate::{
-    fields::FieldChip,
-    gates::{Context, GateInstructions, RangeInstructions},
-};
-use crate::{fields::Selectable, utils::modulus};
 
 // Reference: https://jbootle.github.io/Misc/pippenger.pdf
 
@@ -49,7 +42,7 @@ where
         assert_eq!(scalars[0].len(), scalar.len());
         let mut g = point.clone();
         new_points.push(g);
-        for j in 1..radix {
+        for _ in 1..radix {
             g = ecc_double(chip, ctx, &new_points.last().unwrap())?;
             new_points.push(g);
         }
@@ -172,9 +165,10 @@ where
 
     let (points, bool_scalars) =
         decompose(chip, ctx, points, scalars, max_scalar_bits_per_cell, radix)?;
-    let t = bool_scalars.len();
 
-    /*let c = {
+    /*
+    let t = bool_scalars.len();
+    let c = {
         let m = points.len();
         let cost = |b: usize| -> usize { (m + b - 1) / b * ((1 << b) + t) };
         let c_max: usize = f64::from(points.len() as u32).log2().ceil() as usize;
@@ -185,7 +179,8 @@ where
             }
         }
         c_best
-    };*/
+    };
+    */
     let c = clump_factor;
     println!("clumping factor: {}", c);
 

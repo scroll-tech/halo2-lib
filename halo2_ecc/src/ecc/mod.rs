@@ -1,35 +1,25 @@
 #![allow(non_snake_case)]
-use std::marker::PhantomData;
-
-use ff::PrimeField;
-use group::{Curve, Group};
-use halo2_proofs::{
-    arithmetic::{CurveAffine, Field, FieldExt},
-    circuit::{AssignedCell, Layouter, Value},
-    halo2curves::bn256::{G1Affine, G1},
-    plonk::{Advice, Column, ConstraintSystem, Error, Fixed},
-};
-use num_bigint::{BigInt, BigUint};
-use num_traits::{Num, One, Zero};
-use rand_core::OsRng;
-
+use crate::bigint::{big_less_than, select, CRTInteger, OverflowInteger};
 use crate::fields::{fp::FpConfig, fp_overflow::FpOverflowChip, Selectable};
 use crate::fields::{FieldChip, PrimeFieldChip};
-use crate::gates::{
-    Context, GateInstructions,
-    QuantumCell::{self, Constant, Existing, Witness},
-    RangeInstructions,
-};
-use crate::utils::{
-    bigint_to_fe, decompose_bigint_option, decompose_biguint, fe_to_bigint, fe_to_biguint, modulus,
-};
-use crate::{
-    bigint::{
-        add_no_carry, big_less_than, inner_product, mul_no_carry, scalar_mul_no_carry, select,
-        sub_no_carry, CRTInteger, FixedCRTInteger, OverflowInteger,
+use ff::PrimeField;
+use group::{Curve, Group};
+use halo2_base::{
+    gates::{
+        Context, GateInstructions,
+        QuantumCell::{Constant, Existing},
+        RangeInstructions,
     },
-    utils::biguint_to_fe,
+    utils::{biguint_to_fe, fe_to_biguint, modulus},
 };
+use halo2_proofs::{
+    arithmetic::{CurveAffine, FieldExt},
+    circuit::{AssignedCell, Value},
+    plonk::Error,
+};
+use num_bigint::BigInt;
+use rand_core::OsRng;
+use std::marker::PhantomData;
 
 pub mod fixed;
 pub mod pippenger;
@@ -247,7 +237,6 @@ pub fn scalar_multiply<F: FieldExt, FC>(
     ctx: &mut Context<'_, F>,
     P: &EccPoint<F, FC::FieldPoint>,
     scalar: &Vec<AssignedCell<F, F>>,
-    b: F,
     max_bits: usize,
     window_bits: usize,
 ) -> Result<EccPoint<F, FC::FieldPoint>, Error>
@@ -268,13 +257,13 @@ where
     }
     let mut rounded_bits = bits;
     let zero_cell = chip.range().gate().load_zero(ctx)?;
-    for idx in 0..(rounded_bitlen - total_bits) {
+    for _ in 0..(rounded_bitlen - total_bits) {
         rounded_bits.push(zero_cell.clone());
     }
 
     // is_started[idx] holds whether there is a 1 in bits with index at least (rounded_bitlen - idx)
     let mut is_started = Vec::with_capacity(rounded_bitlen);
-    for idx in 0..(rounded_bitlen - total_bits) {
+    for _ in 0..(rounded_bitlen - total_bits) {
         is_started.push(zero_cell.clone());
     }
     is_started.push(zero_cell.clone());
@@ -290,7 +279,7 @@ where
     // is_zero_window[idx] is 0/1 depending on whether bits [rounded_bitlen - window_bits * (idx + 1), rounded_bitlen - window_bits * idx) are all 0
     let mut is_zero_window = Vec::with_capacity(num_windows);
     let mut ones_vec = Vec::with_capacity(window_bits);
-    for idx in 0..window_bits {
+    for _ in 0..window_bits {
         ones_vec.push(Constant(F::from(1)));
     }
     for idx in 0..num_windows {
@@ -329,7 +318,7 @@ where
 
     for idx in 1..num_windows {
         let mut mult_point = curr_point.clone();
-        for double_idx in 0..window_bits {
+        for _ in 0..window_bits {
             mult_point = ecc_double(chip, ctx, &mult_point)?;
         }
         let add_point = select_from_bits(
@@ -409,7 +398,7 @@ where
 
     let mut is_zero_window_vec = Vec::with_capacity(k);
     let mut ones_vec = Vec::with_capacity(window_bits);
-    for idx in 0..window_bits {
+    for _ in 0..window_bits {
         ones_vec.push(Constant(F::from(1)));
     }
     for idx in 0..k {
@@ -497,7 +486,7 @@ where
 
     // compute \sum_i x_i P_i + (2^{k + 1} - 1) * A
     for idx in 0..num_windows {
-        for double_idx in 0..window_bits {
+        for _ in 0..window_bits {
             curr_point = ecc_double(chip, ctx, &curr_point)?;
         }
         for base_idx in 0..k {
@@ -530,7 +519,6 @@ pub fn ecdsa_verify_no_pubkey_check<F: FieldExt, CF: PrimeField, SF: PrimeField,
     r: &OverflowInteger<F>,
     s: &OverflowInteger<F>,
     msghash: &OverflowInteger<F>,
-    b: F,
     var_window_bits: usize,
     fixed_window_bits: usize,
 ) -> Result<AssignedCell<F, F>, Error>
@@ -562,17 +550,9 @@ where
     let r_crt = scalar_chip.to_crt(ctx, r)?;
 
     // compute u1 * G and u2 * pubkey
-    let u1_mul = fixed_base_scalar_multiply(
-        base_chip,
-        ctx,
-        &G,
-        &u1.limbs,
-        b,
-        u1.limb_bits,
-        fixed_window_bits,
-    )?;
-    let u2_mul =
-        scalar_multiply(base_chip, ctx, pubkey, &u2.limbs, b, u2.limb_bits, var_window_bits)?;
+    let u1_mul =
+        fixed_base_scalar_multiply(base_chip, ctx, &G, &u1.limbs, u1.limb_bits, fixed_window_bits)?;
+    let u2_mul = scalar_multiply(base_chip, ctx, pubkey, &u2.limbs, u2.limb_bits, var_window_bits)?;
 
     // check u1 * G and u2 * pubkey are not negatives and not equal
     //     TODO: Technically they could be equal for a valid signature, but this happens with vanishing probability
@@ -610,7 +590,7 @@ pub fn get_naf(mut exp: Vec<u64>) -> Vec<i8> {
     // generate the NAF for exp
     for idx in 0..len {
         let mut e: u64 = exp[idx];
-        for i in 0..64 {
+        for _ in 0..64 {
             if e & 1 == 1 {
                 let z = 2i8 - (e % 4) as i8;
                 e = e / 2;
@@ -815,11 +795,10 @@ where
         ctx: &mut Context<'_, F>,
         P: &EccPoint<F, FC::FieldPoint>,
         scalar: &Vec<AssignedCell<F, F>>,
-        b: F,
         max_bits: usize,
         window_bits: usize,
     ) -> Result<EccPoint<F, FC::FieldPoint>, Error> {
-        scalar_multiply(self.field_chip, ctx, P, scalar, b, max_bits, window_bits)
+        scalar_multiply(self.field_chip, ctx, P, scalar, max_bits, window_bits)
     }
 
     pub fn multi_scalar_mult<GA>(
@@ -886,8 +865,7 @@ where
         FC: PrimeFieldChip<F, FieldType = GA::Base, FieldPoint = CRTInteger<F>>
             + Selectable<F, Point = FC::FieldPoint>,
     {
-        let curve_b = biguint_to_fe::<F>(&fe_to_biguint(&GA::b()));
-        fixed_base_scalar_multiply(self.field_chip, ctx, P, scalar, curve_b, max_bits, window_bits)
+        fixed_base_scalar_multiply(self.field_chip, ctx, P, scalar, max_bits, window_bits)
     }
 }
 

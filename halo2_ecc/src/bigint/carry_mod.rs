@@ -1,22 +1,18 @@
-use halo2_proofs::arithmetic::FieldExt;
-use num_bigint::Sign;
-use num_bigint::{BigInt, BigUint};
-use num_traits::ops::overflowing;
-use num_traits::{One, Signed, Zero};
-use std::ops::Shl;
-
-use super::{check_carry_to_zero, CRTInteger, OverflowInteger};
+use super::{check_carry_to_zero, BigIntConfig, BigIntStrategy, CRTInteger, OverflowInteger};
 use halo2_base::gates::{
-    flex_gate::GateStrategy,
     range::RangeStrategy,
-    Context, GateInstructions,
+    AssignedValue, Context, GateInstructions,
     QuantumCell::{self, Constant, Existing, Witness},
     RangeInstructions,
 };
 use halo2_base::utils::{
-    bigint_to_fe, biguint_to_fe, decompose_bigint_option, decompose_biguint,
-    modulus as native_modulus,
+    biguint_to_fe, decompose_bigint_option, decompose_biguint, modulus as native_modulus,
+    value_to_option,
 };
+use halo2_proofs::{arithmetic::FieldExt, circuit::Value, plonk::Error};
+use num_bigint::{BigInt, BigUint, Sign};
+use num_traits::{One, Zero};
+use std::ops::Shl;
 
 /// Input `a` is `OverflowInteger` of length `ka` with "signed" limbs
 /// Output is `a (mod modulus)` as a proper BigInt of length `num_limbs` with limbs in [0, 2^limb_bits)`
@@ -83,11 +79,10 @@ pub fn assign<F: FieldExt>(
     if k_prod != ka {
         println!("carry_mod, k_prod: {}, ka: {}", k_prod, ka);
     }
-    let mut mod_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(mod_vec.len());
-    let mut quot_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(m);
-    // let mut prod_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(k_prod);
-    let mut out_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(num_limbs);
-    let mut check_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(k_prod);
+    let mut mod_assigned: Vec<AssignedValue<F>> = Vec::with_capacity(mod_vec.len());
+    let mut quot_assigned: Vec<AssignedValue<F>> = Vec::with_capacity(m);
+    let mut out_assigned: Vec<AssignedValue<F>> = Vec::with_capacity(num_limbs);
+    let mut check_assigned: Vec<AssignedValue<F>> = Vec::with_capacity(k_prod);
 
     for i in 0..k_prod {
         let (mod_cell, quot_cell, out_cell, check_cell) = {
@@ -346,9 +341,9 @@ pub fn crt<F: FieldExt>(
     // 2. for prod[i] we can compute `prod + out - a`
     //    where we assign `out_vec` as we go
 
-    let mut quot_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(k);
-    let mut out_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(k);
-    let mut check_assigned: Vec<AssignedCell<F, F>> = Vec::with_capacity(k);
+    let mut quot_assigned: Vec<AssignedValue<F>> = Vec::with_capacity(k);
+    let mut out_assigned: Vec<AssignedValue<F>> = Vec::with_capacity(k);
+    let mut check_assigned: Vec<AssignedValue<F>> = Vec::with_capacity(k);
 
     match chip.strategy {
         // strategies where we carry out school-book multiplication in some form:
@@ -483,7 +478,7 @@ pub fn crt<F: FieldExt>(
 
     // Check `out + modulus * quotient - a = 0` in native field
     // | out | modulus | quotient | a |
-    let native_computation = range.gate().assign_region_smart(
+    let _native_computation = range.gate().assign_region_smart(
         ctx,
         vec![
             Existing(&out_native_assigned),

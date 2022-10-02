@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::marker::PhantomData;
 
-use ff::{Field, PrimeField};
-use halo2_proofs::poly::commitment::{Params, ParamsProver, ParamsVerifier};
+use ff::{Field, };
+use halo2_proofs::poly::commitment::{Params, ParamsProver, };
 use halo2_proofs::{
     arithmetic::{CurveAffine, FieldExt},
     circuit::*,
@@ -14,22 +14,17 @@ use halo2_proofs::{
     plonk::*,
     transcript::{Blake2bRead, Blake2bWrite, Challenge255},
 };
-use halo2curves::secp256k1::{Fp, Fq, Secp256k1, Secp256k1Affine};
-use num_bigint::{BigInt, BigUint};
+use halo2curves::secp256k1::{Fp, Fq,  Secp256k1Affine};
 use rand_core::OsRng;
 
-use super::{FpChip, FqOverflowChip, Secp256k1Chip, SECP_B};
-use crate::gates::{Context, ContextParams};
+use super::{FpChip, FqOverflowChip, };
 use crate::{
-    ecc::{ecdsa_verify_no_pubkey_check, fixed::FixedEccPoint, EccChip},
-    fields::{fp::FpConfig, fp::FpStrategy, FieldChip, PrimeFieldChip},
-    gates::{
-        range::{RangeConfig, RangeStrategy},
-        GateInstructions,
-        QuantumCell::Witness,
-        RangeInstructions,
-    },
-    utils::{bigint_to_fe, biguint_to_fe, fe_to_biguint, modulus},
+    ecc::{ecdsa_verify_no_pubkey_check, EccChip},
+    fields::{fp::FpStrategy, FieldChip, },
+};
+use halo2_base::{
+    gates::{Context, ContextParams},
+    utils::{ biguint_to_fe, fe_to_biguint, modulus},
 };
 
 #[derive(Serialize, Deserialize)]
@@ -154,7 +149,6 @@ impl<F: FieldExt> Circuit<F> for ECDSACircuit<F> {
                 &r_assigned,
                 &s_assigned,
                 &m_assigned,
-                F::from(SECP_B),
                 4,
                 4,
             )?;
@@ -162,7 +156,7 @@ impl<F: FieldExt> Circuit<F> for ECDSACircuit<F> {
             // IMPORTANT: this assigns all constants to the fixed columns
             // IMPORTANT: this copies cells to the lookup advice column to perform range check lookups
             // This is not optional.
-            let (const_rows, total_fixed, lookup_rows) = fp_chip.finalize(ctx)?;
+            let (const_rows, total_fixed, _lookup_rows) = fp_chip.finalize(ctx)?;
 
             #[cfg(feature = "display")]
             if self.r != None {
@@ -356,7 +350,7 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
     */
 
     use std::io::BufRead;
-    use halo2_proofs::{poly::{kzg::{strategy::SingleStrategy,commitment::{ParamsKZG, KZGCommitmentScheme, ParamsVerifierKZG}, multiopen::{ProverSHPLONK, VerifierSHPLONK}}}, transcript::{TranscriptWriterBuffer, TranscriptReadBuffer}};
+    use halo2_proofs::{poly::{kzg::{strategy::SingleStrategy,commitment::{ParamsKZG, KZGCommitmentScheme}, multiopen::{ProverSHPLONK, VerifierSHPLONK}}}, transcript::{TranscriptWriterBuffer, TranscriptReadBuffer}};
 
     let mut rng = rand::thread_rng();
 

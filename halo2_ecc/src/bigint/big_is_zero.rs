@@ -1,10 +1,6 @@
 use super::{CRTInteger, OverflowInteger};
 use halo2_base::gates::{Context, GateInstructions, QuantumCell::Existing, RangeInstructions};
-use halo2_proofs::{
-    arithmetic::{Field, FieldExt},
-    circuit::*,
-    plonk::*,
-};
+use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
 
 // given OverflowInteger<F> `a`, returns whether `a == 0`
 pub fn assign<F: FieldExt>(
@@ -13,7 +9,6 @@ pub fn assign<F: FieldExt>(
     a: &OverflowInteger<F>,
 ) -> Result<AssignedCell<F, F>, Error> {
     let k = a.limbs.len();
-    let limb_bits = a.limb_bits;
 
     let mut partial = None;
     for idx in 0..k {

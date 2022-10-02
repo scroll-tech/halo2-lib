@@ -1,33 +1,28 @@
-use std::marker::PhantomData;
-
-use ff::PrimeField;
-use halo2_proofs::{
-    arithmetic::{Field, FieldExt},
-    circuit::{AssignedCell, Layouter, Value},
-    plonk::{Advice, Column, ConstraintSystem, Error, Expression, Fixed, Selector, TableColumn},
-    poly::Rotation,
-};
-use num_bigint::{BigInt, BigUint};
-use num_traits::{Num, Signed};
-use serde::{Deserialize, Serialize};
-
 use super::{FieldChip, PrimeFieldChip, Selectable};
-use crate::{
-    bigint::{
-        add_no_carry, big_is_equal, big_is_zero, big_less_than, carry_mod, check_carry_mod_to_zero,
-        inner_product, mul_no_carry, scalar_mul_and_add_no_carry, scalar_mul_no_carry, select, sub,
-        sub_no_carry, BigIntConfig, BigIntStrategy, CRTInteger, FixedCRTInteger, OverflowInteger,
-    },
-    gates::QuantumCell::{Constant, Existing, Witness},
+use crate::bigint::{
+    add_no_carry, big_is_equal, big_is_zero, big_less_than, carry_mod, check_carry_mod_to_zero,
+    inner_product, mul_no_carry, scalar_mul_and_add_no_carry, scalar_mul_no_carry, select, sub,
+    sub_no_carry, BigIntConfig, BigIntStrategy, CRTInteger, OverflowInteger,
+};
+use ff::PrimeField;
+use halo2_base::{
     gates::{
         range::{RangeConfig, RangeStrategy},
-        Context, GateInstructions, QuantumCell, RangeInstructions,
+        Context, GateInstructions, QuantumCell,
+        QuantumCell::{Constant, Existing, Witness},
+        RangeInstructions,
     },
-    utils::{
-        bigint_to_fe, decompose_bigint, decompose_bigint_option, decompose_biguint,
-        decompose_biguint_to_biguints, fe_to_bigint, fe_to_biguint, modulus,
-    },
+    utils::{bigint_to_fe, decompose_bigint, decompose_bigint_option, fe_to_bigint, fe_to_biguint},
 };
+use halo2_proofs::{
+    arithmetic::FieldExt,
+    circuit::{AssignedCell, Layouter, Value},
+    plonk::{ConstraintSystem, Error},
+};
+use num_bigint::{BigInt, BigUint};
+use num_traits::Signed;
+use serde::{Deserialize, Serialize};
+use std::marker::PhantomData;
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum FpStrategy {
@@ -335,7 +330,7 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpConfig<F, Fp> {
 
         // underflow != 0 iff carry < p
         let p = self.load_constant(ctx, BigInt::from(self.p.clone()))?;
-        let (diff, underflow) = sub::crt(self.range(), ctx, a, &p)?;
+        let (_, underflow) = sub::crt(self.range(), ctx, a, &p)?;
         let is_underflow_zero = self.range.is_zero(ctx, &underflow)?;
         let range_check = self.range.gate().not(ctx, &Existing(&is_underflow_zero))?;
 
@@ -353,7 +348,7 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpConfig<F, Fp> {
 
         // underflow != 0 iff carry < p
         let p = self.load_constant(ctx, BigInt::from(self.p.clone()))?;
-        let (diff, underflow) = sub::crt(self.range(), ctx, a, &p)?;
+        let (_, underflow) = sub::crt(self.range(), ctx, a, &p)?;
         let is_underflow_zero = self.range.is_zero(ctx, &underflow)?;
         let range_check = self.range.gate().not(ctx, &Existing(&is_underflow_zero))?;
 
@@ -435,7 +430,6 @@ pub(crate) mod tests {
     use std::marker::PhantomData;
 
     use group::ff::Field;
-    use halo2_proofs::circuit::floor_planner::V1;
     use halo2_proofs::{
         arithmetic::FieldExt,
         circuit::*,
@@ -443,17 +437,12 @@ pub(crate) mod tests {
         halo2curves::bn256::{Fq, Fr},
         plonk::*,
     };
-    use num_traits::One;
     use rand::rngs::OsRng;
 
-    use crate::bigint::big_less_than;
     use crate::fields::fp::FpConfig;
-    use crate::fields::{FieldChip, PrimeFieldChip};
-    use crate::gates::flex_gate::GateStrategy;
-    use crate::gates::range::RangeConfig;
-    use crate::gates::{Context, ContextParams, RangeInstructions};
-    use crate::utils::{fe_to_bigint, modulus};
-    use num_bigint::{BigInt, BigUint};
+    use crate::fields::FieldChip;
+    use halo2_base::gates::{Context, ContextParams};
+    use halo2_base::utils::{fe_to_bigint, modulus};
 
     use super::FpStrategy;
 

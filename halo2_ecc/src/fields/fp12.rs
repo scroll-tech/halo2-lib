@@ -1,31 +1,16 @@
-use std::marker::PhantomData;
-
+use super::{FieldChip, FieldExtConstructor, FieldExtPoint, PrimeFieldChip};
 use ff::PrimeField;
+use halo2_base::{
+    gates::{Context, GateInstructions, QuantumCell::Existing, RangeInstructions},
+    utils::{fe_to_biguint, value_to_option},
+};
 use halo2_proofs::{
     arithmetic::{Field, FieldExt},
-    circuit::{AssignedCell, Layouter, Value},
+    circuit::{AssignedCell, Value},
     plonk::Error,
 };
-use num_bigint::{BigInt, BigUint};
-use num_traits::Num;
-
-use crate::gates::{
-    Context, GateInstructions,
-    QuantumCell::{Constant, Existing, Witness},
-    RangeInstructions,
-};
-use crate::utils::decompose_bigint_option;
-use crate::utils::{bigint_to_fe, fe_to_biguint};
-use crate::{
-    bigint::{
-        add_no_carry, carry_mod, check_carry_mod_to_zero, mul_no_carry, scalar_mul_no_carry,
-        sub_no_carry, CRTInteger, OverflowInteger,
-    },
-    utils::modulus,
-};
-use crate::{fields::fp2::Fp2Chip, utils::value_to_option};
-
-use super::{FieldChip, FieldExtConstructor, FieldExtPoint, PrimeFieldChip};
+use num_bigint::BigInt;
+use std::marker::PhantomData;
 
 /// Represent Fp12 point as FqPoint with degree = 12
 /// `Fp12 = Fp2[w] / (w^6 - u - xi)`
@@ -62,7 +47,6 @@ where
         a: &FieldExtPoint<FpChip::FieldPoint>,
         fp2_pt: &FieldExtPoint<FpChip::FieldPoint>,
     ) -> Result<FieldExtPoint<FpChip::FieldPoint>, Error> {
-        let deg = 6;
         assert_eq!(a.coeffs.len(), 12);
         assert_eq!(fp2_pt.coeffs.len(), 2);
 
@@ -260,8 +244,6 @@ where
         a: &Self::FieldPoint,
         b: &Self::FieldPoint,
     ) -> Result<Self::FieldPoint, Error> {
-        let deg = 6;
-        let xi = XI_0;
         assert_eq!(a.coeffs.len(), 12);
         assert_eq!(b.coeffs.len(), 12);
 
@@ -453,22 +435,16 @@ where
 pub(crate) mod tests {
     use std::marker::PhantomData;
 
-    use halo2_proofs::circuit::floor_planner::V1;
     use halo2_proofs::{
         arithmetic::FieldExt, circuit::*, dev::MockProver, halo2curves::bn256::Fr, plonk::*,
     };
     use halo2curves::bn254::{Fq, Fq12};
-    use num_traits::One;
-    use rand::Rng;
 
     use super::*;
     use crate::fields::fp::{FpConfig, FpStrategy};
-    use crate::fields::{FieldChip, PrimeFieldChip};
-    use crate::gates::flex_gate::GateStrategy;
-    use crate::gates::range::RangeStrategy;
-    use crate::gates::{ContextParams, RangeInstructions};
-    use crate::utils::{fe_to_bigint, modulus};
-    use num_bigint::{BigInt, BigUint};
+    use crate::fields::FieldChip;
+    use halo2_base::gates::ContextParams;
+    use halo2_base::utils::modulus;
 
     #[derive(Default)]
     struct MyCircuit<F> {

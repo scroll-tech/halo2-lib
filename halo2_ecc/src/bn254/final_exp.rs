@@ -1,23 +1,19 @@
-use ff::{Field, PrimeField};
-use halo2_proofs::{
-    arithmetic::FieldExt,
-    halo2curves::bn256::{self, G1Affine, G2Affine, BN_X, SIX_U_PLUS_2_NAF},
-    plonk::{Advice, Column, ConstraintSystem, Error, Fixed},
-};
-use halo2curves::bn254::{Fq, Fq2, FROBENIUS_COEFF_FQ12_C1};
-use num_bigint::{BigInt, BigUint};
-use num_traits::{Num, One, Zero};
-
 use super::{Fp12Chip, Fp2Chip, FpChip, FpPoint};
 use crate::{
-    ecc::{get_naf, EccChip, EccPoint},
-    fields::{fp12::mul_no_carry_w6, fp2, FieldChip, FieldExtPoint},
-    gates::{Context, GateInstructions, QuantumCell::*},
-    utils::{
-        bigint_to_fe, biguint_to_fe, decompose_bigint_option, decompose_biguint, fe_to_bigint,
-        fe_to_biguint, modulus,
-    },
+    ecc::get_naf,
+    fields::{fp12::mul_no_carry_w6, FieldChip, FieldExtPoint},
 };
+use ff::Field;
+use halo2_base::{
+    gates::{
+        Context, GateInstructions,
+        QuantumCell::{Constant, Existing},
+    },
+    utils::{fe_to_biguint, modulus},
+};
+use halo2_proofs::{arithmetic::FieldExt, halo2curves::bn256::BN_X, plonk::Error};
+use halo2curves::bn254::{Fq, Fq2, FROBENIUS_COEFF_FQ12_C1};
+use num_bigint::{BigInt, BigUint};
 
 const XI_0: u64 = 9;
 

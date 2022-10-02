@@ -7,31 +7,27 @@ use std::marker::PhantomData;
 
 use super::pairing::PairingChip;
 use super::*;
-use crate::{
-    bigint::FixedOverflowInteger,
-    ecc::EccChip,
-    fields::fp::FpStrategy,
+use crate::{ecc::EccChip, fields::fp::FpStrategy};
+use halo2_base::{
     gates::{Context, ContextParams, GateInstructions, QuantumCell::Witness},
-    utils::{decompose_bigint_option, value_to_option},
+    utils::{biguint_to_fe, fe_to_biguint, value_to_option},
 };
 use halo2_proofs::{
     arithmetic::{Field, FieldExt},
-    circuit::{floor_planner::V1, Layouter, SimpleFloorPlanner, Value},
+    circuit::{Layouter, SimpleFloorPlanner, Value},
     dev::MockProver,
-    halo2curves::bn256::{
-        multi_miller_loop, pairing, Bn256, Fr, G1Affine, G2Affine, G2Prepared, Gt, G1, G2,
-    },
+    halo2curves::bn256::{pairing, Bn256, Fr, G1Affine, G2Affine},
     plonk::*,
-    poly::commitment::{Params, ParamsProver, ParamsVerifier},
+    poly::commitment::{Params, ParamsProver},
     poly::kzg::{
-        commitment::{KZGCommitmentScheme, ParamsKZG, ParamsVerifierKZG},
+        commitment::{KZGCommitmentScheme, ParamsKZG},
         multiopen::{ProverSHPLONK, VerifierSHPLONK},
         strategy::SingleStrategy,
     },
     transcript::{Blake2bRead, Blake2bWrite, Challenge255},
     transcript::{TranscriptReadBuffer, TranscriptWriterBuffer},
 };
-use num_bigint::{BigInt, BigUint, ToBigInt};
+use num_bigint::BigUint;
 use num_traits::Num;
 
 #[derive(Serialize, Deserialize)]
@@ -159,7 +155,7 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
                 // IMPORTANT: this assigns all constants to the fixed columns
                 // IMPORTANT: this copies cells to the lookup advice column to perform range check lookups
                 // This is not optional.
-                let (const_rows, total_fixed, lookup_rows) = config.finalize(ctx)?;
+                let (const_rows, total_fixed, _lookup_rows) = config.finalize(ctx)?;
 
                 #[cfg(feature = "display")]
                 if self.P != None {
@@ -387,7 +383,7 @@ impl Circuit<Fr> for MSMCircuit<Fr> {
                     println!("correct: {:?}", msm_answer);
                 }
 
-                let (const_rows, total_fixed, lookup_rows) = config.fp_chip.finalize(ctx)?;
+                let (const_rows, total_fixed, _lookup_rows) = config.fp_chip.finalize(ctx)?;
 
                 #[cfg(feature = "display")]
                 if self.bases[0] != None {
@@ -451,7 +447,7 @@ fn test_msm() {
 
     let mut bases = Vec::new();
     let mut scalars = Vec::new();
-    for idx in 0..params.batch_size {
+    for _ in 0..params.batch_size {
         let new_pt = Some(G1Affine::random(&mut rng));
         bases.push(new_pt);
 
@@ -571,7 +567,7 @@ fn bench_msm() -> Result<(), Box<dyn std::error::Error>> {
 
         let mut bases = Vec::new();
         let mut scalars = Vec::new();
-        for idx in 0..bench_params.batch_size {
+        for _idx in 0..bench_params.batch_size {
             let new_pt = Some(G1Affine::random(&mut rng));
             bases.push(new_pt);
 

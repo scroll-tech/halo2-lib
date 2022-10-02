@@ -1,16 +1,13 @@
-use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
-use num_bigint::BigUint;
-
 use super::{BigIntConfig, CRTInteger, OverflowInteger};
-use crate::gates::Context;
-use crate::utils::{fe_to_biguint, modulus as native_modulus};
-use crate::{
-    bigint::BigIntStrategy,
+use halo2_base::{
     gates::{
-        GateInstructions,
+        Context, GateInstructions,
         QuantumCell::{self, Constant, Existing, Witness},
     },
+    utils::modulus as native_modulus,
 };
+use halo2_proofs::{arithmetic::FieldExt, circuit::Value, plonk::Error};
+use num_bigint::BigUint;
 
 pub fn assign<F: FieldExt>(
     gate: &impl GateInstructions<F>,
@@ -71,7 +68,7 @@ pub fn assign<F: FieldExt>(
 
 pub fn truncate<F: FieldExt>(
     gate: &impl GateInstructions<F>,
-    chip: &BigIntConfig<F>,
+    _chip: &BigIntConfig<F>,
     ctx: &mut Context<'_, F>,
     a: &OverflowInteger<F>,
     b: &OverflowInteger<F>,
