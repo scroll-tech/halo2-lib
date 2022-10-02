@@ -1,7 +1,7 @@
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Cell, Region, Value},
-    plonk::{Advice, Column, Error, Fixed},
+    plonk::{Advice, Challenge, Column, Error, Fixed},
 };
 use num_bigint::BigUint;
 use std::{borrow::Borrow, collections::HashMap, rc::Rc};
@@ -89,6 +89,8 @@ pub struct Context<'a, F: FieldExt> {
     pub constants_to_assign: Vec<(F, Option<Cell>)>,
     pub zero_cell: Option<AssignedValue<F>>,
 
+    pub challenge: HashMap<String, Value<F>>,
+    
     // `cells_to_lookup` is a vector keeping track of all cells that we want to enable lookup for. When there is more than 1 advice column we will copy_advice all of these cells to the single lookup enabled column and do lookups there
     pub cells_to_lookup: Vec<AssignedValue<F>>,
 
@@ -122,6 +124,7 @@ impl<'a, F: FieldExt> Context<'a, F> {
             advice_rows,
             constants_to_assign: Vec::new(),
             zero_cell: None,
+	    challenge: HashMap::new(),
             cells_to_lookup: Vec::new(),
             current_phase: 0u8,
             #[cfg(feature = "display")]
