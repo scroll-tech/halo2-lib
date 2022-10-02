@@ -10,7 +10,9 @@ use crate::{
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{Layouter, Value},
-    plonk::{Advice, Column, ConstraintSystem, Error, Selector, TableColumn},
+    plonk::{
+        Advice, Column, ConstraintSystem, Error, SecondPhase, Selector, TableColumn, ThirdPhase,
+    },
     poly::Rotation,
 };
 use num_bigint::BigUint;
@@ -36,7 +38,7 @@ pub struct RangeConfig<F: FieldExt> {
     // If `strategy` is `CustomHorizontal`:
     // * TODO
     pub lookup_advice: Vec<Column<Advice>>,
-    pub q_lookup: Vec<Selector>,
+    pub q_lookup: Vec<Option<Selector>>,
     pub lookup: TableColumn,
     pub lookup_bits: usize,
     // selector for custom range gate
@@ -74,8 +76,8 @@ impl<F: FieldExt> RangeConfig<F> {
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
         range_strategy: RangeStrategy,
-        num_advice: usize,
-        mut num_lookup_advice: usize,
+        num_advice: &[usize],
+        num_lookup_advice: &[usize],
         num_fixed: usize,
         lookup_bits: usize,
         context_id: String,
@@ -94,37 +96,33 @@ impl<F: FieldExt> RangeConfig<F> {
             context_id.clone(),
         );
 
-        if num_advice == 1 {
-            num_lookup_advice = 0;
-        }
-        let mut lookup_advice = Vec::with_capacity(num_lookup_advice);
-        for _i in 0..num_lookup_advice {
-            let a = meta.advice_column();
-            meta.enable_equality(a);
-            lookup_advice.push(a);
-        }
-        let config = if num_advice > 1 {
-            Self {
-                lookup_advice,
-                q_lookup: Vec::new(),
-                lookup,
-                lookup_bits,
-                gate,
-                strategy: range_strategy,
-                context_id,
+        let mut q_lookup = Vec::new();
+        let mut lookup_advice = Vec::new();
+        for (phase, &num_columns) in num_lookup_advice.iter().enumerate() {
+            if num_advice[phase] == 1 {
+                q_lookup.push(Some(meta.complex_selector()));
+            } else {
+                q_lookup.push(None);
+                for _ in 0..num_columns {
+                    let a = match phase {
+                        0 => meta.advice_column(),
+                        1 => meta.advice_column_in(SecondPhase),
+                        2 => meta.advice_column_in(ThirdPhase),
+                        _ => panic!(),
+                    };
+                    meta.enable_equality(a);
+                    lookup_advice.push(a);
+                }
             }
-        } else {
-            let q = meta.complex_selector();
-            Self {
-                lookup_advice: vec![],
-                q_lookup: vec![q],
-                lookup,
-                lookup_bits,
-                // q_range,
-                gate,
-                strategy: range_strategy,
-                context_id,
-            }
+        }
+        let config = Self {
+            lookup_advice,
+            q_lookup,
+            lookup,
+            lookup_bits,
+            gate,
+            strategy: range_strategy,
+            context_id,
         };
         config.create_lookup(meta);
 
@@ -132,12 +130,23 @@ impl<F: FieldExt> RangeConfig<F> {
     }
 
     fn create_lookup(&self, meta: &mut ConstraintSystem<F>) -> () {
-        for i in 0..self.q_lookup.len() {
-            meta.lookup("lookup", |meta| {
-                let q = meta.query_selector(self.q_lookup[i]);
-                let a = meta.query_advice(self.gate.basic_gates[i].value, Rotation::cur());
-                vec![(q * a, self.lookup)]
-            });
+        for (i, q_l) in self.q_lookup.iter().enumerate() {
+            if let Some(q) = q_l {
+                meta.lookup("lookup", |meta| {
+                    let q = meta.query_selector(q.clone());
+                    // find an advice column of phase i
+                    let a = meta.query_advice(
+                        self.gate
+                            .basic_gates
+                            .iter()
+                            .find(|bg| bg.value.column_type().phase() == i as u8)
+                            .unwrap()
+                            .value,
+                        Rotation::cur(),
+                    );
+                    vec![(q * a, self.lookup)]
+                });
+            }
         }
         for la in self.lookup_advice.iter() {
             meta.lookup("lookup wo selector", |meta| {
@@ -181,12 +190,10 @@ impl<F: FieldExt> RangeConfig<F> {
         ctx: &mut Context<'_, F>,
         acell: AssignedValue<F>,
     ) -> Result<(), Error> {
-        if self.q_lookup.len() > 0 {
-            // currently we only use non-specialized lookup columns if there is only a single advice column
-            assert_eq!(self.gate.basic_gates.len(), 1);
-            self.q_lookup[0].enable(&mut ctx.region, acell.row())?;
+        let phase = acell.phase() as usize;
+        if let Some(q) = &self.q_lookup[phase] {
+            q.enable(&mut ctx.region, acell.row())?;
         } else {
-            // offset is not used in this case
             ctx.cells_to_lookup.push(acell);
         }
         Ok(())

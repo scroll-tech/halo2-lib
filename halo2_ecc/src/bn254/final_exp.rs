@@ -5,11 +5,10 @@ use crate::{
 };
 use ff::Field;
 use halo2_base::{
-    gates::{
-        Context, GateInstructions,
-        QuantumCell::{Constant, Existing},
-    },
+    gates::GateInstructions,
     utils::{fe_to_biguint, modulus},
+    Context,
+    QuantumCell::{Constant, Existing},
 };
 use halo2_proofs::{arithmetic::FieldExt, halo2curves::bn256::BN_X, plonk::Error};
 use halo2curves::bn254::{Fq, Fq2, FROBENIUS_COEFF_FQ12_C1};

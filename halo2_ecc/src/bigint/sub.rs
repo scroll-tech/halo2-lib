@@ -1,10 +1,10 @@
 use super::{CRTInteger, OverflowInteger};
-use halo2_base::gates::{
-    AssignedValue, Context, GateInstructions,
-    QuantumCell::{Constant, Existing, Witness},
-    RangeInstructions,
-};
 use halo2_base::utils::bigint_to_fe;
+use halo2_base::{
+    gates::{GateInstructions, RangeInstructions},
+    AssignedValue, Context,
+    QuantumCell::{Constant, Existing, Witness},
+};
 use halo2_proofs::{arithmetic::FieldExt, plonk::Error};
 use num_bigint::BigInt;
 

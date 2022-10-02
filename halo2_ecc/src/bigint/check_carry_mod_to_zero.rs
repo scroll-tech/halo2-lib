@@ -1,15 +1,14 @@
 use super::BigIntConfig;
 use super::{check_carry_to_zero, CRTInteger, OverflowInteger};
 use crate::bigint::{carry_mod::get_carry_witness, BigIntStrategy};
-use halo2_base::gates::AssignedValue;
-use halo2_base::gates::{
-    Context, GateInstructions,
+use halo2_base::{
+    gates::{GateInstructions, RangeInstructions},
+    utils::{
+        biguint_to_fe, decompose_bigint_option, decompose_biguint, modulus as native_modulus,
+        value_to_option,
+    },
+    AssignedValue, Context,
     QuantumCell::{self, Constant, Existing, Witness},
-    RangeInstructions,
-};
-use halo2_base::utils::{
-    biguint_to_fe, decompose_bigint_option, decompose_biguint, modulus as native_modulus,
-    value_to_option,
 };
 use halo2_proofs::{arithmetic::FieldExt, circuit::Value, plonk::Error};
 use num_bigint::BigUint;
@@ -274,7 +273,7 @@ pub fn crt<F: FieldExt>(
         BigIntStrategy::Simple => {
             for i in 0..k {
                 let (quot_cell, check_cell) = {
-                    let (quot_assigned, _, prod, gate_index) = range.gate().inner_product(
+                    let (quot_assigned, _, prod) = range.gate().inner_product(
                         ctx,
                         &quot_assigned[0..i]
                             .iter()
@@ -283,12 +282,13 @@ pub fn crt<F: FieldExt>(
                             .collect(),
                         &mod_vec[0..=i].iter().rev().map(|c| Constant(*c)).collect(),
                     )?;
+                    let gate_index = prod.column();
 
                     // perform step 2: compute prod - a + out
                     // transpose of:
                     // | prod | -1 | a | prod - a |
                     let check_val = prod.value().copied() - a.truncation.limbs[i].value();
-                    let (assignments, _) = range.gate().assign_region(
+                    let assignments = range.gate().assign_region(
                         ctx,
                         vec![
                             Constant(-F::from(1)),
@@ -299,7 +299,7 @@ pub fn crt<F: FieldExt>(
                         Some(gate_index),
                     )?;
 
-                    (quot_assigned.unwrap()[i].0.clone(), assignments[2].clone())
+                    (quot_assigned.unwrap()[i].clone(), assignments[2].clone())
                 };
                 quot_assigned.push(quot_cell);
                 check_assigned.push(check_cell);

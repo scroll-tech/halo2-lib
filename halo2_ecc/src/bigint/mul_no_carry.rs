@@ -1,10 +1,9 @@
 use super::{BigIntConfig, CRTInteger, OverflowInteger};
 use halo2_base::{
-    gates::{
-        Context, GateInstructions,
-        QuantumCell::{self, Constant, Existing, Witness},
-    },
+    gates::GateInstructions,
     utils::modulus as native_modulus,
+    Context,
+    QuantumCell::{self, Constant, Existing, Witness},
 };
 use halo2_proofs::{arithmetic::FieldExt, circuit::Value, plonk::Error};
 use num_bigint::BigUint;

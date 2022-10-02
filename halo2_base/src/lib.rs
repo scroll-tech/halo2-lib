@@ -29,7 +29,7 @@ impl<F: FieldExt> QuantumCell<'_, F> {
 
 #[derive(Clone, Debug)]
 pub struct AssignedValue<F: FieldExt> {
-    pub assigned: AssignedCell<F, F>,
+    pub assigned: Rc<AssignedCell<F, F>>,
     pub context_id: Rc<String>,
     column_index: usize,
     row_offset: usize,
@@ -45,7 +45,7 @@ impl<F: FieldExt> AssignedValue<F> {
         row_offset: usize,
         phase: u8,
     ) -> Self {
-        Self { assigned, context_id, column_index, row_offset, phase }
+        Self { assigned: Rc::new(assigned), context_id, column_index, row_offset, phase }
     }
 
     pub fn context_id(&self) -> &String {

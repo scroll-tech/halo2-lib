@@ -31,7 +31,7 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
         FlexGateConfig::configure(
             meta,
             GateStrategy::PlonkPlus,
-            NUM_ADVICE,
+            &[NUM_ADVICE],
             1,
             "default".to_string(),
         )
@@ -156,8 +156,8 @@ impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
         range::RangeConfig::configure(
             meta,
             range::RangeStrategy::PlonkPlus,
-            NUM_ADVICE,
-            1,
+            &[NUM_ADVICE],
+            &[1],
             1,
             3,
             "default".to_string(),

@@ -1,6 +1,8 @@
 use super::{CRTInteger, OverflowInteger};
-use halo2_base::gates::{
-    AssignedValue, Context, GateInstructions, QuantumCell::Existing, RangeInstructions,
+use halo2_base::{
+    gates::{GateInstructions, RangeInstructions},
+    AssignedValue, Context,
+    QuantumCell::Existing,
 };
 use halo2_proofs::{arithmetic::FieldExt, plonk::Error};
 

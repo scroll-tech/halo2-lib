@@ -6,8 +6,8 @@ use crate::{
     fields::{FieldChip, FieldExtPoint},
 };
 use halo2_base::{
-    gates::Context,
     utils::{biguint_to_fe, fe_to_biguint},
+    Context,
 };
 use halo2_proofs::{
     arithmetic::FieldExt,

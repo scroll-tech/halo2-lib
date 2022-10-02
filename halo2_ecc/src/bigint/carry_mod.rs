@@ -1,13 +1,12 @@
 use super::{check_carry_to_zero, BigIntConfig, BigIntStrategy, CRTInteger, OverflowInteger};
-use halo2_base::gates::{
-    range::RangeStrategy,
-    AssignedValue, Context, GateInstructions,
+use halo2_base::{
+    gates::{range::RangeStrategy, GateInstructions, RangeInstructions},
+    utils::{
+        biguint_to_fe, decompose_bigint_option, decompose_biguint, modulus as native_modulus,
+        value_to_option,
+    },
+    AssignedValue, Context,
     QuantumCell::{self, Constant, Existing, Witness},
-    RangeInstructions,
-};
-use halo2_base::utils::{
-    biguint_to_fe, decompose_bigint_option, decompose_biguint, modulus as native_modulus,
-    value_to_option,
 };
 use halo2_proofs::{arithmetic::FieldExt, circuit::Value, plonk::Error};
 use num_bigint::{BigInt, BigUint, Sign};
@@ -350,7 +349,7 @@ pub fn crt<F: FieldExt>(
         BigIntStrategy::Simple => {
             for i in 0..k {
                 let (quot_cell, out_cell, check_cell) = {
-                    let (quot_assigned, _, prod, gate_index) = range.gate().inner_product(
+                    let (quot_assigned, _, prod) = range.gate().inner_product(
                         ctx,
                         &quot_assigned[0..i]
                             .iter()
@@ -359,6 +358,7 @@ pub fn crt<F: FieldExt>(
                             .collect(),
                         &mod_vec[0..=i].iter().rev().map(|c| Constant(*c)).collect(),
                     )?;
+                    let gate_index = prod.column();
 
                     let out_cell;
                     let check_cell;
@@ -371,7 +371,7 @@ pub fn crt<F: FieldExt>(
                             // transpose of:
                             // | prod | -1 | a | prod - a | 1 | out | prod - a + out
                             // where prod is at relative row `offset`
-                            let (assignments, _) = range.gate().assign_region(
+                            let assignments = range.gate().assign_region(
                                 ctx,
                                 vec![
                                     Constant(-F::from(1)),
@@ -392,7 +392,7 @@ pub fn crt<F: FieldExt>(
                             // selector columns:
                             // | 1    | 0 | 0   |
                             // | 0    | -1| 1   |
-                            let (assignments, _) = range.gate().assign_region(
+                            let assignments = range.gate().assign_region(
                                 ctx,
                                 vec![
                                     Existing(&a.truncation.limbs[i]),
@@ -407,7 +407,7 @@ pub fn crt<F: FieldExt>(
                         }
                     }
 
-                    (quot_assigned.unwrap()[i].0.clone(), out_cell, check_cell)
+                    (quot_assigned.unwrap()[i].clone(), out_cell, check_cell)
                 };
                 quot_assigned.push(quot_cell);
                 out_assigned.push(out_cell);

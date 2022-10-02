@@ -9,8 +9,10 @@ use super::pairing::PairingChip;
 use super::*;
 use crate::{ecc::EccChip, fields::fp::FpStrategy};
 use halo2_base::{
-    gates::{Context, ContextParams, GateInstructions, QuantumCell::Witness},
+    gates::GateInstructions,
     utils::{biguint_to_fe, fe_to_biguint, value_to_option},
+    Context, ContextParams,
+    QuantumCell::Witness,
 };
 use halo2_proofs::{
     arithmetic::{Field, FieldExt},

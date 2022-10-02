@@ -1,5 +1,9 @@
 use super::{CRTInteger, OverflowInteger};
-use halo2_base::gates::{Context, GateInstructions, QuantumCell::Existing, RangeInstructions};
+use halo2_base::{
+    gates::{GateInstructions, RangeInstructions},
+    AssignedValue, Context,
+    QuantumCell::Existing,
+};
 use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
 
 // given OverflowInteger<F> `a`, returns whether `a == 0`
@@ -7,7 +11,7 @@ pub fn assign<F: FieldExt>(
     range: &impl RangeInstructions<F>,
     ctx: &mut Context<'_, F>,
     a: &OverflowInteger<F>,
-) -> Result<AssignedCell<F, F>, Error> {
+) -> Result<AssignedValue<F>, Error> {
     let k = a.limbs.len();
 
     let mut partial = None;
@@ -28,7 +32,7 @@ pub fn crt<F: FieldExt>(
     range: &impl RangeInstructions<F>,
     ctx: &mut Context<'_, F>,
     a: &CRTInteger<F>,
-) -> Result<AssignedCell<F, F>, Error> {
+) -> Result<AssignedValue<F>, Error> {
     let out_trunc = assign(range, ctx, &a.truncation)?;
     let out_native = range.is_zero(ctx, &a.native)?;
     let out = range.gate().and(ctx, &Existing(&out_trunc), &Existing(&out_native))?;

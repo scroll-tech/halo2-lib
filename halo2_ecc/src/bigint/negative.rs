@@ -1,5 +1,5 @@
 use super::OverflowInteger;
-use halo2_base::gates::{Context, GateInstructions, QuantumCell::Existing};
+use halo2_base::{gates::GateInstructions, Context, QuantumCell::Existing};
 use halo2_proofs::{arithmetic::FieldExt, plonk::Error};
 
 pub fn assign<F: FieldExt>(

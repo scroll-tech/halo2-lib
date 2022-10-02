@@ -1,10 +1,8 @@
 use halo2_base::{
-    gates::{
-        flex_gate::FlexGateConfig,
-        AssignedValue, Context, GateInstructions,
-        QuantumCell::{Constant, Existing},
-    },
+    gates::{flex_gate::FlexGateConfig, GateInstructions},
     utils::{bigint_to_fe, biguint_to_fe, decompose_bigint, fe_to_bigint, fe_to_biguint},
+    AssignedValue, Context,
+    QuantumCell::{Constant, Existing},
 };
 use halo2_proofs::{
     arithmetic::FieldExt,
@@ -89,7 +87,7 @@ impl<F: FieldExt> OverflowInteger<F> {
         match chip.strategy {
             BigIntStrategy::Simple => {
                 // Constrain `out_native = sum_i out_assigned[i] * 2^{n*i}` in `F`
-                let (_, _, native, _) =
+                let (_, _, native) =
                     gate.inner_product(ctx, &limbs.iter().map(|a| Existing(a)).collect(), &pows)?;
                 Ok(native)
             }

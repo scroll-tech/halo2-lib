@@ -1,11 +1,11 @@
 use super::OverflowInteger;
-use halo2_base::gates::{
-    Context, GateInstructions,
+use halo2_base::{
+    gates::{GateInstructions, RangeInstructions},
+    utils::{
+        bigint_to_fe, biguint_to_fe, fe_to_bigint, modulus as native_modulus, value_to_option,
+    },
+    Context,
     QuantumCell::{Constant, Existing, Witness},
-    RangeInstructions,
-};
-use halo2_base::utils::{
-    bigint_to_fe, biguint_to_fe, fe_to_bigint, modulus as native_modulus, value_to_option,
 };
 use halo2_proofs::{arithmetic::FieldExt, circuit::Value, plonk::Error};
 use num_bigint::{BigInt, BigUint};

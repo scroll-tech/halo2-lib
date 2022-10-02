@@ -1,6 +1,7 @@
 use super::{CRTInteger, OverflowInteger};
-use halo2_base::gates::{AssignedValue, Context, GateInstructions, QuantumCell::Existing};
-use halo2_base::utils::fe_to_bigint;
+use halo2_base::{
+    gates::GateInstructions, utils::fe_to_bigint, AssignedValue, Context, QuantumCell::Existing,
+};
 use halo2_proofs::{arithmetic::FieldExt, plonk::Error};
 use num_bigint::BigInt;
 use std::cmp;

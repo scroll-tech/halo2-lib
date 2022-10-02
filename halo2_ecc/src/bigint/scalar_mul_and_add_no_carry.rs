@@ -1,10 +1,9 @@
 use super::{CRTInteger, OverflowInteger};
 use halo2_base::{
-    gates::{
-        Context, GateInstructions,
-        QuantumCell::{Constant, Existing, Witness},
-    },
+    gates::GateInstructions,
     utils::fe_to_bigint,
+    Context,
+    QuantumCell::{Constant, Existing, Witness},
 };
 use halo2_proofs::{arithmetic::FieldExt, plonk::Error};
 use num_traits::Signed;

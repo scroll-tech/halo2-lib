@@ -1,5 +1,5 @@
 use super::OverflowInteger;
-use halo2_base::gates::{AssignedValue, Context, RangeInstructions};
+use halo2_base::{gates::RangeInstructions, AssignedValue, Context};
 use halo2_proofs::{arithmetic::FieldExt, plonk::Error};
 
 // given OverflowInteger<F>'s `a` and `b` of the same shape,

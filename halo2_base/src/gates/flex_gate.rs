@@ -5,7 +5,7 @@ use super::{
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Value},
-    plonk::{Advice, Column, ConstraintSystem, Error, Fixed},
+    plonk::{Advice, Column, ConstraintSystem, Error, FirstPhase, Fixed, SecondPhase, ThirdPhase},
     poly::Rotation,
 };
 use std::{borrow::Borrow, marker::PhantomData, rc::Rc};
@@ -41,8 +41,13 @@ pub struct BasicGateConfig<F: FieldExt> {
 }
 
 impl<F: FieldExt> BasicGateConfig<F> {
-    pub fn configure(meta: &mut ConstraintSystem<F>, strategy: GateStrategy) -> Self {
-        let value = meta.advice_column();
+    pub fn configure(meta: &mut ConstraintSystem<F>, strategy: GateStrategy, phase: u8) -> Self {
+        let value = match phase {
+            0 => meta.advice_column_in(FirstPhase),
+            1 => meta.advice_column_in(SecondPhase),
+            2 => meta.advice_column_in(ThirdPhase),
+            _ => panic!(),
+        };
         meta.enable_equality(value);
         let q = meta.fixed_column();
 
@@ -111,7 +116,7 @@ impl<F: FieldExt> FlexGateConfig<F> {
     pub fn configure(
         meta: &mut ConstraintSystem<F>,
         strategy: GateStrategy,
-        num_advice: usize,
+        num_advice: &[usize],
         num_fixed: usize,
         context_id: String,
     ) -> Self {
@@ -124,11 +129,14 @@ impl<F: FieldExt> FlexGateConfig<F> {
         }
         match strategy {
             GateStrategy::Vertical | GateStrategy::PlonkPlus => {
-                let mut basic_gates = Vec::with_capacity(num_advice);
-                for _i in 0..num_advice {
-                    let gate = BasicGateConfig::configure(meta, strategy);
-                    basic_gates.push(gate);
+                let mut basic_gates = Vec::new();
+                for (phase, &num_columns) in num_advice.iter().enumerate() {
+                    basic_gates.extend(
+                        (0..num_columns)
+                            .map(|_| BasicGateConfig::configure(meta, strategy, phase as u8)),
+                    );
                 }
+                let num_advice = basic_gates.len();
                 Self {
                     basic_gates,
                     constants,
