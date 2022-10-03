@@ -8,7 +8,7 @@ use halo2_proofs::{
     plonk::{Advice, Column, ConstraintSystem, Error, FirstPhase, Fixed, SecondPhase, ThirdPhase},
     poly::Rotation,
 };
-use std::{borrow::Borrow, marker::PhantomData, rc::Rc};
+use std::{marker::PhantomData, rc::Rc};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum GateStrategy {

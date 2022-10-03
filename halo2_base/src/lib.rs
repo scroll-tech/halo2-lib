@@ -20,7 +20,7 @@ pub enum QuantumCell<'a, F: FieldExt> {
 impl<F: FieldExt> QuantumCell<'_, F> {
     pub fn value(&self) -> Value<&F> {
         match self {
-            Self::Existing(a) => a.assigned.value(),
+            Self::Existing(a) => a.value(),
             Self::Witness(a) => a.as_ref(),
             Self::Constant(a) => Value::known(a),
         }
@@ -29,7 +29,8 @@ impl<F: FieldExt> QuantumCell<'_, F> {
 
 #[derive(Clone, Debug)]
 pub struct AssignedValue<F: FieldExt> {
-    pub assigned: Rc<AssignedCell<F, F>>,
+    pub cell: Rc<Cell>,
+    pub value: Rc<Value<F>>,
     pub context_id: Rc<String>,
     column_index: usize,
     row_offset: usize,
@@ -45,7 +46,14 @@ impl<F: FieldExt> AssignedValue<F> {
         row_offset: usize,
         phase: u8,
     ) -> Self {
-        Self { assigned: Rc::new(assigned), context_id, column_index, row_offset, phase }
+        Self {
+            cell: Rc::new(assigned.cell()),
+            value: Rc::new(assigned.value().copied()),
+            context_id,
+            column_index,
+            row_offset,
+            phase,
+        }
     }
 
     pub fn context_id(&self) -> &String {
@@ -65,11 +73,29 @@ impl<F: FieldExt> AssignedValue<F> {
     }
 
     pub fn cell(&self) -> Cell {
-        self.assigned.cell()
+        self.cell.as_ref().clone()
     }
 
     pub fn value(&self) -> Value<&F> {
-        self.assigned.value()
+        self.value.as_ref().as_ref()
+    }
+
+    pub fn copy_advice<A, AR>(
+        &self,
+        annotation: A,
+        region: &mut Region<'_, F>,
+        column: Column<Advice>,
+        offset: usize,
+    ) -> Result<AssignedCell<F, F>, Error>
+    where
+        A: Fn() -> AR,
+        AR: Into<String>,
+    {
+        let assigned_cell =
+            region.assign_advice(annotation, column, offset, || self.value.as_ref().clone())?;
+        region.constrain_equal(assigned_cell.cell(), self.cell())?;
+
+        Ok(assigned_cell)
     }
 }
 
@@ -178,7 +204,7 @@ impl<'a, F: FieldExt> Context<'a, F> {
     ) -> Result<AssignedCell<F, F>, Error> {
         match input {
             QuantumCell::Existing(acell) => {
-                acell.assigned.copy_advice(|| "gate: copy advice", &mut self.region, column, offset)
+                acell.copy_advice(|| "gate: copy advice", &mut self.region, column, offset)
             }
             QuantumCell::Witness(val) => {
                 self.region.assign_advice(|| "gate: assign advice", column, offset, || val)
@@ -245,7 +271,7 @@ impl<'a, F: FieldExt> Context<'a, F> {
         for acell in &self.cells_to_lookup {
             let phase = acell.phase as usize;
             assert!(phase < NUM_PHASE);
-            acell.assigned.copy_advice(
+            acell.copy_advice(
                 || "copy lookup cell",
                 &mut self.region,
                 lookup_advice[phase][col[phase]],
