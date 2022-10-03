@@ -4,7 +4,7 @@ use super::{
 };
 use halo2_proofs::{
     arithmetic::FieldExt,
-    circuit::{AssignedCell, Value},
+    circuit::Value,
     plonk::{Advice, Column, ConstraintSystem, Error, FirstPhase, Fixed, SecondPhase, ThirdPhase},
     poly::Rotation,
 };
@@ -161,40 +161,9 @@ impl<F: FieldExt> FlexGateConfig<F> {
         ctx.assign_and_constrain_constants(&self.constants)
     }
 
-    /// Assuming that this is only called if ctx.region is not in shape mode!
-    pub fn assign_cell(
-        &self,
-        ctx: &mut Context<'_, F>,
-        input: QuantumCell<F>,
-        column: Column<Advice>,
-        offset: usize,
-    ) -> Result<AssignedCell<F, F>, Error> {
-        match input {
-            QuantumCell::Existing(acell) => {
-                acell.assigned.copy_advice(|| "gate: copy advice", &mut ctx.region, column, offset)
-            }
-            QuantumCell::Witness(val) => {
-                ctx.region.assign_advice(|| "gate: assign advice", column, offset, || val)
-            }
-            QuantumCell::Constant(c) => {
-                let acell = ctx.region.assign_advice(
-                    || "gate: assign const",
-                    column,
-                    offset,
-                    || Value::known(c),
-                )?;
-                ctx.constants_to_assign.push((c, Some(acell.cell())));
-                Ok(acell)
-            }
-        }
-    }
-
     /// returns leftmost `i` where `advice_rows[context_id][i]` is minimum amongst all `i` where `column[i]` is in phase `phase`
     fn min_gate_index_in(&self, ctx: &Context<'_, F>, phase: u8) -> usize {
-        let advice_rows = ctx
-            .advice_rows
-            .get::<String>(Rc::borrow(&self.context_id))
-            .expect(format!("context_id {} should have advice rows", self.context_id).as_str());
+        let advice_rows = ctx.advice_rows_get(&self.context_id);
 
         self.basic_gates
             .iter()
@@ -242,17 +211,12 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
         } else {
             self.min_gate_index_in(ctx, phase)
         };
-        let row_offset =
-            ctx.advice_rows.get::<String>(Rc::borrow(&self.context_id)).unwrap()[gate_index];
+        let row_offset = ctx.advice_rows_get(&self.context_id)[gate_index];
 
         let mut assignments = Vec::with_capacity(inputs.len());
         for (i, input) in inputs.iter().enumerate() {
-            let assigned_cell = self.assign_cell(
-                ctx,
-                input.clone(),
-                self.basic_gates[gate_index].value,
-                row_offset + i,
-            )?;
+            let assigned_cell =
+                ctx.assign_cell(input.clone(), self.basic_gates[gate_index].value, row_offset + i)?;
             assignments.push(AssignedValue::new(
                 assigned_cell,
                 self.context_id.clone(),
@@ -282,8 +246,7 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
             }
         }
 
-        ctx.advice_rows.get_mut::<String>(Rc::borrow(&self.context_id)).unwrap()[gate_index] +=
-            inputs.len();
+        ctx.advice_rows_get_mut(&self.context_id)[gate_index] += inputs.len();
 
         Ok(assignments)
     }

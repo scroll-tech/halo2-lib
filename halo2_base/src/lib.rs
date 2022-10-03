@@ -1,7 +1,7 @@
 use halo2_proofs::{
     arithmetic::FieldExt,
     circuit::{AssignedCell, Cell, Region, Value},
-    plonk::{Advice, Challenge, Column, Error, Fixed},
+    plonk::{Advice, Column, Error, Fixed},
 };
 use num_bigint::BigUint;
 use std::{borrow::Borrow, collections::HashMap, rc::Rc};
@@ -90,7 +90,7 @@ pub struct Context<'a, F: FieldExt> {
     pub zero_cell: Option<AssignedValue<F>>,
 
     pub challenge: HashMap<String, Value<F>>,
-    
+
     // `cells_to_lookup` is a vector keeping track of all cells that we want to enable lookup for. When there is more than 1 advice column we will copy_advice all of these cells to the single lookup enabled column and do lookups there
     pub cells_to_lookup: Vec<AssignedValue<F>>,
 
@@ -124,7 +124,7 @@ impl<'a, F: FieldExt> Context<'a, F> {
             advice_rows,
             constants_to_assign: Vec::new(),
             zero_cell: None,
-	    challenge: HashMap::new(),
+            challenge: HashMap::new(),
             cells_to_lookup: Vec::new(),
             current_phase: 0u8,
             #[cfg(feature = "display")]
@@ -140,6 +140,22 @@ impl<'a, F: FieldExt> Context<'a, F> {
         self.current_phase
     }
 
+    pub fn advice_rows_get(&self, id: &String) -> &Vec<usize> {
+        self.advice_rows
+            .get(id)
+            .expect(format!("context_id {} should have advice rows", id).as_str())
+    }
+
+    pub fn advice_rows_get_mut(&mut self, id: &String) -> &mut Vec<usize> {
+        self.advice_rows
+            .get_mut(id)
+            .expect(format!("context_id {} should have advice rows", id).as_str())
+    }
+
+    pub fn challenge_get(&self, id: &String) -> &Value<F> {
+        self.challenge.get(id).expect(format!("challenge {} should exist", id).as_str())
+    }
+
     /// returns leftmost `i` where `advice_rows[context_id][i]` is minimum amongst all `i`
     #[allow(dead_code)]
     fn min_gate_index(&self, context_id: &String) -> usize {
@@ -151,6 +167,33 @@ impl<'a, F: FieldExt> Context<'a, F> {
             .min_by(|(_, x), (_, y)| x.cmp(y))
             .map(|(i, _)| i)
             .unwrap()
+    }
+
+    /// Assuming that this is only called if ctx.region is not in shape mode!
+    pub fn assign_cell(
+        &mut self,
+        input: QuantumCell<F>,
+        column: Column<Advice>,
+        offset: usize,
+    ) -> Result<AssignedCell<F, F>, Error> {
+        match input {
+            QuantumCell::Existing(acell) => {
+                acell.assigned.copy_advice(|| "gate: copy advice", &mut self.region, column, offset)
+            }
+            QuantumCell::Witness(val) => {
+                self.region.assign_advice(|| "gate: assign advice", column, offset, || val)
+            }
+            QuantumCell::Constant(c) => {
+                let acell = self.region.assign_advice(
+                    || "gate: assign const",
+                    column,
+                    offset,
+                    || Value::known(c),
+                )?;
+                self.constants_to_assign.push((c, Some(acell.cell())));
+                Ok(acell)
+            }
+        }
     }
 
     /// call this at the very end of synthesize!
