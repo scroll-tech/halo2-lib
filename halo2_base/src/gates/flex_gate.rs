@@ -215,15 +215,15 @@ impl<F: FieldExt> GateInstructions<F> for FlexGateConfig<F> {
 
         let mut assignments = Vec::with_capacity(inputs.len());
         for (i, input) in inputs.iter().enumerate() {
-            let assigned_cell =
-                ctx.assign_cell(input.clone(), self.basic_gates[gate_index].value, row_offset + i)?;
-            assignments.push(AssignedValue::new(
-                assigned_cell,
-                self.context_id.clone(),
+            let assigned = ctx.assign_cell(
+                input.clone(),
+                self.basic_gates[gate_index].value,
+                &self.context_id,
                 gate_index,
                 row_offset + i,
                 phase,
-            ));
+            )?;
+            assignments.push(assigned);
         }
         for (i, q_coeff) in &gate_offsets {
             ctx.region.assign_fixed(

@@ -40,6 +40,24 @@ pub struct AssignedValue<F: FieldExt> {
 
 impl<F: FieldExt> AssignedValue<F> {
     pub fn new(
+        cell: Cell,
+        value: Value<F>,
+        context_id: Rc<String>,
+        column_index: usize,
+        row_offset: usize,
+        phase: u8,
+    ) -> Self {
+        Self {
+            cell: Rc::new(cell),
+            value: Rc::new(value),
+            context_id,
+            column_index,
+            row_offset,
+            phase,
+        }
+    }
+
+    pub fn from_assigned(
         assigned: AssignedCell<F, F>,
         context_id: Rc<String>,
         column_index: usize,
@@ -200,24 +218,50 @@ impl<'a, F: FieldExt> Context<'a, F> {
         &mut self,
         input: QuantumCell<F>,
         column: Column<Advice>,
-        offset: usize,
-    ) -> Result<AssignedCell<F, F>, Error> {
+        context_id: &Rc<String>,
+        column_index: usize,
+        row_offset: usize,
+        phase: u8,
+    ) -> Result<AssignedValue<F>, Error> {
         match input {
-            QuantumCell::Existing(acell) => {
-                acell.copy_advice(|| "gate: copy advice", &mut self.region, column, offset)
-            }
-            QuantumCell::Witness(val) => {
-                self.region.assign_advice(|| "gate: assign advice", column, offset, || val)
-            }
+            QuantumCell::Existing(acell) => Ok(AssignedValue {
+                cell: Rc::new(
+                    acell
+                        .copy_advice(|| "gate: copy advice", &mut self.region, column, row_offset)?
+                        .cell(),
+                ),
+                value: acell.value.clone(),
+                context_id: context_id.clone(),
+                column_index,
+                row_offset,
+                phase,
+            }),
+            QuantumCell::Witness(val) => Ok(AssignedValue {
+                cell: Rc::new(
+                    self.region
+                        .assign_advice(|| "gate: assign advice", column, row_offset, || val)?
+                        .cell(),
+                ),
+                value: Rc::new(val),
+                context_id: context_id.clone(),
+                column_index,
+                row_offset,
+                phase,
+            }),
             QuantumCell::Constant(c) => {
-                let acell = self.region.assign_advice(
-                    || "gate: assign const",
-                    column,
-                    offset,
-                    || Value::known(c),
-                )?;
-                self.constants_to_assign.push((c, Some(acell.cell())));
-                Ok(acell)
+                let cell = self
+                    .region
+                    .assign_advice(|| "gate: assign const", column, row_offset, || Value::known(c))?
+                    .cell();
+                self.constants_to_assign.push((c, Some(cell)));
+                Ok(AssignedValue {
+                    cell: Rc::new(cell),
+                    value: Rc::new(Value::known(c)),
+                    context_id: context_id.clone(),
+                    column_index,
+                    row_offset,
+                    phase,
+                })
             }
         }
     }
