@@ -220,7 +220,7 @@ impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
                     config.range_check(ctx, &a, self.range_bits)?;
                 }
                 {
-                    config.check_less_than(ctx, &a, &b, self.lt_bits)?;
+                    config.check_less_than(ctx, &Existing(&a), &Existing(&b), self.lt_bits)?;
                 }
                 {
                     config.is_less_than(ctx, &Existing(&a), &Existing(&b), self.lt_bits)?;

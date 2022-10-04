@@ -336,8 +336,8 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
     fn check_less_than(
         &self,
         ctx: &mut Context<'_, F>,
-        a: &AssignedValue<F>,
-        b: &AssignedValue<F>,
+        a: &QuantumCell<F>,
+        b: &QuantumCell<F>,
         num_bits: usize,
     ) -> Result<(), Error> {
         let pow_of_two = biguint_to_fe::<F>(&(BigUint::from(1u64) << num_bits));
@@ -346,12 +346,12 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
                 // | a + 2^(num_bits) - b | b | 1 | a + 2^(num_bits) | - 2^(num_bits) | 1 | a |
                 let cells = vec![
                     Witness(Value::known(pow_of_two) + a.value() - b.value()),
-                    Existing(&b),
+                    b.clone(),
                     Constant(F::from(1)),
                     Witness(Value::known(pow_of_two) + a.value()),
                     Constant(-pow_of_two),
                     Constant(F::from(1)),
-                    Existing(&a),
+                    a.clone(),
                 ];
                 let assigned_cells =
                     self.gate.assign_region_smart(ctx, cells, vec![0, 3], vec![], vec![])?;
@@ -365,9 +365,9 @@ impl<F: FieldExt> RangeInstructions<F> for RangeConfig<F> {
                 let assigned_cells = self.gate.assign_region(
                     ctx,
                     vec![
-                        Existing(&a),
+                        a.clone(),
                         Constant(F::from(1)),
-                        Existing(&b),
+                        b.clone(),
                         Witness(Value::known(pow_of_two) + a.value() - b.value()),
                     ],
                     vec![(0, Some([F::zero(), pow_of_two, -F::one()]))],
