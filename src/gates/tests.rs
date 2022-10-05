@@ -2,7 +2,7 @@ use std::cmp::max;
 
 use halo2_proofs::{
     arithmetic::FieldExt, circuit::floor_planner::V1, circuit::*, dev::MockProver,
-    pairing::bn256::Fr, plonk::*, poly::Rotation,
+    halo2curves::bn256::Fr, plonk::*, poly::Rotation,
 };
 
 use super::{
@@ -16,9 +16,9 @@ use crate::gates::{
 
 #[derive(Default)]
 struct MyCircuit<F> {
-    a: Option<F>,
-    b: Option<F>,
-    c: Option<F>,
+    a: Value<F>,
+    b: Value<F>,
+    c: Value<F>,
 }
 
 const NUM_ADVICE: usize = 1;
@@ -87,6 +87,11 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
                     config.mul(ctx, &Existing(&c_cell), &Existing(&b_cell))?;
                 }
 
+		// test idx_to_indicator
+		{
+		    config.idx_to_indicator(ctx, &Constant(F::from(3)), 4)?;
+		}
+
                 println!(
                     "maximum rows used by an advice column: {}",
                     ctx.advice_rows.iter().max().or(Some(&0)).unwrap(),
@@ -103,12 +108,15 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
 #[test]
 fn test_gates() {
     let k = 6;
-    let circuit =
-        MyCircuit::<Fr> { a: Some(Fr::from(10)), b: Some(Fr::from(12)), c: Some(Fr::from(120)) };
+    let circuit = MyCircuit::<Fr> {
+        a: Value::known(Fr::from(10)),
+        b: Value::known(Fr::from(12)),
+        c: Value::known(Fr::from(120)),
+    };
 
     let prover = MockProver::run(k, &circuit, vec![]).unwrap();
-    //prover.assert_satisfied();
-    assert_eq!(prover.verify(), Ok(()));
+    prover.assert_satisfied();
+    // assert_eq!(prover.verify(), Ok(()));
 }
 
 #[cfg(feature = "dev-graph")]
@@ -121,7 +129,7 @@ fn plot_gates() {
     root.fill(&WHITE).unwrap();
     let root = root.titled("Gates Layout", ("sans-serif", 60)).unwrap();
 
-    let circuit = MyCircuit::<Fr> { a: Some(Fr::zero()), b: Some(Fr::zero()), c: Some(Fr::zero()) };
+    let circuit = MyCircuit::<Fr>::default();
     halo2_proofs::dev::CircuitLayout::default().render(k, &circuit, &root).unwrap();
 }
 
@@ -129,8 +137,8 @@ fn plot_gates() {
 struct RangeTestCircuit<F> {
     range_bits: usize,
     lt_bits: usize,
-    a: Option<F>,
-    b: Option<F>,
+    a: Value<F>,
+    b: Value<F>,
 }
 
 impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
@@ -138,7 +146,12 @@ impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
-        Self { range_bits: self.range_bits, lt_bits: self.lt_bits, a: None, b: None }
+        Self {
+            range_bits: self.range_bits,
+            lt_bits: self.lt_bits,
+            a: Value::unknown(),
+            b: Value::unknown(),
+        }
     }
 
     fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
@@ -212,13 +225,13 @@ impl<F: FieldExt> Circuit<F> for RangeTestCircuit<F> {
                     config.check_less_than(ctx, &a, &b, self.lt_bits)?;
                 }
                 {
-                    config.is_less_than(ctx, &a, &b, self.lt_bits)?;
+                    config.is_less_than(ctx, &Existing(&a), &Existing(&b), self.lt_bits)?;
                 }
                 {
-                    config.is_less_than(ctx, &b, &a, self.lt_bits)?;
+                    config.is_less_than(ctx, &Existing(&b), &Existing(&a), self.lt_bits)?;
                 }
                 {
-                    config.is_equal(ctx, &b, &a)?;
+                    config.is_equal(ctx, &Existing(&b), &Existing(&a))?;
                 }
                 {
                     config.is_zero(ctx, &a)?;
@@ -244,13 +257,13 @@ fn test_range() {
     let circuit = RangeTestCircuit::<Fr> {
         range_bits: 8,
         lt_bits: 8,
-        a: Some(Fr::from(100)),
-        b: Some(Fr::from(101)),
+        a: Value::known(Fr::from(100)),
+        b: Value::known(Fr::from(101)),
     };
 
     let prover = MockProver::run(k, &circuit, vec![]).unwrap();
-    //prover.assert_satisfied();
-    assert_eq!(prover.verify(), Ok(()));
+    prover.assert_satisfied();
+    //assert_eq!(prover.verify(), Ok(()));
 }
 
 #[cfg(feature = "dev-graph")]
@@ -265,8 +278,8 @@ fn plot_range() {
     let circuit = RangeTestCircuit::<Fr> {
         range_bits: 8,
         lt_bits: 8,
-        a: Some(Fr::from(100)),
-        b: Some(Fr::from(101)),
+        a: Value::unknown(),
+        b: Value::unknown(),
     };
 
     halo2_proofs::dev::CircuitLayout::default().render(7, &circuit, &root).unwrap();

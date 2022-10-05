@@ -5,15 +5,16 @@ use crate::fields::fp::{FpConfig, FpStrategy};
 use crate::fields::fp2::Fp2Chip;
 use crate::gates::range::RangeStrategy;
 use crate::gates::ContextParams;
+use crate::utils::value_to_option;
 
 use super::*;
-use halo2_proofs::arithmetic::BaseExt;
-use halo2_proofs::circuit::floor_planner::*;
-use halo2_proofs::pairing::bn256::{G1Affine, G2Affine, G1, G2};
-use halo2_proofs::pairing::group::ff::PrimeField;
-use halo2_proofs::pairing::group::Group;
+use ff::PrimeField;
+use group::Group;
 use halo2_proofs::{
-    arithmetic::FieldExt, circuit::*, dev::MockProver, pairing::bn256::Fq, pairing::bn256::Fr,
+    arithmetic::FieldExt,
+    circuit::*,
+    dev::MockProver,
+    halo2curves::bn256::{Fq, Fr, G1Affine, G2Affine, G1, G2},
     plonk::*,
 };
 use num_bigint::{BigInt, RandBigInt};
@@ -81,28 +82,34 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
 
                 let P_assigned = chip.load_private(
                     ctx,
-                    match self.P {
-                        Some(P) => (Some(P.x), Some(P.y)),
-                        None => (None, None),
+                    match self.P.clone() {
+                        Some(P) => (Value::known(P.x), Value::known(P.y)),
+                        None => (Value::unknown(), Value::unknown()),
                     },
                 )?;
                 let Q_assigned = chip.load_private(
                     ctx,
-                    match self.Q {
-                        Some(Q) => (Some(Q.x), Some(Q.y)),
-                        None => (None, None),
+                    match self.Q.clone() {
+                        Some(Q) => (Value::known(Q.x), Value::known(Q.y)),
+                        None => (Value::unknown(), Value::unknown()),
                     },
                 )?;
 
                 // test add_unequal
                 {
                     let sum = chip.add_unequal(ctx, &P_assigned, &Q_assigned, false)?;
-                    assert_eq!(sum.x.truncation.to_bigint(), sum.x.value);
-                    assert_eq!(sum.y.truncation.to_bigint(), sum.y.value);
+                    assert_eq!(
+                        value_to_option(sum.x.truncation.to_bigint()),
+                        value_to_option(sum.x.value.clone())
+                    );
+                    assert_eq!(
+                        value_to_option(sum.y.truncation.to_bigint()),
+                        value_to_option(sum.y.value.clone())
+                    );
                     if self.P != None {
                         let actual_sum = G1Affine::from(self.P.unwrap() + self.Q.unwrap());
-                        assert_eq!(bigint_to_fe::<Fq>(&sum.x.value.unwrap()), actual_sum.x);
-                        assert_eq!(bigint_to_fe::<Fq>(&sum.y.value.unwrap()), actual_sum.y);
+                        sum.x.value.map(|v| assert_eq!(bigint_to_fe::<Fq>(&v), actual_sum.x));
+                        sum.y.value.map(|v| assert_eq!(bigint_to_fe::<Fq>(&v), actual_sum.y));
                     }
                     println!("add unequal witness OK");
                 }
@@ -112,8 +119,8 @@ impl<F: FieldExt> Circuit<F> for MyCircuit<F> {
                     let doub = chip.double(ctx, &P_assigned)?;
                     if self.P != None {
                         let actual_doub = G1Affine::from(self.P.unwrap() * Fr::from(2));
-                        assert_eq!(bigint_to_fe::<Fq>(&doub.x.value.unwrap()), actual_doub.x);
-                        assert_eq!(bigint_to_fe::<Fq>(&doub.y.value.unwrap()), actual_doub.y);
+                        doub.x.value.map(|v| assert_eq!(bigint_to_fe::<Fq>(&v), actual_doub.x));
+                        doub.y.value.map(|v| assert_eq!(bigint_to_fe::<Fq>(&v), actual_doub.y));
                     }
                     println!("double witness OK");
                 }

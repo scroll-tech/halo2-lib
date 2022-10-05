@@ -26,7 +26,7 @@ pub fn assign<F: FieldExt>(
 
     let mut eq = Vec::with_capacity(k);
     for idx in 0..k {
-        let eq_limb = range.is_equal(ctx, &a.limbs[idx], &b.limbs[idx])?;
+        let eq_limb = range.is_equal(ctx, &Existing(&a.limbs[idx]), &Existing(&b.limbs[idx]))?;
         eq.push(eq_limb);
     }
 
@@ -46,7 +46,7 @@ pub fn crt<F: FieldExt>(
     b: &CRTInteger<F>,
 ) -> Result<AssignedCell<F, F>, Error> {
     let out_trunc = assign(range, ctx, &a.truncation, &b.truncation)?;
-    let out_native = range.is_equal(ctx, &a.native, &b.native)?;
+    let out_native = range.is_equal(ctx, &Existing(&a.native), &Existing(&b.native))?;
     let out = range.gate().and(ctx, &Existing(&out_trunc), &Existing(&out_native))?;
     Ok(out)
 }

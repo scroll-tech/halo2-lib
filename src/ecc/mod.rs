@@ -4,19 +4,15 @@ use std::marker::PhantomData;
 use ff::PrimeField;
 use group::{Curve, Group};
 use halo2_proofs::{
-    arithmetic::{BaseExt, CurveAffine, Field, FieldExt},
-    circuit::{AssignedCell, Layouter},
-    pairing::bn256::{G1Affine, G1},
+    arithmetic::{CurveAffine, Field, FieldExt},
+    circuit::{AssignedCell, Layouter, Value},
+    halo2curves::bn256::{G1Affine, G1},
     plonk::{Advice, Column, ConstraintSystem, Error, Fixed},
 };
 use num_bigint::{BigInt, BigUint};
 use num_traits::{Num, One, Zero};
 use rand_core::OsRng;
 
-use crate::bigint::{
-    add_no_carry, big_less_than, inner_product, mul_no_carry, scalar_mul_no_carry, select,
-    sub_no_carry, CRTInteger, FixedCRTInteger, OverflowInteger,
-};
 use crate::fields::{fp::FpConfig, fp_overflow::FpOverflowChip, Selectable};
 use crate::fields::{FieldChip, PrimeFieldChip};
 use crate::gates::{
@@ -27,8 +23,16 @@ use crate::gates::{
 use crate::utils::{
     bigint_to_fe, decompose_bigint_option, decompose_biguint, fe_to_bigint, fe_to_biguint, modulus,
 };
+use crate::{
+    bigint::{
+        add_no_carry, big_less_than, inner_product, mul_no_carry, scalar_mul_no_carry, select,
+        sub_no_carry, CRTInteger, FixedCRTInteger, OverflowInteger,
+    },
+    utils::biguint_to_fe,
+};
 
 pub mod fixed;
+pub mod pippenger;
 use fixed::{fixed_base_scalar_multiply, FixedEccPoint};
 
 // EccPoint and EccChip take in a generic `FieldChip` to implement generic elliptic curve operations on arbitrary field extensions (provided chip exists) for short Weierstrass curves (currently further assuming a4 = 0 for optimization purposes)
@@ -417,7 +421,7 @@ where
                 .map(|x| Existing(&x))
                 .collect();
             let bit_sum = chip.range().gate().inner_product(ctx, &ones_vec, &temp_bits)?;
-            let is_zero = chip.range().is_zero(ctx, &bit_sum.2)?;
+            let is_zero = RangeInstructions::is_zero(chip.range(), ctx, &bit_sum.2)?;
             is_zero_window.push(is_zero.clone());
         }
         is_zero_window_vec.push(is_zero_window);
@@ -428,8 +432,8 @@ where
     let mut rng = rand::thread_rng();
     let base_point: GA = GA::CurveExt::random(&mut rng).to_affine();
     let base_point_coord = base_point.coordinates().unwrap();
-    let pt_x = FC::fe_to_witness(&Some(*base_point_coord.x()));
-    let pt_y = FC::fe_to_witness(&Some(*base_point_coord.y()));
+    let pt_x = FC::fe_to_witness(&Value::known(*base_point_coord.x()));
+    let pt_y = FC::fe_to_witness(&Value::known(*base_point_coord.y()));
     let base = {
         let x_overflow = chip.load_private(ctx, pt_x)?;
         let y_overflow = chip.load_private(ctx, pt_y)?;
@@ -597,6 +601,50 @@ where
     Ok(res5)
 }
 
+pub fn get_naf(mut exp: Vec<u64>) -> Vec<i8> {
+    // https://en.wikipedia.org/wiki/Non-adjacent_form
+    // NAF for exp:
+    let mut naf: Vec<i8> = Vec::with_capacity(64 * exp.len());
+    let len = exp.len();
+
+    // generate the NAF for exp
+    for idx in 0..len {
+        let mut e: u64 = exp[idx];
+        for i in 0..64 {
+            if e & 1 == 1 {
+                let z = 2i8 - (e % 4) as i8;
+                e = e / 2;
+                if z == -1 {
+                    e += 1;
+                }
+                naf.push(z);
+            } else {
+                naf.push(0);
+                e = e / 2;
+            }
+        }
+        if e != 0 {
+            assert_eq!(e, 1);
+            let mut j = idx + 1;
+            while j < exp.len() && exp[j] == u64::MAX {
+                exp[j] = 0;
+                j += 1;
+            }
+            if j < exp.len() {
+                exp[j] += 1;
+            } else {
+                exp.push(1);
+            }
+        }
+    }
+    if exp.len() != len {
+        assert_eq!(len, exp.len() + 1);
+        assert!(exp[len] == 1);
+        naf.push(1);
+    }
+    naf
+}
+
 pub struct EccChip<'a, F: FieldExt, FC: FieldChip<F>> {
     pub field_chip: &'a FC,
     _marker: PhantomData<F>,
@@ -610,7 +658,7 @@ impl<'a, F: FieldExt, FC: FieldChip<F>> EccChip<'a, F, FC> {
     pub fn load_private(
         &self,
         ctx: &mut Context<'_, F>,
-        point: (Option<FC::FieldType>, Option<FC::FieldType>),
+        point: (Value<FC::FieldType>, Value<FC::FieldType>),
     ) -> Result<EccPoint<F, FC::FieldPoint>, Error> {
         let (x, y) = (FC::fe_to_witness(&point.0), FC::fe_to_witness(&point.1));
 
@@ -618,6 +666,77 @@ impl<'a, F: FieldExt, FC: FieldChip<F>> EccChip<'a, F, FC> {
         let y_assigned = self.field_chip.load_private(ctx, y)?;
 
         Ok(EccPoint::construct(x_assigned, y_assigned))
+    }
+
+    /// Does not constrain witness to lie on curve
+    pub fn assign_point<C>(
+        &self,
+        ctx: &mut Context<'_, F>,
+        g: Value<C>,
+    ) -> Result<EccPoint<F, FC::FieldPoint>, Error>
+    where
+        C: CurveAffine<Base = FC::FieldType>,
+    {
+        let coord = g.map(|g| g.coordinates().unwrap());
+        self.load_private(ctx, (coord.map(|p| *p.x()), coord.map(|p| *p.y())))
+    }
+
+    pub fn load_random_point<C>(
+        &self,
+        ctx: &mut Context<'_, F>,
+    ) -> Result<EccPoint<F, FC::FieldPoint>, Error>
+    where
+        C: CurveAffine<Base = FC::FieldType>,
+        C::Base: PrimeField,
+    {
+        let pt: C = C::CurveExt::random(OsRng).to_affine();
+        let assigned = self.assign_point(ctx, Value::known(pt))?;
+        self.assert_is_on_curve::<C>(ctx, &assigned)?;
+        Ok(assigned)
+    }
+
+    pub fn assert_is_on_curve<C>(
+        &self,
+        ctx: &mut Context<'_, F>,
+        P: &EccPoint<F, FC::FieldPoint>,
+    ) -> Result<(), Error>
+    where
+        C: CurveAffine<Base = FC::FieldType>,
+        C::Base: PrimeField,
+    {
+        let b = biguint_to_fe::<F>(&fe_to_biguint(&C::b()));
+        is_on_curve(self.field_chip, ctx, &P, b)
+    }
+
+    pub fn is_on_curve_or_infinity<C>(
+        &self,
+        ctx: &mut Context<'_, F>,
+        P: &EccPoint<F, FC::FieldPoint>,
+    ) -> Result<AssignedCell<F, F>, Error>
+    where
+        C: CurveAffine<Base = FC::FieldType>,
+        C::Base: PrimeField,
+    {
+        let b = biguint_to_fe::<F>(&fe_to_biguint(&C::b()));
+
+        let lhs = self.field_chip.mul_no_carry(ctx, &P.y, &P.y)?;
+        let mut rhs = self.field_chip.mul(ctx, &P.x, &P.x)?;
+        rhs = self.field_chip.mul_no_carry(ctx, &rhs, &P.x)?;
+        rhs = self.field_chip.add_native_constant_no_carry(ctx, &rhs, b)?;
+        let mut diff = self.field_chip.sub_no_carry(ctx, &lhs, &rhs)?;
+        diff = self.field_chip.carry_mod(ctx, &diff)?;
+
+        let is_on_curve = self.field_chip.is_zero(ctx, &diff)?;
+
+        let x_is_zero = self.field_chip.is_zero(ctx, &P.x)?;
+        let y_is_zero = self.field_chip.is_zero(ctx, &P.y)?;
+
+        self.field_chip.range().gate().or_and(
+            ctx,
+            &Existing(&is_on_curve),
+            &Existing(&x_is_zero),
+            &Existing(&y_is_zero),
+        )
     }
 
     pub fn negate(
@@ -681,8 +800,8 @@ impl<'a, F: FieldExt, FC: FieldChip<F>> EccChip<'a, F, FC> {
         P: &EccPoint<F, FC::FieldPoint>,
         Q: &EccPoint<F, FC::FieldPoint>,
     ) -> Result<(), Error> {
-        let is_equal = self.is_equal(ctx, P, Q)?;
-        ctx.constants_to_assign.push((F::from(1), Some(is_equal.cell())));
+        self.field_chip.assert_equal(ctx, &P.x, &Q.x)?;
+        self.field_chip.assert_equal(ctx, &P.y, &Q.y)?;
         Ok(())
     }
 }
@@ -708,22 +827,44 @@ where
         ctx: &mut Context<'_, F>,
         P: &Vec<EccPoint<F, FC::FieldPoint>>,
         scalars: &Vec<Vec<AssignedCell<F, F>>>,
-        b: F,
         max_bits: usize,
         window_bits: usize,
     ) -> Result<EccPoint<F, FC::FieldPoint>, Error>
     where
         GA: CurveAffine<Base = FC::FieldType>,
+        GA::Base: PrimeField,
     {
-        multi_scalar_multiply::<F, FC, GA>(
-            self.field_chip,
-            ctx,
-            P,
-            scalars,
-            b,
-            max_bits,
-            window_bits,
-        )
+        let curve_b = biguint_to_fe::<F>(&fe_to_biguint(&GA::b()));
+        if P.len() < 25 {
+            multi_scalar_multiply::<F, FC, GA>(
+                self.field_chip,
+                ctx,
+                P,
+                scalars,
+                curve_b,
+                max_bits,
+                window_bits,
+            )
+        } else {
+            /*let mut radix = (f64::from((max_bits * scalars[0].len()) as u32)
+                / f64::from(P.len() as u32))
+            .sqrt()
+            .floor() as usize;
+            if radix == 0 {
+                radix = 1;
+            }*/
+            let radix = 1;
+            pippenger::multi_exp::<F, FC, GA>(
+                self.field_chip,
+                ctx,
+                P,
+                scalars,
+                curve_b,
+                max_bits,
+                radix,
+                window_bits,
+            )
+        }
     }
 }
 
@@ -736,7 +877,6 @@ where
         ctx: &mut Context<'_, F>,
         P: &FixedEccPoint<F, GA>,
         scalar: &Vec<AssignedCell<F, F>>,
-        b: F,
         max_bits: usize,
         window_bits: usize,
     ) -> Result<EccPoint<F, FC::FieldPoint>, Error>
@@ -746,9 +886,10 @@ where
         FC: PrimeFieldChip<F, FieldType = GA::Base, FieldPoint = CRTInteger<F>>
             + Selectable<F, Point = FC::FieldPoint>,
     {
-        fixed_base_scalar_multiply(self.field_chip, ctx, P, scalar, b, max_bits, window_bits)
+        let curve_b = biguint_to_fe::<F>(&fe_to_biguint(&GA::b()));
+        fixed_base_scalar_multiply(self.field_chip, ctx, P, scalar, curve_b, max_bits, window_bits)
     }
 }
 
 #[cfg(test)]
-pub mod tests;
+pub(crate) mod tests;

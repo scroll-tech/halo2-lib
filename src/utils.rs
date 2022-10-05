@@ -1,4 +1,5 @@
 use ff::PrimeField;
+use halo2_proofs::circuit::Value;
 use num_bigint::BigInt;
 use num_bigint::BigUint;
 use num_bigint::Sign;
@@ -7,9 +8,6 @@ use num_traits::{Num, One, Zero};
 use std::cmp::Ordering;
 use std::ops::Neg;
 use std::ops::Shl;
-
-use halo2_proofs::pairing::bn256::Fq as Fp;
-use halo2_proofs::pairing::bn256::Fr;
 
 // utils modified from halo2wrong
 
@@ -112,19 +110,24 @@ pub fn decompose_bigint<F: PrimeField>(
 }
 
 pub fn decompose_option<F: PrimeField>(
-    value: &Option<F>,
+    value: &Value<F>,
     number_of_limbs: usize,
     bit_len: usize,
-) -> Vec<Option<F>> {
-    decompose_bigint_option(&value.map(|fe| fe_to_bigint(&fe)), number_of_limbs, bit_len)
+) -> Vec<Value<F>> {
+    decompose_bigint_option(
+        &value.map(|fe| BigInt::from(fe_to_biguint(&fe))),
+        number_of_limbs,
+        bit_len,
+    )
 }
 
 pub fn decompose_bigint_option<F: PrimeField>(
-    value: &Option<BigInt>,
+    value: &Value<BigInt>,
     number_of_limbs: usize,
     bit_len: usize,
-) -> Vec<Option<F>> {
-    match value {
+) -> Vec<Value<F>> {
+    let v = value_to_option(value.clone());
+    match v {
         Some(e) => {
             let sgn = e.sign();
             let mut e: BigUint = if e.is_negative() {
@@ -133,12 +136,12 @@ pub fn decompose_bigint_option<F: PrimeField>(
                 e.to_biguint().unwrap()
             };
             let mask = (BigUint::one() << bit_len) - 1usize;
-            let limbs: Vec<Option<F>> = (0..number_of_limbs)
+            let limbs = (0..number_of_limbs)
                 .map(|_| {
                     let limb = &mask & &e;
                     let limb_fe: F = biguint_to_fe(&limb);
                     e = &e >> bit_len;
-                    Some(match sgn {
+                    Value::known(match sgn {
                         Sign::Minus => -limb_fe,
                         _ => limb_fe,
                     })
@@ -147,22 +150,16 @@ pub fn decompose_bigint_option<F: PrimeField>(
             // assert_eq!(e, BigUint::zero());
             limbs
         }
-        None => vec![None; number_of_limbs],
+        None => vec![Value::unknown(); number_of_limbs],
     }
 }
 
-pub fn decompose_biguint_option<F: PrimeField>(
-    value: &Option<F>,
-    number_of_limbs: usize,
-    bit_len: usize,
-) -> Vec<Option<F>> {
-    match value.as_ref() {
-        Some(v) => decompose_biguint(&fe_to_biguint(v), number_of_limbs, bit_len)
-            .iter()
-            .map(|&x| Some(x))
-            .collect(),
-        None => vec![None; number_of_limbs],
-    }
+pub fn value_to_option<V>(value: Value<V>) -> Option<V> {
+    let mut v = None;
+    value.map(|val| {
+        v = Some(val);
+    });
+    v
 }
 
 /// Compute the represented value by a vector of values and a bit length.
@@ -177,6 +174,6 @@ pub fn compose(input: Vec<BigUint>, bit_len: usize) -> BigUint {
 #[cfg(test)]
 #[test]
 fn test_signed_roundtrip() {
-    use halo2_proofs::pairing::bn256::Fr as F;
-    assert_eq!(fe_to_bigint(&bigint_to_fe::<F>(&-BigInt::one())), -BigInt::one());
+    use halo2_proofs::halo2curves::bn256::Fr;
+    assert_eq!(fe_to_bigint(&bigint_to_fe::<Fr>(&-BigInt::one())), -BigInt::one());
 }

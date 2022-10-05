@@ -21,6 +21,7 @@ use crate::utils::biguint_to_fe;
 use crate::utils::decompose_bigint_option;
 use crate::utils::decompose_biguint;
 use crate::utils::modulus as native_modulus;
+use crate::utils::value_to_option;
 
 // Input `a` is `OverflowInteger` of length `k` with "signed" limbs
 // Check that `a = 0 (mod modulus)`
@@ -41,14 +42,14 @@ pub fn assign<F: FieldExt>(
     let m = (quot_max_size.bits() as usize + n - 1) / n;
     assert!(m > 0);
 
-    let a_val = a.to_bigint();
+    let a_val = value_to_option(a.to_bigint());
     // these are witness vectors:
     let quotient_vec = if let Some(a_big) = a_val {
         let (out, quotient) = get_carry_witness(&a_big, modulus);
         assert_eq!(out, BigUint::zero());
-        decompose_bigint_option::<F>(&Some(quotient), m, n)
+        decompose_bigint_option::<F>(&Value::known(quotient), m, n)
     } else {
-        vec![None; k]
+        vec![Value::unknown(); k]
     };
 
     // this is a constant vector:
@@ -89,7 +90,7 @@ pub fn assign<F: FieldExt>(
             let startj = if i >= m { i - m + 1 } else { 0 };
             let mut prod_computation: Vec<QuantumCell<F>> =
                 Vec::with_capacity(1 + 3 * std::cmp::min(i + 1, mod_vec.len()) - startj);
-            let mut prod_val = Some(F::zero());
+            let mut prod_val = Value::known(F::zero());
             prod_computation.push(Constant(F::zero()));
             let mut enable_gates = Vec::new();
 
@@ -114,7 +115,7 @@ pub fn assign<F: FieldExt>(
                     prod_computation.push(Witness(quotient_vec[i - j]));
                 };
 
-                prod_val = prod_val.zip(quotient_vec[i - j]).map(|(sum, b)| sum + mod_vec[j] * b);
+                prod_val = prod_val + Value::known(mod_vec[j]) * &quotient_vec[i - j];
                 prod_computation.push(Witness(prod_val));
 
                 offset += 3;
@@ -125,7 +126,7 @@ pub fn assign<F: FieldExt>(
                 // transpose of:
                 // | prod | -1 | a | prod - a
                 // where prod is at relative row `offset`
-                let check_val = prod_val.zip(a.limbs[i].value()).map(|(prod, &a)| prod - a);
+                let check_val = prod_val - a.limbs[i].value();
                 prod_computation.append(&mut vec![
                     Constant(-F::from(1)),
                     Existing(&a.limbs[i]),
@@ -246,21 +247,16 @@ pub fn crt<F: FieldExt>(
     // we need to find `quot_native` as a native F element
 
     // we need to constrain that `sum_i quot_vec[i] * 2^{n*i} = quot_native` in `F`
-    let (quot_val, quot_vec) = if let Some(a_big) = &a.value {
-        let (out_val, quot_val) = get_carry_witness(a_big, modulus);
+    let quot_vec = if let Some(a_big) = value_to_option(a.value.clone()) {
+        let (out_val, quot_val) = get_carry_witness(&a_big, modulus);
         assert_eq!(out_val, BigUint::zero());
 
         assert!((quot_val.bits() as usize) < quot_max_bits);
-        (
-            Some(quot_val.clone()),
-            // decompose_bigint_option just throws away signed limbs in index >= k
-            decompose_bigint_option::<F>(&Some(quot_val), k, n),
-        )
+        // decompose_bigint_option just throws away signed limbs in index >= k
+        decompose_bigint_option::<F>(&Value::known(quot_val), k, n)
     } else {
-        (None, vec![None; k])
+        vec![Value::unknown(); k]
     };
-
-    let quot_native = quot_val.map(|a| bigint_to_fe::<F>(&a));
 
     assert!(modulus < &(BigUint::one() << (n * k)));
     let mod_vec = decompose_biguint(modulus, k, n);
@@ -298,8 +294,7 @@ pub fn crt<F: FieldExt>(
                     // perform step 2: compute prod - a + out
                     // transpose of:
                     // | prod | -1 | a | prod - a |
-                    let check_val =
-                        prod.value().zip(a.truncation.limbs[i].value()).map(|(&prod, &a)| prod - a);
+                    let check_val = prod.value().copied() - a.truncation.limbs[i].value();
                     let (assignments, _) = range.gate().assign_region(
                         ctx,
                         vec![

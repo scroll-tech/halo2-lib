@@ -4,7 +4,7 @@ use std::cmp;
 
 use super::{CRTInteger, OverflowInteger};
 use crate::gates::{Context, GateInstructions, QuantumCell::Existing};
-use crate::utils::fe_to_bigint;
+use crate::utils::{fe_to_bigint, value_to_option};
 
 pub fn assign<F: FieldExt>(
     gate: &impl GateInstructions<F>,

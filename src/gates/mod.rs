@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use halo2_proofs::{
     arithmetic::FieldExt,
-    circuit::{AssignedCell, Cell, Layouter, Region},
+    circuit::{AssignedCell, Cell, Layouter, Region, Value},
     plonk::{Advice, Column, ConstraintSystem, Error, Fixed, Selector},
 };
 use num_bigint::BigUint;
@@ -17,16 +17,16 @@ pub mod range;
 #[derive(Clone, Debug)]
 pub enum QuantumCell<'a, F: FieldExt> {
     Existing(&'a AssignedCell<F, F>),
-    Witness(Option<F>),
+    Witness(Value<F>),
     Constant(F),
 }
 
 impl<F: FieldExt> QuantumCell<'_, F> {
-    pub fn value(&self) -> Option<&F> {
+    pub fn value(&self) -> Value<&F> {
         match self {
             Self::Existing(a) => a.value(),
             Self::Witness(a) => a.as_ref(),
-            Self::Constant(a) => Some(a),
+            Self::Constant(a) => Value::known(a),
         }
     }
 }
@@ -119,7 +119,7 @@ impl<'a, F: FieldExt> Context<'a, F> {
                     || "load constant",
                     fixed_columns[col],
                     offset,
-                    || Ok(c.clone()),
+                    || Value::known(c.clone()),
                 )?;
                 assigned.insert(c_big, c_cell.clone());
                 col += 1;
@@ -209,6 +209,15 @@ pub trait GateInstructions<F: FieldExt> {
         b: &QuantumCell<F>,
     ) -> Result<AssignedCell<F, F>, Error>;
 
+    /// a * b + c
+    fn mul_add(
+        &self,
+        ctx: &mut Context<'_, F>,
+        a: &QuantumCell<F>,
+        b: &QuantumCell<F>,
+        c: &QuantumCell<F>,
+    ) -> Result<AssignedCell<F, F>, Error>;
+
     fn div_unsafe(
         &self,
         ctx: &mut Context<'_, F>,
@@ -226,6 +235,17 @@ pub trait GateInstructions<F: FieldExt> {
         Ok(assignments[1].clone())
     }
 
+    fn assert_equal(
+        &self,
+        ctx: &mut Context<'_, F>,
+        a: &QuantumCell<F>,
+        b: &QuantumCell<F>,
+    ) -> Result<(), Error>;
+
+    fn assert_is_const(&self, ctx: &mut Context<'_, F>, a: &AssignedCell<F, F>, constant: F) {
+        ctx.constants_to_assign.push((constant, Some(a.cell())));
+    }
+
     fn inner_product(
         &self,
         ctx: &mut Context<'_, F>,
@@ -240,6 +260,27 @@ pub trait GateInstructions<F: FieldExt> {
         ),
         Error,
     >;
+
+    // requires vec_b.len() == vec_a.len() + 1
+    // returns
+    // x_i = b_1 * (a_1...a_{i - 1})
+    //     + b_2 * (a_2...a_{i - 1})
+    //     + ...
+    //     + b_i
+    // Returns [x_1, ..., x_{vec_b.len()}]
+    fn accumulated_product(
+        &self,
+        ctx: &mut Context<'_, F>,
+        vec_a: &Vec<QuantumCell<F>>,
+        vec_b: &Vec<QuantumCell<F>>,
+    ) -> Result<Vec<AssignedCell<F, F>>, Error>;
+    
+    fn sum_products_with_coeff_and_var<'a>(
+        &self,
+        ctx: &mut Context<'_, F>,
+        values: &[(F, QuantumCell<F>, QuantumCell<F>)],
+        var: &QuantumCell<F>,
+    ) -> Result<AssignedCell<F, F>, Error>;
 
     fn or(
         &self,
@@ -284,6 +325,28 @@ pub trait GateInstructions<F: FieldExt> {
         ctx: &mut Context<'_, F>,
         bits: &Vec<QuantumCell<F>>,
     ) -> Result<Vec<AssignedCell<F, F>>, Error>;
+
+    fn idx_to_indicator(
+        &self,
+        ctx: &mut Context<'_, F>,
+        idx: &QuantumCell<F>,
+	len: usize,
+    ) -> Result<Vec<AssignedCell<F, F>>, Error>;
+
+    fn select_from_idx(
+	&self,
+	ctx: &mut Context<'_, F>,
+	cells: &Vec<QuantumCell<F>>,
+	idx: &QuantumCell<F>,	
+    ) -> Result<AssignedCell<F, F>, Error> {
+	let ind = self.idx_to_indicator(ctx, idx, cells.len())?;
+	let (_, _, res, _) = self.inner_product(
+	    ctx,
+	    cells,
+	    &ind.iter().map(|x| QuantumCell::Existing(&x)).collect()
+	)?;
+	Ok(res)
+    }
 }
 
 pub trait RangeInstructions<F: FieldExt> {
@@ -312,8 +375,8 @@ pub trait RangeInstructions<F: FieldExt> {
     fn is_less_than(
         &self,
         ctx: &mut Context<'_, F>,
-        a: &AssignedCell<F, F>,
-        b: &AssignedCell<F, F>,
+        a: &QuantumCell<F>,
+        b: &QuantumCell<F>,
         num_bits: usize,
     ) -> Result<AssignedCell<F, F>, Error>;
 
@@ -326,8 +389,8 @@ pub trait RangeInstructions<F: FieldExt> {
     fn is_equal(
         &self,
         ctx: &mut Context<'_, F>,
-        a: &AssignedCell<F, F>,
-        b: &AssignedCell<F, F>,
+        a: &QuantumCell<F>,
+        b: &QuantumCell<F>,
     ) -> Result<AssignedCell<F, F>, Error>;
 
     fn num_to_bits(

@@ -1,12 +1,9 @@
 #![allow(non_snake_case)]
 use ff::PrimeField;
 use halo2_proofs::{
-    arithmetic::{BaseExt, FieldExt},
-    circuit::Layouter,
-    pairing::{
-        bn256,
-        bn256::{G1Affine, G2Affine, SIX_U_PLUS_2_NAF},
-    },
+    arithmetic::FieldExt,
+    circuit::{Layouter, Value},
+    halo2curves::bn256::{self, G1Affine, G2Affine, SIX_U_PLUS_2_NAF},
     plonk::{Advice, Column, ConstraintSystem, Error, Fixed},
 };
 use halo2curves::bn254::{Fq, Fq2, FROBENIUS_COEFF_FQ12_C1};
@@ -395,7 +392,7 @@ impl<'a, F: FieldExt> PairingChip<'a, F> {
     pub fn load_private_g1(
         &self,
         ctx: &mut Context<'_, F>,
-        point: Option<G1Affine>,
+        point: Value<G1Affine>,
     ) -> Result<EccPoint<F, FpPoint<F>>, Error> {
         // go from pse/pairing::bn256::Fq to forked Fq
         let convert_fp = |x: bn256::Fq| biguint_to_fe(&fe_to_biguint(&x));
@@ -407,7 +404,7 @@ impl<'a, F: FieldExt> PairingChip<'a, F> {
     pub fn load_private_g2(
         &self,
         ctx: &mut Context<'_, F>,
-        point: Option<G2Affine>,
+        point: Value<G2Affine>,
     ) -> Result<EccPoint<F, FieldExtPoint<FpPoint<F>>>, Error> {
         let fp2_chip = Fp2Chip::construct(self.fp_chip);
         let g2_chip = EccChip::construct(&fp2_chip);

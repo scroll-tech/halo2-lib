@@ -12,18 +12,24 @@ use crate::{
     ecc::EccChip,
     fields::fp::FpStrategy,
     gates::{Context, ContextParams, GateInstructions, QuantumCell::Witness},
-    utils::decompose_bigint_option,
+    utils::{decompose_bigint_option, value_to_option},
 };
 use halo2_proofs::{
-    arithmetic::{BaseExt, Field, FieldExt},
-    circuit::{floor_planner::V1, Layouter, SimpleFloorPlanner},
+    arithmetic::{Field, FieldExt},
+    circuit::{floor_planner::V1, Layouter, SimpleFloorPlanner, Value},
     dev::MockProver,
-    pairing::bn256::{
+    halo2curves::bn256::{
         multi_miller_loop, pairing, Bn256, Fr, G1Affine, G2Affine, G2Prepared, Gt, G1, G2,
     },
     plonk::*,
-    poly::commitment::{Params, ParamsVerifier},
+    poly::commitment::{Params, ParamsProver, ParamsVerifier},
+    poly::kzg::{
+        commitment::{KZGCommitmentScheme, ParamsKZG, ParamsVerifierKZG},
+        multiopen::{ProverSHPLONK, VerifierSHPLONK},
+        strategy::SingleStrategy,
+    },
     transcript::{Blake2bRead, Blake2bWrite, Challenge255},
+    transcript::{TranscriptReadBuffer, TranscriptWriterBuffer},
 };
 use num_bigint::{BigInt, BigUint, ToBigInt};
 use num_traits::Num;
@@ -40,16 +46,11 @@ struct PairingCircuitParams {
     num_limbs: usize,
 }
 
+#[derive(Default)]
 struct PairingCircuit<F: FieldExt> {
     P: Option<G1Affine>,
     Q: Option<G2Affine>,
     _marker: PhantomData<F>,
-}
-
-impl<F: FieldExt> Default for PairingCircuit<F> {
-    fn default() -> Self {
-        Self { P: None, Q: None, _marker: PhantomData }
-    }
 }
 
 impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
@@ -109,8 +110,8 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
                 );
                 let ctx = &mut aux;
 
-                let P_assigned = chip.load_private_g1(ctx, self.P.clone())?;
-                let Q_assigned = chip.load_private_g2(ctx, self.Q.clone())?;
+                let P_assigned = chip.load_private_g1(ctx, self.P.map(|p| Value::known(p)).unwrap_or(Value::unknown()))?;
+                let Q_assigned = chip.load_private_g2(ctx, self.Q.map(|p| Value::known(p)).unwrap_or(Value::unknown()))?;
 
                 /*
                 // test miller loop without final exp
@@ -136,8 +137,9 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
                 // test optimal ate pairing
                 {
                     let f = chip.pairing(ctx, &Q_assigned, &P_assigned)?;
+                    #[cfg(feature = "display")]
                     for fc in &f.coeffs {
-                        assert_eq!(fc.value, fc.truncation.to_bigint());
+                        assert_eq!(value_to_option(fc.value.clone()), value_to_option(fc.truncation.to_bigint()));
                     }
                     #[cfg(feature = "display")]
                     if self.P != None {
@@ -145,7 +147,7 @@ impl<F: FieldExt> Circuit<F> for PairingCircuit<F> {
                         let f_val: Vec<String> = f
                             .coeffs
                             .iter()
-                            .map(|x| x.value.clone().unwrap().to_str_radix(16))
+                            .map(|x| value_to_option(x.value.clone()).unwrap().to_str_radix(16))
                             //.map(|x| x.to_bigint().clone().unwrap().to_str_radix(16))
                             .collect();
                         println!("optimal ate pairing:");
@@ -272,8 +274,8 @@ impl<F: FieldExt> Default for MSMCircuit<F> {
     }
 }
 
-impl<F: FieldExt> Circuit<F> for MSMCircuit<F> {
-    type Config = MSMConfig<F>;
+impl Circuit<Fr> for MSMCircuit<Fr> {
+    type Config = MSMConfig<Fr>;
     type FloorPlanner = SimpleFloorPlanner;
 
     fn without_witnesses(&self) -> Self {
@@ -285,7 +287,7 @@ impl<F: FieldExt> Circuit<F> for MSMCircuit<F> {
         }
     }
 
-    fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+    fn configure(meta: &mut ConstraintSystem<Fr>) -> Self::Config {
         let mut folder = std::path::PathBuf::new();
         folder.push("./src/bn254");
         folder.push("configs/msm_circuit.config");
@@ -311,7 +313,7 @@ impl<F: FieldExt> Circuit<F> for MSMCircuit<F> {
     fn synthesize(
         &self,
         config: Self::Config,
-        mut layouter: impl Layouter<F>,
+        mut layouter: impl Layouter<Fr>,
     ) -> Result<(), Error> {
         assert_eq!(config.batch_size, self.scalars.len());
         assert_eq!(config.batch_size, self.bases.len());
@@ -340,19 +342,14 @@ impl<F: FieldExt> Circuit<F> for MSMCircuit<F> {
 
                 let mut scalars_assigned = Vec::new();
                 for scalar in &self.scalars {
-                    let decomposed = decompose_bigint_option(
-                        &scalar.map(|x| fe_to_biguint(&x).to_bigint().unwrap()),
-                        config.fp_chip.num_limbs,
-                        config.fp_chip.limb_bits,
-                    );
-                            let limbs = config.fp_chip.range.gate.assign_region_smart(
+                    let assignment = config.fp_chip.range.gate.assign_region_smart(
                                 ctx,
-                                decomposed.iter().map(|x| Witness(x.clone())).collect(),
+                                vec![Witness(scalar.map_or(Value::unknown(), |s| Value::known(s)))],
                                 vec![],
                                 vec![],
                                 vec![],
                             )?;
-                    scalars_assigned.push(limbs);
+                    scalars_assigned.push(vec![assignment.last().unwrap().clone()]);
                 }
 
                 let ecc_chip = EccChip::construct(&config.fp_chip);
@@ -361,8 +358,8 @@ impl<F: FieldExt> Circuit<F> for MSMCircuit<F> {
                     let base_assigned = ecc_chip.load_private(
                         ctx,
                         (
-                            base.map(|pt| biguint_to_fe(&fe_to_biguint(&pt.x))),
-                            base.map(|pt| biguint_to_fe(&fe_to_biguint(&pt.y))),
+                            base.map(|pt| Value::known(biguint_to_fe(&fe_to_biguint(&pt.x)))).unwrap_or(Value::unknown()),
+                            base.map(|pt| Value::known(biguint_to_fe(&fe_to_biguint(&pt.y)))).unwrap_or(Value::unknown()),
                         ),
                     )?;
                     bases_assigned.push(base_assigned);
@@ -372,8 +369,7 @@ impl<F: FieldExt> Circuit<F> for MSMCircuit<F> {
                     ctx,
                     &bases_assigned,
                     &scalars_assigned,
-                    F::from(3),
-                    config.fp_chip.limb_bits,
+                    254,
                     config.window_bits,
                 )?;
 
@@ -385,8 +381,8 @@ impl<F: FieldExt> Circuit<F> for MSMCircuit<F> {
                     }
                     let msm_answer = elts.into_iter().reduce(|a, b| a + b).unwrap().to_affine();
 
-                    let msm_x = msm.x.value.clone().unwrap().to_str_radix(16);
-                    let msm_y = msm.y.value.clone().unwrap().to_str_radix(16);
+                    let msm_x = value_to_option(msm.x.value).unwrap().to_str_radix(16);
+                    let msm_y = value_to_option(msm.y.value).unwrap().to_str_radix(16);
                     println!("circuit: {:?} {:?}", msm_x, msm_y);
                     println!("correct: {:?}", msm_answer);
                 }
@@ -475,6 +471,7 @@ fn test_msm() {
 #[test]
 fn bench_msm() -> Result<(), Box<dyn std::error::Error>> {
     use std::io::BufRead;
+
     let mut folder = std::path::PathBuf::new();
     folder.push("./src/bn254");
 
@@ -487,7 +484,7 @@ fn bench_msm() -> Result<(), Box<dyn std::error::Error>> {
     let mut fs_results = std::fs::File::create(folder.as_path()).unwrap();
     folder.pop();
     folder.pop();
-    write!(fs_results, "degree,num_advice,num_lookup,num_fixed,lookup_bits,limb_bits,num_limbs,batch_size,window_bits,vk_size,proof_time,proof_size,verify_time\n")?;
+    write!(fs_results, "degree,num_advice,num_lookup,num_fixed,lookup_bits,limb_bits,num_limbs,batch_size,window_bits,proof_time,proof_size,verify_time\n")?;
     folder.push("data");
     if !folder.is_dir() {
         std::fs::create_dir(folder.as_path())?;
@@ -519,15 +516,15 @@ fn bench_msm() -> Result<(), Box<dyn std::error::Error>> {
         }
         let params_time = start_timer!(|| "Params construction");
         let params = {
-            params_folder.push(format!("bn254_{}.params", bench_params.degree));
+            params_folder.push(format!("kzg_bn254_{}.params", bench_params.degree));
             let fd = std::fs::File::open(params_folder.as_path());
             let params = if let Ok(mut f) = fd {
                 println!("Found existing params file. Reading params...");
-                Params::<G1Affine>::read(&mut f).unwrap()
+                ParamsKZG::<Bn256>::read(&mut f).unwrap()
             } else {
                 println!("Creating new params file...");
                 let mut f = std::fs::File::create(params_folder.as_path())?;
-                let params = Params::<G1Affine>::unsafe_setup::<Bn256>(bench_params.degree);
+                let params = ParamsKZG::<Bn256>::setup(bench_params.degree, &mut rng);
                 params.write(&mut f).unwrap();
                 params
             };
@@ -547,6 +544,7 @@ fn bench_msm() -> Result<(), Box<dyn std::error::Error>> {
         let vk = keygen_vk(&params, &circuit)?;
         end_timer!(vk_time);
 
+        /*
         let vk_size = {
             folder.push(format!(
                 "msm_circuit_{}_{}_{}_{}_{}_{}_{}_{}_{}.vkey",
@@ -565,6 +563,7 @@ fn bench_msm() -> Result<(), Box<dyn std::error::Error>> {
             vk.write(&mut fd).unwrap();
             fd.metadata().unwrap().len()
         };
+        */
 
         let pk_time = start_timer!(|| "Generating pkey");
         let pk = keygen_pk(&params, vk, &circuit)?;
@@ -591,7 +590,14 @@ fn bench_msm() -> Result<(), Box<dyn std::error::Error>> {
         // create a proof
         let proof_time = start_timer!(|| "Proving time");
         let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
-        create_proof(&params, &pk, &[proof_circuit], &[&[]], rng, &mut transcript)?;
+        create_proof::<
+            KZGCommitmentScheme<Bn256>,
+            ProverSHPLONK<'_, Bn256>,
+            Challenge255<G1Affine>,
+            _,
+            Blake2bWrite<Vec<u8>, G1Affine, Challenge255<G1Affine>>,
+            MSMCircuit<Fr>,
+        >(&params, &pk, &[proof_circuit], &[&[]], rng, &mut transcript)?;
         let proof = transcript.finalize();
         end_timer!(proof_time);
 
@@ -615,17 +621,22 @@ fn bench_msm() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let verify_time = start_timer!(|| "Verify time");
-        let params_verifier: ParamsVerifier<Bn256> = params.verifier(0).unwrap();
-        let strategy = SingleVerifier::new(&params_verifier);
+        let verifier_params = params.verifier_params();
+        let strategy = SingleStrategy::new(&params);
         let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
-        assert!(
-            verify_proof(&params_verifier, pk.get_vk(), strategy, &[&[]], &mut transcript).is_ok()
-        );
+        assert!(verify_proof::<
+            KZGCommitmentScheme<Bn256>,
+            VerifierSHPLONK<'_, Bn256>,
+            Challenge255<G1Affine>,
+            Blake2bRead<&[u8], G1Affine, Challenge255<G1Affine>>,
+            SingleStrategy<'_, Bn256>,
+        >(verifier_params, pk.get_vk(), strategy, &[&[]], &mut transcript)
+        .is_ok());
         end_timer!(verify_time);
 
         write!(
             fs_results,
-            "{},{},{},{},{},{},{},{},{},{},{:?},{},{:?}\n",
+            "{},{},{},{},{},{},{},{},{},{:?},{},{:?}\n",
             bench_params.degree,
             bench_params.num_advice,
             bench_params.num_lookup_advice,
@@ -635,7 +646,6 @@ fn bench_msm() -> Result<(), Box<dyn std::error::Error>> {
             bench_params.num_limbs,
             bench_params.batch_size,
             bench_params.window_bits,
-            vk_size,
             proof_time.time.elapsed(),
             proof_size,
             verify_time.time.elapsed()
@@ -671,6 +681,11 @@ fn test_pairing() {
 #[test]
 fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
     use std::io::BufRead;
+
+    use halo2_proofs::poly::kzg::multiopen::{ProverGWC, VerifierGWC};
+
+    let mut rng = rand::thread_rng();
+
     let mut folder = std::path::PathBuf::new();
     folder.push("./src/bn254");
 
@@ -715,15 +730,15 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
         }
         let params_time = start_timer!(|| "Params construction");
         let params = {
-            params_folder.push(format!("bn254_{}.params", bench_params.degree));
+            params_folder.push(format!("kzg_bn254_{}.params", bench_params.degree));
             let fd = std::fs::File::open(params_folder.as_path());
             let params = if let Ok(mut f) = fd {
                 println!("Found existing params file. Reading params...");
-                Params::<G1Affine>::read(&mut f).unwrap()
+                ParamsKZG::<Bn256>::read(&mut f).unwrap()
             } else {
                 println!("Creating new params file...");
                 let mut f = std::fs::File::create(params_folder.as_path())?;
-                let params = Params::<G1Affine>::unsafe_setup::<Bn256>(bench_params.degree);
+                let params = ParamsKZG::<Bn256>::setup(bench_params.degree, &mut rng);
                 params.write(&mut f).unwrap();
                 params
             };
@@ -738,6 +753,7 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
         let vk = keygen_vk(&params, &circuit)?;
         end_timer!(vk_time);
 
+        /*
         let vk_size = {
             folder.push(format!(
                 "pairing_circuit_{}_{}_{}_{}_{}_{}_{}.vkey",
@@ -754,6 +770,7 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
             vk.write(&mut fd).unwrap();
             fd.metadata().unwrap().len()
         };
+        */
 
         let pk_time = start_timer!(|| "Generating pkey");
         let pk = keygen_pk(&params, vk, &circuit)?;
@@ -767,7 +784,14 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
         // create a proof
         let proof_time = start_timer!(|| "Proving time");
         let mut transcript = Blake2bWrite::<_, _, Challenge255<_>>::init(vec![]);
-        create_proof(&params, &pk, &[proof_circuit], &[&[]], rng, &mut transcript)?;
+        create_proof::<
+            KZGCommitmentScheme<Bn256>,
+            ProverGWC<'_, Bn256>,
+            Challenge255<G1Affine>,
+            _,
+            Blake2bWrite<Vec<u8>, G1Affine, Challenge255<G1Affine>>,
+            PairingCircuit<Fr>,
+        >(&params, &pk, &[proof_circuit], &[&[]], rng, &mut transcript)?;
         let proof = transcript.finalize();
         end_timer!(proof_time);
 
@@ -789,17 +813,22 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let verify_time = start_timer!(|| "Verify time");
-        let params_verifier: ParamsVerifier<Bn256> = params.verifier(0).unwrap();
-        let strategy = SingleVerifier::new(&params_verifier);
+        let verifier_params = params.verifier_params();
+        let strategy = SingleStrategy::new(&params);
         let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
-        assert!(
-            verify_proof(&params_verifier, pk.get_vk(), strategy, &[&[]], &mut transcript).is_ok()
-        );
+        assert!(verify_proof::<
+            KZGCommitmentScheme<Bn256>,
+            VerifierGWC<'_, Bn256>,
+            Challenge255<G1Affine>,
+            Blake2bRead<&[u8], G1Affine, Challenge255<G1Affine>>,
+            SingleStrategy<'_, Bn256>,
+        >(verifier_params, pk.get_vk(), strategy, &[&[]], &mut transcript)
+        .is_ok());
         end_timer!(verify_time);
 
         write!(
             fs_results,
-            "{},{},{},{},{},{},{},{},{:?},{},{:?}\n",
+            "{},{},{},{},{},{},{},{:?},{},{:?}\n",
             bench_params.degree,
             bench_params.num_advice,
             bench_params.num_lookup_advice,
@@ -807,7 +836,6 @@ fn bench_pairing() -> Result<(), Box<dyn std::error::Error>> {
             bench_params.lookup_bits,
             bench_params.limb_bits,
             bench_params.num_limbs,
-            vk_size,
             proof_time.time.elapsed(),
             proof_size,
             verify_time.time.elapsed()

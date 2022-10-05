@@ -26,13 +26,13 @@ pub fn assign<F: FieldExt>(
     for i in 0..k {
         let (bottom, lt) = match borrow {
             None => {
-                let lt = range.is_less_than(ctx, &a.limbs[i], &b.limbs[i], a.limb_bits)?;
+                let lt = range.is_less_than(ctx, &Existing(&a.limbs[i]), &Existing(&b.limbs[i]), a.limb_bits)?;
                 (b.limbs[i].clone(), lt)
             }
             Some(borrow) => {
                 let b_plus_borrow =
                     range.gate().add(ctx, &Existing(&b.limbs[i]), &Existing(&borrow))?;
-                let lt = range.is_less_than(ctx, &a.limbs[i], &b_plus_borrow, a.limb_bits + 1)?;
+                let lt = range.is_less_than(ctx, &Existing(&a.limbs[i]), &Existing(&b_plus_borrow), a.limb_bits + 1)?;
                 (b_plus_borrow, lt)
             }
         };

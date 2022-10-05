@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 use ff::PrimeField;
 use group::Group;
 use halo2_proofs::{
-    arithmetic::{BaseExt, CurveAffine, Field, FieldExt},
+    arithmetic::{CurveAffine, Field, FieldExt},
     circuit::{AssignedCell, Layouter},
     plonk::{Advice, Column, ConstraintSystem, Error, Fixed},
 };

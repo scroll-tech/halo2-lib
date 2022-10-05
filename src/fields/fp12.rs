@@ -3,13 +3,12 @@ use std::marker::PhantomData;
 use ff::PrimeField;
 use halo2_proofs::{
     arithmetic::{Field, FieldExt},
-    circuit::{AssignedCell, Layouter},
+    circuit::{AssignedCell, Layouter, Value},
     plonk::Error,
 };
 use num_bigint::{BigInt, BigUint};
 use num_traits::Num;
 
-use crate::fields::fp2::Fp2Chip;
 use crate::gates::{
     Context, GateInstructions,
     QuantumCell::{Constant, Existing, Witness},
@@ -24,6 +23,7 @@ use crate::{
     },
     utils::modulus,
 };
+use crate::{fields::fp2::Fp2Chip, utils::value_to_option};
 
 use super::{FieldChip, FieldExtConstructor, FieldExtPoint, PrimeFieldChip};
 
@@ -125,12 +125,12 @@ pub fn mul_no_carry_w6<F: FieldExt, FC: FieldChip<F>, const XI_0: u64>(
 impl<'a, F, FpChip, Fp12, const XI_0: u64> FieldChip<F> for Fp12Chip<'a, F, FpChip, Fp12, XI_0>
 where
     F: FieldExt,
-    FpChip: PrimeFieldChip<F, WitnessType = Option<BigInt>, ConstantType = BigInt>,
+    FpChip: PrimeFieldChip<F, WitnessType = Value<BigInt>, ConstantType = BigInt>,
     FpChip::FieldType: PrimeField,
     Fp12: Field + FieldExtConstructor<FpChip::FieldType, 12>,
 {
     type ConstantType = Fp12;
-    type WitnessType = Vec<Option<BigInt>>;
+    type WitnessType = Vec<Value<BigInt>>;
     type FieldPoint = FieldExtPoint<FpChip::FieldPoint>;
     type FieldType = Fp12;
     type RangeChip = FpChip::RangeChip;
@@ -139,25 +139,27 @@ where
         self.fp_chip.range()
     }
 
-    fn get_assigned_value(x: &Self::FieldPoint) -> Option<Fp12> {
+    fn get_assigned_value(x: &Self::FieldPoint) -> Value<Fp12> {
         assert_eq!(x.coeffs.len(), 12);
-        let values: Vec<Option<FpChip::FieldType>> =
+        let values: Vec<Value<FpChip::FieldType>> =
             x.coeffs.iter().map(|v| FpChip::get_assigned_value(v)).collect();
-        let values_collected: Option<Vec<FpChip::FieldType>> = values.into_iter().collect();
+        let values_collected: Value<Vec<FpChip::FieldType>> = values.into_iter().collect();
         values_collected.map(|c| Fp12::new(c.try_into().unwrap()))
     }
 
-    fn fe_to_witness(x: &Option<Fp12>) -> Vec<Option<BigInt>> {
-        match x.as_ref() {
-            Some(x) => x.coeffs().iter().map(|c| Some(BigInt::from(fe_to_biguint(c)))).collect(),
-            None => vec![None; 12],
+    fn fe_to_witness(x: &Value<Fp12>) -> Vec<Value<BigInt>> {
+        match value_to_option(x.clone()) {
+            Some(x) => {
+                x.coeffs().iter().map(|c| Value::known(BigInt::from(fe_to_biguint(c)))).collect()
+            }
+            None => vec![Value::unknown(); 12],
         }
     }
 
     fn load_private(
         &self,
         ctx: &mut Context<'_, F>,
-        coeffs: Vec<Option<BigInt>>,
+        coeffs: Vec<Value<BigInt>>,
     ) -> Result<Self::FieldPoint, Error> {
         assert_eq!(coeffs.len(), 12);
         let mut assigned_coeffs = Vec::with_capacity(12);
@@ -451,10 +453,9 @@ where
 pub(crate) mod tests {
     use std::marker::PhantomData;
 
-    use halo2_proofs::arithmetic::BaseExt;
     use halo2_proofs::circuit::floor_planner::V1;
     use halo2_proofs::{
-        arithmetic::FieldExt, circuit::*, dev::MockProver, pairing::bn256::Fr, plonk::*,
+        arithmetic::FieldExt, circuit::*, dev::MockProver, halo2curves::bn256::Fr, plonk::*,
     };
     use halo2curves::bn254::{Fq, Fq12};
     use num_traits::One;
@@ -471,8 +472,8 @@ pub(crate) mod tests {
 
     #[derive(Default)]
     struct MyCircuit<F> {
-        a: Option<Fq12>,
-        b: Option<Fq12>,
+        a: Value<Fq12>,
+        b: Value<Fq12>,
         _marker: PhantomData<F>,
     }
 
@@ -567,7 +568,8 @@ pub(crate) mod tests {
         let a = Fq12::random(&mut rng);
         let b = Fq12::random(&mut rng);
 
-        let circuit = MyCircuit::<Fr> { a: Some(a), b: Some(b), _marker: PhantomData };
+        let circuit =
+            MyCircuit::<Fr> { a: Value::known(a), b: Value::known(b), _marker: PhantomData };
 
         let prover = MockProver::run(k, &circuit, vec![]).unwrap();
         //prover.assert_satisfied();

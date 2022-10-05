@@ -42,16 +42,16 @@ pub fn assign<F: FieldExt>(
     let m = (quot_max_size.bits() as usize + n - 1) / n;
     assert!(m > 0);
 
-    let a_val = a.to_bigint();
+    let a_val = value_to_option(a.to_bigint());
     // these are witness vectors:
     let (out_vec, quotient_vec) = if let Some(a_big) = a_val {
         let (out, quotient) = get_carry_witness(&a_big, modulus);
         (
-            decompose_bigint_option::<F>(&Some(BigInt::from(out)), num_limbs, n),
-            decompose_bigint_option::<F>(&Some(quotient), m, n),
+            decompose_bigint_option::<F>(&Value::known(BigInt::from(out)), num_limbs, n),
+            decompose_bigint_option::<F>(&Value::known(quotient), m, n),
         )
     } else {
-        (vec![None; num_limbs], vec![None; m])
+        (vec![Value::unknown(); num_limbs], vec![Value::unknown(); m])
     };
 
     // this is a constant vector:
@@ -97,7 +97,7 @@ pub fn assign<F: FieldExt>(
             let startj = if i >= m { i - m + 1 } else { 0 };
             let mut prod_computation: Vec<QuantumCell<F>> =
                 Vec::with_capacity(1 + 3 * std::cmp::min(i + 1, mod_vec.len()) - startj);
-            let mut prod_val = Some(F::zero());
+            let mut prod_val = Value::known(F::zero());
             prod_computation.push(Constant(F::zero()));
             let mut enable_gates = Vec::new();
 
@@ -123,7 +123,7 @@ pub fn assign<F: FieldExt>(
                     prod_computation.push(Witness(quotient_vec[i - j]));
                 };
 
-                prod_val = prod_val.zip(quotient_vec[i - j]).map(|(sum, b)| sum + mod_vec[j] * b);
+                prod_val = prod_val + Value::known(mod_vec[j]) * &quotient_vec[i - j];
                 prod_computation.push(Witness(prod_val));
 
                 offset += 3;
@@ -134,7 +134,7 @@ pub fn assign<F: FieldExt>(
                 // transpose of:
                 // | prod | -1 | a | prod - a | 1 | out | prod - a + out
                 // where prod is at relative row `offset`
-                let prod_minus_a = prod_val.zip(a.limbs[i].value()).map(|(prod, &a)| prod - a);
+                let prod_minus_a = prod_val - a.limbs[i].value();
                 prod_computation.append(&mut vec![
                     Constant(-F::from(1)),
                     Existing(&a.limbs[i]),
@@ -143,7 +143,7 @@ pub fn assign<F: FieldExt>(
                 enable_gates.push(offset);
 
                 if i < num_limbs {
-                    let check_val = prod_minus_a.zip(out_vec[i]).map(|(a, b)| a + b);
+                    let check_val = prod_minus_a + out_vec[i];
                     prod_computation.append(&mut vec![
                         Constant(F::one()),
                         Witness(out_vec[i]),
@@ -309,31 +309,28 @@ pub fn crt<F: FieldExt>(
     // these are witness vectors:
     // we need to find `out_vec` as a proper BigInt with k limbs
     // we need to find `quot_vec` as a proper BigInt with k limbs
-    // we need to find `out_native` as a native F element
-    // we need to find `quot_native` as a native F element
 
     // we need to constrain that `sum_i out_vec[i] * 2^{n*i} = out_native` in `F`
     // we need to constrain that `sum_i quot_vec[i] * 2^{n*i} = quot_native` in `F`
-    let (out_val, quot_val, out_vec, quot_vec) = if let Some(a_big) = &a.value {
-        let (out_val, quot_val) = get_carry_witness(a_big, modulus);
+    let (out_val, out_vec, quot_vec) = if let Some(a_big) = value_to_option(a.value.clone()) {
+        let (out_val, quot_val) = get_carry_witness(&a_big, modulus);
         let out_val = BigInt::from(out_val);
 
         assert!(out_val < (BigInt::one() << (n * k)));
         assert!(quot_val < (BigInt::one() << quot_max_bits));
 
         (
-            Some(out_val.clone()),
-            Some(quot_val.clone()),
+            Value::known(out_val.clone()),
             // decompose_bigint_option just throws away signed limbs in index >= k
-            decompose_bigint_option::<F>(&Some(out_val), k, n),
-            decompose_bigint_option::<F>(&Some(quot_val), k, n),
+            decompose_bigint_option::<F>(&Value::known(out_val), k, n),
+            decompose_bigint_option::<F>(&Value::known(quot_val), k, n),
         )
     } else {
-        (None, None, vec![None; k], vec![None; k])
+        (Value::unknown(), vec![Value::unknown(); k], vec![Value::unknown(); k])
     };
 
-    let out_native = out_val.as_ref().map(|a| bigint_to_fe::<F>(a));
-    let quot_native = quot_val.map(|a| bigint_to_fe::<F>(&a));
+    // let out_native = out_val.as_ref().map(|a| bigint_to_fe::<F>(a));
+    // let quot_native = quot_val.map(|a| bigint_to_fe::<F>(&a));
 
     assert!(modulus < &(BigUint::one() << (n * k)));
     let mod_vec = decompose_biguint(modulus, k, n);
@@ -372,9 +369,8 @@ pub fn crt<F: FieldExt>(
                     let out_cell;
                     let check_cell;
                     // perform step 2: compute prod - a + out
-                    let temp1 =
-                        prod.value().zip(a.truncation.limbs[i].value()).map(|(&prod, &a)| prod - a);
-                    let check_val = temp1.zip(out_vec[i]).map(|(a, b)| a + b);
+                    let temp1 = prod.value().copied() - a.truncation.limbs[i].value();
+                    let check_val = temp1 + out_vec[i];
 
                     match range.strategy() {
                         RangeStrategy::Vertical => {
@@ -480,7 +476,7 @@ pub fn crt<F: FieldExt>(
 
     // Constrain `out_native = sum_i out_assigned[i] * 2^{n*i}` in `F`
     let out_native_assigned = OverflowInteger::evaluate(range.gate(), chip, ctx, &out_assigned, n)?;
-    // Constrain `quot_native = sum_i out_assigned[i] * 2^{n*i}` in `F`
+    // Constrain `quot_native = sum_i quot_assigned[i] * 2^{n*i}` in `F`
     let quot_native_assigned =
         OverflowInteger::evaluate(range.gate(), chip, ctx, &quot_assigned, n)?;
 

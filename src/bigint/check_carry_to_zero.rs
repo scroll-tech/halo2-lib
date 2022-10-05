@@ -2,6 +2,7 @@ use halo2_proofs::{arithmetic::FieldExt, circuit::*, plonk::*};
 use num_bigint::BigInt;
 use num_bigint::BigUint;
 use num_traits::One;
+use serde::de::value;
 
 use super::OverflowInteger;
 use crate::gates::{
@@ -11,6 +12,7 @@ use crate::gates::{
 };
 use crate::utils::biguint_to_fe;
 use crate::utils::fe_to_bigint;
+use crate::utils::value_to_option;
 use crate::utils::{bigint_to_fe, modulus as native_modulus};
 
 // checks there exist d_i = -c_i so that
@@ -39,24 +41,21 @@ pub fn assign<F: FieldExt>(
     let limb_bits = a.limb_bits;
     let max_limb_bits = a.max_limb_size.bits();
 
-    let mut carries: Vec<Option<BigInt>> = Vec::with_capacity(k);
+    let mut carries: Vec<Value<BigInt>> = Vec::with_capacity(k);
     let limb_val = BigInt::from(1) << limb_bits;
     let limb_base = bigint_to_fe(&limb_val);
 
     for idx in 0..k - 1 {
         let a_val = a.limbs[idx].value();
-        let carry = match a_val {
-            Some(a_fe) => {
-                let a_val_big = fe_to_bigint(a_fe);
-                if idx == 0 {
-                    Some(a_val_big / &limb_val)
-                } else {
-                    let carry_val = carries[idx - 1].as_ref().unwrap();
-                    Some((a_val_big + carry_val) / &limb_val)
-                }
+        let carry = a_val.map(|a_fe| {
+            let a_val_big = fe_to_bigint(a_fe);
+            if idx == 0 {
+                a_val_big / &limb_val
+            } else {
+                let carry_val = value_to_option(carries[idx - 1].clone()).unwrap();
+                (a_val_big + carry_val) / &limb_val
             }
-            None => None,
-        };
+        });
         carries.push(carry);
     }
 
@@ -106,7 +105,7 @@ pub fn assign<F: FieldExt>(
     while idx < k - 2 {
         let shifted_carry_cell = {
             let carry_cell = &neg_carry_assignments[idx];
-            let shift_carry_val = Some(shift_val).zip(carry_cell.value()).map(|(s, c)| s + c);
+            let shift_carry_val = Value::known(shift_val) + carry_cell.value();
             let cells = vec![
                 Existing(&carry_cell),
                 Constant(F::from(1)),
@@ -159,24 +158,21 @@ pub fn truncate<F: FieldExt>(
         *count += 1;
     }
 
-    let mut carries: Vec<Option<BigInt>> = Vec::with_capacity(k);
+    let mut carries: Vec<Value<BigInt>> = Vec::with_capacity(k);
     let limb_val = BigInt::from(1) << limb_bits;
     let limb_base = bigint_to_fe(&limb_val);
 
     for idx in 0..k {
         let a_val = a.limbs[idx].value();
-        let carry = match a_val {
-            Some(a_fe) => {
-                let a_val_big = fe_to_bigint(a_fe);
-                if idx == 0 {
-                    Some(a_val_big / &limb_val)
-                } else {
-                    let carry_val = carries[idx - 1].as_ref().unwrap();
-                    Some((a_val_big + carry_val) / &limb_val)
-                }
+        let carry = a_val.map(|a_fe| {
+            let a_val_big = fe_to_bigint(a_fe);
+            if idx == 0 {
+                a_val_big / &limb_val
+            } else {
+                let carry_val = value_to_option(carries[idx - 1].clone()).unwrap();
+                (a_val_big + carry_val) / &limb_val
             }
-            None => None,
-        };
+        });
         carries.push(carry);
     }
 
@@ -221,7 +217,7 @@ pub fn truncate<F: FieldExt>(
         let idx = std::cmp::min(window * i + window - 1, k - 1);
         let carry_cell = &neg_carry_assignments[idx];
         let shift_cell = {
-            let shift_carry_val = Some(shift_val).zip(carry_cell.value()).map(|(s, c)| s + c);
+            let shift_carry_val = Value::known(shift_val) + carry_cell.value();
             let cells = vec![
                 Existing(&carry_cell),
                 Constant(F::from(1)),
