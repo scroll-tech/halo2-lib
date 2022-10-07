@@ -201,8 +201,7 @@ impl<'a, F: FieldExt> Context<'a, F> {
     }
 
     /// returns leftmost `i` where `advice_rows[context_id][i]` is minimum amongst all `i`
-    #[allow(dead_code)]
-    fn min_gate_index(&self, context_id: &String) -> usize {
+    pub fn min_gate_index(&self, context_id: &String) -> usize {
         self.advice_rows
             .get(context_id)
             .unwrap()
