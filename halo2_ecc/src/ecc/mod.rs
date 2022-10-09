@@ -811,6 +811,9 @@ where
         GA: CurveAffine<Base = FC::FieldType>,
         GA::Base: PrimeField,
     {
+        #[cfg(feature = "display")]
+        println!("computing length {} MSM", P.len());
+
         let curve_b = biguint_to_fe::<F>(&fe_to_biguint(&GA::b()));
         if P.len() < 25 {
             multi_scalar_multiply::<F, FC, GA>(
