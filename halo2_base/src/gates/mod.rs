@@ -1,5 +1,8 @@
 use self::{flex_gate::GateStrategy, range::RangeStrategy};
-use super::{AssignedValue, Context, QuantumCell};
+use super::{
+    AssignedValue, Context, QuantumCell,
+    QuantumCell::{Constant, Existing},
+};
 use halo2_proofs::{arithmetic::FieldExt, plonk::Error};
 
 pub mod flex_gate;
@@ -213,6 +216,20 @@ pub trait RangeInstructions<F: FieldExt> {
         num_bits: usize,
     ) -> Result<(), Error>;
 
+    // checks that a in [0, b), does not require bit assumptions on a, b
+    fn check_less_than_safe(
+        &self,
+        ctx: &mut Context<'_, F>,
+        a: &AssignedValue<F>,
+        b: usize,
+        range_bits: usize,
+    ) -> Result<(), Error> {
+        assert!(b <= 1 << range_bits);
+
+        self.range_check(ctx, a, range_bits)?;
+        self.check_less_than(ctx, &Existing(&a), &Constant(F::from(b as u64)), range_bits)
+    }
+
     fn is_less_than(
         &self,
         ctx: &mut Context<'_, F>,
@@ -220,6 +237,19 @@ pub trait RangeInstructions<F: FieldExt> {
         b: &QuantumCell<F>,
         num_bits: usize,
     ) -> Result<AssignedValue<F>, Error>;
+
+    fn is_less_than_safe(
+        &self,
+        ctx: &mut Context<'_, F>,
+        a: &AssignedValue<F>,
+        b: usize,
+        num_bits: usize,
+    ) -> Result<AssignedValue<F>, Error> {
+        assert!(b <= 1 << num_bits);
+
+        self.range_check(ctx, a, num_bits)?;
+        self.is_less_than(ctx, &Existing(&a), &Constant(F::from(b as u64)), num_bits)
+    }
 
     fn is_zero(
         &self,
