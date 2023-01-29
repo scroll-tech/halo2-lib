@@ -363,7 +363,7 @@ impl Circuit<Fr> for MSMCircuit<Fr> {
                     bases_assigned.push(base_assigned);
                 }
 
-                let msm = ecc_chip.multi_scalar_mult::<halo2curves::bn254::G1Affine>(
+                let msm = ecc_chip.multi_scalar_mult::<halo2curves::bn256::G1Affine>(
                     ctx,
                     &bases_assigned,
                     &scalars_assigned,

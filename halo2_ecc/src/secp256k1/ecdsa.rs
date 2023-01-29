@@ -4,27 +4,27 @@ use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::marker::PhantomData;
 
-use ff::{Field, };
-use halo2_proofs::poly::commitment::{Params, ParamsProver, };
+use ff::Field;
+use halo2_proofs::poly::commitment::{Params, ParamsProver};
 use halo2_proofs::{
     arithmetic::{CurveAffine, FieldExt},
     circuit::*,
     dev::MockProver,
-    halo2curves::{bn256::{Fr, Bn256, G1Affine}},
+    halo2curves::bn256::{Bn256, Fr, G1Affine},
     plonk::*,
     transcript::{Blake2bRead, Blake2bWrite, Challenge255},
 };
-use halo2curves::secp256k1::{Fp, Fq,  Secp256k1Affine};
+use halo2curves::secp256k1::{Fp, Fq, Secp256k1Affine};
 use rand_core::OsRng;
 
-use super::{FpChip, FqOverflowChip, };
+use super::{FpChip, FqOverflowChip};
 use crate::{
     ecc::{ecdsa_verify_no_pubkey_check, EccChip},
-    fields::{fp::FpStrategy, FieldChip, },
+    fields::{fp::FpStrategy, FieldChip},
 };
 use halo2_base::{
+    utils::{biguint_to_fe, fe_to_biguint, modulus},
     Context, ContextParams,
-    utils::{ biguint_to_fe, fe_to_biguint, modulus},
 };
 
 #[derive(Serialize, Deserialize)]
@@ -86,7 +86,7 @@ impl<F: FieldExt> Circuit<F> for ECDSACircuit<F> {
             params.limb_bits,
             params.num_limbs,
             modulus::<Fp>(),
-            "ecdsa".to_string()
+            "ecdsa".to_string(),
         )
     }
 
@@ -101,7 +101,7 @@ impl<F: FieldExt> Circuit<F> for ECDSACircuit<F> {
         let num_limbs = fp_chip.num_limbs;
         let num_fixed = fp_chip.range.gate.constants.len();
         let lookup_bits = fp_chip.range.lookup_bits;
-        let num_advice =  fp_chip.range.gate.num_advice;
+        let num_advice = fp_chip.range.gate.num_advice;
 
         let using_simple_floor_planner = true;
         let mut first_pass = true;
@@ -292,7 +292,7 @@ impl<F: FieldExt> Circuit<F> for ECDSACircuit<F> {
 
         Ok(())
     })
-}
+    }
 }
 
 #[cfg(test)]
@@ -348,8 +348,15 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
     const LIMB_BITS: [usize; 9] = [88, 88, 88, 88, 88, 88, 88, 88, 88];
     */
 
+    use halo2_proofs::{
+        poly::kzg::{
+            commitment::{KZGCommitmentScheme, ParamsKZG},
+            multiopen::{ProverSHPLONK, VerifierSHPLONK},
+            strategy::SingleStrategy,
+        },
+        transcript::{TranscriptReadBuffer, TranscriptWriterBuffer},
+    };
     use std::io::BufRead;
-    use halo2_proofs::{poly::{kzg::{strategy::SingleStrategy,commitment::{ParamsKZG, KZGCommitmentScheme}, multiopen::{ProverSHPLONK, VerifierSHPLONK}}}, transcript::{TranscriptWriterBuffer, TranscriptReadBuffer}};
 
     let mut rng = rand::thread_rng();
 
@@ -500,15 +507,14 @@ fn bench_secp() -> Result<(), Box<dyn std::error::Error>> {
         let verifier_params = params.verifier_params();
         let strategy = SingleStrategy::new(&params);
         let mut transcript = Blake2bRead::<_, _, Challenge255<_>>::init(&proof[..]);
-        assert!(
-            verify_proof::<
+        assert!(verify_proof::<
             KZGCommitmentScheme<Bn256>,
             VerifierSHPLONK<'_, Bn256>,
             Challenge255<G1Affine>,
             Blake2bRead<&[u8], G1Affine, Challenge255<G1Affine>>,
             SingleStrategy<'_, Bn256>,
-            >(verifier_params, pk.get_vk(), strategy, &[&[]], &mut transcript).is_ok()
-        );
+        >(verifier_params, pk.get_vk(), strategy, &[&[]], &mut transcript)
+        .is_ok());
         end_timer!(verify_time);
 
         write!(

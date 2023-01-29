@@ -2,7 +2,7 @@ use crate::{
     bigint::CRTInteger,
     fields::{fp, fp12, fp2, FieldExtConstructor, FieldExtPoint},
 };
-use halo2curves::bn254::{Fq, Fq12, Fq2, Fq6};
+use halo2curves::bn256::{Fq, Fq12, Fq2, Fq6};
 
 pub mod final_exp;
 pub mod pairing;

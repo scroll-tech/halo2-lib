@@ -11,7 +11,7 @@ use halo2_base::{
     QuantumCell::{Constant, Existing},
 };
 use halo2_proofs::{arithmetic::FieldExt, halo2curves::bn256::BN_X, plonk::Error};
-use halo2curves::bn254::{Fq, Fq2, FROBENIUS_COEFF_FQ12_C1};
+use halo2curves::bn256::{Fq, Fq2, FROBENIUS_COEFF_FQ12_C1};
 use num_bigint::{BigInt, BigUint};
 
 const XI_0: u64 = 9;

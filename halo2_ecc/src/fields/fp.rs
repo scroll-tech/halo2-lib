@@ -311,7 +311,12 @@ impl<F: FieldExt, Fp: PrimeField> FieldChip<F> for FpConfig<F, Fp> {
         assert!(last_limb_bits > 0);
 
         a.value.clone().map(|v| {
-            assert!(v.bits() <= a.truncation.max_size.bits());
+            assert!(
+                v.bits() <= a.truncation.max_size.bits(),
+                "v.bits() <= a.truncation.max_size.bits(): {} vs {}",
+                v.bits(),
+                a.truncation.max_size.bits(),
+            );
         });
 
         // range check limbs of `a` are in [0, 2^n) except last limb should be in [0, 2^last_limb_bits)

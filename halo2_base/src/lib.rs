@@ -4,7 +4,7 @@ use halo2_proofs::{
     plonk::{Advice, Column, Error, Fixed},
 };
 use num_bigint::BigUint;
-use std::{borrow::Borrow, collections::HashMap, rc::Rc};
+use std::{borrow::Borrow, collections::HashMap, marker::PhantomData, rc::Rc};
 use utils::fe_to_biguint;
 
 pub mod gates;

@@ -15,7 +15,7 @@ use halo2_proofs::{
     halo2curves::bn256::{self, G1Affine, G2Affine, SIX_U_PLUS_2_NAF},
     plonk::{ConstraintSystem, Error},
 };
-use halo2curves::bn254::{Fq, Fq2, FROBENIUS_COEFF_FQ12_C1};
+use halo2curves::bn256::{Fq, Fq2, FROBENIUS_COEFF_FQ12_C1};
 use num_bigint::{BigInt, BigUint};
 use num_traits::Num;
 

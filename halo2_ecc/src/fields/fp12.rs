@@ -440,7 +440,7 @@ pub(crate) mod tests {
     use halo2_proofs::{
         arithmetic::FieldExt, circuit::*, dev::MockProver, halo2curves::bn256::Fr, plonk::*,
     };
-    use halo2curves::bn254::{Fq, Fq12};
+    use halo2curves::bn256::{Fq, Fq12};
 
     use super::*;
     use crate::fields::fp::{FpConfig, FpStrategy};
