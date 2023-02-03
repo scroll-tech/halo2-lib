@@ -237,8 +237,11 @@ fn bench_secp256k1_ecdsa() -> Result<(), Box<dyn std::error::Error>> {
     };
     use std::{env::set_var, fs, io::BufRead};
 
+<<<<<<< HEAD
     let _rng = OsRng;
 
+=======
+>>>>>>> 4e956fa... halo2-ecc-ecdsa-0129
     let mut folder = std::path::PathBuf::new();
     folder.push("./src/secp256k1");
 

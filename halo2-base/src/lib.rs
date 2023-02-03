@@ -17,21 +17,26 @@ use mimalloc::MiMalloc;
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
-#[cfg(all(feature = "halo2-pse", feature = "halo2-axiom"))]
-compile_error!(
-    "Cannot have both \"halo2-pse\" and \"halo2-axiom\" features enabled at the same time!"
-);
+// #[cfg(all(feature = "halo2-pse", feature = "halo2-axiom"))]
+// compile_error!(
+//     "Cannot have both \"halo2-pse\" and \"halo2-axiom\" features enabled at the same time!"
+// );
 #[cfg(not(any(feature = "halo2-pse", feature = "halo2-axiom")))]
 compile_error!("Must enable exactly one of \"halo2-pse\" or \"halo2-axiom\" features to choose which halo2_proofs crate to use.");
 
 use gates::flex_gate::MAX_PHASE;
 #[cfg(feature = "halo2-pse")]
 pub use halo2_proofs;
-#[cfg(feature = "halo2-axiom")]
-pub use halo2_proofs_axiom as halo2_proofs;
+// #[cfg(feature = "halo2-axiom")]
+// pub use halo2_proofs_axiom as halo2_proofs;
 
 use halo2_proofs::{
-    circuit::{AssignedCell, Cell, Region, Value},
+    circuit::{
+        // AssignedCell,
+        Cell,
+        Region,
+        Value,
+    },
     plonk::{Advice, Assigned, Column, Fixed},
 };
 use rustc_hash::FxHashMap;
@@ -44,8 +49,8 @@ pub mod gates;
 // pub mod hashes;
 pub mod utils;
 
-#[cfg(feature = "halo2-axiom")]
-pub const SKIP_FIRST_PASS: bool = false;
+// #[cfg(feature = "halo2-axiom")]
+// pub const SKIP_FIRST_PASS: bool = false;
 #[cfg(feature = "halo2-pse")]
 pub const SKIP_FIRST_PASS: bool = true;
 
@@ -74,9 +79,8 @@ impl<F: ScalarField> QuantumCell<'_, '_, F> {
 
 #[derive(Clone, Debug)]
 pub struct AssignedValue<'a, F: ScalarField> {
-    #[cfg(feature = "halo2-axiom")]
-    pub cell: AssignedCell<&'a Assigned<F>, F>,
-
+    // #[cfg(feature = "halo2-axiom")]
+    // pub cell: AssignedCell<&'a Assigned<F>, F>,
     #[cfg(feature = "halo2-pse")]
     pub cell: Cell,
     #[cfg(feature = "halo2-pse")]
@@ -97,10 +101,10 @@ impl<'a, F: ScalarField> AssignedValue<'a, F> {
     }
 
     pub fn row(&self) -> usize {
-        #[cfg(feature = "halo2-axiom")]
-        {
-            self.cell.row_offset()
-        }
+        // #[cfg(feature = "halo2-axiom")]
+        // {
+        //     self.cell.row_offset()
+        // }
 
         #[cfg(feature = "halo2-pse")]
         {
@@ -108,43 +112,43 @@ impl<'a, F: ScalarField> AssignedValue<'a, F> {
         }
     }
 
-    #[cfg(feature = "halo2-axiom")]
-    pub fn cell(&self) -> &Cell {
-        self.cell.cell()
-    }
+    // #[cfg(feature = "halo2-axiom")]
+    // pub fn cell(&self) -> &Cell {
+    //     self.cell.cell()
+    // }
     #[cfg(feature = "halo2-pse")]
     pub fn cell(&self) -> Cell {
         self.cell
     }
 
     pub fn value(&self) -> Value<&F> {
-        #[cfg(feature = "halo2-axiom")]
-        {
-            self.cell.value().map(|a| match *a {
-                Assigned::Trivial(a) => a,
-                _ => unreachable!(),
-            })
-        }
+        // #[cfg(feature = "halo2-axiom")]
+        // {
+        //     self.cell.value().map(|a| match *a {
+        //         Assigned::Trivial(a) => a,
+        //         _ => unreachable!(),
+        //     })
+        // }
         #[cfg(feature = "halo2-pse")]
         {
             self.value.as_ref()
         }
     }
 
-    #[cfg(feature = "halo2-axiom")]
-    pub fn copy_advice<'v>(
-        &'a self,
-        region: &mut Region<'_, F>,
-        column: Column<Advice>,
-        offset: usize,
-    ) -> AssignedCell<&'v Assigned<F>, F> {
-        let assigned_cell = region
-            .assign_advice(column, offset, self.cell.value().map(|v| **v))
-            .unwrap_or_else(|err| panic!("{err:?}"));
-        region.constrain_equal(assigned_cell.cell(), self.cell());
+    // #[cfg(feature = "halo2-axiom")]
+    // pub fn copy_advice<'v>(
+    //     &'a self,
+    //     region: &mut Region<'_, F>,
+    //     column: Column<Advice>,
+    //     offset: usize,
+    // ) -> AssignedCell<&'v Assigned<F>, F> {
+    //     let assigned_cell = region
+    //         .assign_advice(column, offset, self.cell.value().map(|v| **v))
+    //         .unwrap_or_else(|err| panic!("{err:?}"));
+    //     region.constrain_equal(assigned_cell.cell(), self.cell());
 
-        assigned_cell
-    }
+    //     assigned_cell
+    // }
 
     #[cfg(feature = "halo2-pse")]
     pub fn copy_advice(
@@ -193,8 +197,8 @@ pub struct Context<'a, F: ScalarField> {
     fixed_col: usize,
     fixed_offset: usize,
     // fxhash is faster than normal HashMap: https://nnethercote.github.io/perf-book/hashing.html
-    #[cfg(feature = "halo2-axiom")]
-    pub assigned_constants: FxHashMap<F, Cell>,
+    // #[cfg(feature = "halo2-axiom")]
+    // pub assigned_constants: FxHashMap<F, Cell>,
     // PSE's halo2curves does not derive Hash
     #[cfg(feature = "halo2-pse")]
     pub assigned_constants: FxHashMap<Vec<u8>, Cell>,
@@ -282,12 +286,12 @@ impl<'a, F: ScalarField> Context<'a, F> {
         {
             self.advice_alloc_cache[self.current_phase] = self.advice_alloc.clone();
         }
-        #[cfg(feature = "halo2-axiom")]
-        self.region.next_phase();
-        self.current_phase += 1;
-        for advice_alloc in self.advice_alloc.iter_mut() {
-            *advice_alloc = (0, 0);
-        }
+        // #[cfg(feature = "halo2-axiom")]
+        // self.region.next_phase();
+        // self.current_phase += 1;
+        // for advice_alloc in self.advice_alloc.iter_mut() {
+        //     *advice_alloc = (0, 0);
+        // }
         assert!(self.current_phase < MAX_PHASE);
     }
 
@@ -302,17 +306,17 @@ impl<'a, F: ScalarField> Context<'a, F> {
         ((self.total_fixed + self.max_rows - 1) / self.max_rows, self.total_fixed)
     }
 
-    #[cfg(feature = "halo2-axiom")]
-    pub fn assign_fixed(&mut self, c: F) -> Cell {
-        let fixed = self.assigned_constants.get(&c);
-        if let Some(cell) = fixed {
-            *cell
-        } else {
-            let cell = self.assign_fixed_without_caching(c);
-            self.assigned_constants.insert(c, cell);
-            cell
-        }
-    }
+    // #[cfg(feature = "halo2-axiom")]
+    // pub fn assign_fixed(&mut self, c: F) -> Cell {
+    //     let fixed = self.assigned_constants.get(&c);
+    //     if let Some(cell) = fixed {
+    //         *cell
+    //     } else {
+    //         let cell = self.assign_fixed_without_caching(c);
+    //         self.assigned_constants.insert(c, cell);
+    //         cell
+    //     }
+    // }
     #[cfg(feature = "halo2-pse")]
     pub fn assign_fixed(&mut self, c: F) -> Cell {
         let fixed = self.assigned_constants.get(c.to_repr().as_ref());
@@ -329,12 +333,12 @@ impl<'a, F: ScalarField> Context<'a, F> {
     ///
     /// In situations where you don't expect to reuse the value, you can assign the fixed value directly using this function.
     pub fn assign_fixed_without_caching(&mut self, c: F) -> Cell {
-        #[cfg(feature = "halo2-axiom")]
-        let cell = self.region.assign_fixed(
-            self.fixed_columns[self.fixed_col],
-            self.fixed_offset,
-            Assigned::Trivial(c),
-        );
+        // #[cfg(feature = "halo2-axiom")]
+        // let cell = self.region.assign_fixed(
+        //     self.fixed_columns[self.fixed_col],
+        //     self.fixed_offset,
+        //     Assigned::Trivial(c),
+        // );
         #[cfg(feature = "halo2-pse")]
         let cell = self
             .region
@@ -358,71 +362,71 @@ impl<'a, F: ScalarField> Context<'a, F> {
         cell
     }
 
-    /// Assuming that this is only called if ctx.region is not in shape mode!
-    #[cfg(feature = "halo2-axiom")]
-    pub fn assign_cell<'v>(
-        &mut self,
-        input: QuantumCell<'_, 'v, F>,
-        column: Column<Advice>,
-        #[cfg(feature = "display")] context_id: usize,
-        row_offset: usize,
-    ) -> AssignedValue<'v, F> {
-        match input {
-            QuantumCell::Existing(acell) => {
-                AssignedValue {
-                    cell: acell.copy_advice(
-                        // || "gate: copy advice",
-                        &mut self.region,
-                        column,
-                        row_offset,
-                    ),
-                    #[cfg(feature = "display")]
-                    context_id,
-                }
-            }
-            QuantumCell::ExistingOwned(acell) => {
-                AssignedValue {
-                    cell: acell.copy_advice(
-                        // || "gate: copy advice",
-                        &mut self.region,
-                        column,
-                        row_offset,
-                    ),
-                    #[cfg(feature = "display")]
-                    context_id,
-                }
-            }
-            QuantumCell::Witness(val) => AssignedValue {
-                cell: self
-                    .region
-                    .assign_advice(column, row_offset, val.map(Assigned::Trivial))
-                    .expect("assign advice should not fail"),
-                #[cfg(feature = "display")]
-                context_id,
-            },
-            QuantumCell::WitnessFraction(val) => AssignedValue {
-                cell: self
-                    .region
-                    .assign_advice(column, row_offset, val)
-                    .expect("assign advice should not fail"),
-                #[cfg(feature = "display")]
-                context_id,
-            },
-            QuantumCell::Constant(c) => {
-                let acell = self
-                    .region
-                    .assign_advice(column, row_offset, Value::known(Assigned::Trivial(c)))
-                    .expect("assign fixed advice should not fail");
-                let c_cell = self.assign_fixed(c);
-                self.region.constrain_equal(acell.cell(), &c_cell);
-                AssignedValue {
-                    cell: acell,
-                    #[cfg(feature = "display")]
-                    context_id,
-                }
-            }
-        }
-    }
+    // /// Assuming that this is only called if ctx.region is not in shape mode!
+    // #[cfg(feature = "halo2-axiom")]
+    // pub fn assign_cell<'v>(
+    //     &mut self,
+    //     input: QuantumCell<'_, 'v, F>,
+    //     column: Column<Advice>,
+    //     #[cfg(feature = "display")] context_id: usize,
+    //     row_offset: usize,
+    // ) -> AssignedValue<'v, F> {
+    //     match input {
+    //         QuantumCell::Existing(acell) => {
+    //             AssignedValue {
+    //                 cell: acell.copy_advice(
+    //                     // || "gate: copy advice",
+    //                     &mut self.region,
+    //                     column,
+    //                     row_offset,
+    //                 ),
+    //                 #[cfg(feature = "display")]
+    //                 context_id,
+    //             }
+    //         }
+    //         QuantumCell::ExistingOwned(acell) => {
+    //             AssignedValue {
+    //                 cell: acell.copy_advice(
+    //                     // || "gate: copy advice",
+    //                     &mut self.region,
+    //                     column,
+    //                     row_offset,
+    //                 ),
+    //                 #[cfg(feature = "display")]
+    //                 context_id,
+    //             }
+    //         }
+    //         QuantumCell::Witness(val) => AssignedValue {
+    //             cell: self
+    //                 .region
+    //                 .assign_advice(column, row_offset, val.map(Assigned::Trivial))
+    //                 .expect("assign advice should not fail"),
+    //             #[cfg(feature = "display")]
+    //             context_id,
+    //         },
+    //         QuantumCell::WitnessFraction(val) => AssignedValue {
+    //             cell: self
+    //                 .region
+    //                 .assign_advice(column, row_offset, val)
+    //                 .expect("assign advice should not fail"),
+    //             #[cfg(feature = "display")]
+    //             context_id,
+    //         },
+    //         QuantumCell::Constant(c) => {
+    //             let acell = self
+    //                 .region
+    //                 .assign_advice(column, row_offset, Value::known(Assigned::Trivial(c)))
+    //                 .expect("assign fixed advice should not fail");
+    //             let c_cell = self.assign_fixed(c);
+    //             self.region.constrain_equal(acell.cell(), &c_cell);
+    //             AssignedValue {
+    //                 cell: acell,
+    //                 #[cfg(feature = "display")]
+    //                 context_id,
+    //             }
+    //         }
+    //     }
+    // }
 
     #[cfg(feature = "halo2-pse")]
     pub fn assign_cell<'v>(
@@ -431,7 +435,7 @@ impl<'a, F: ScalarField> Context<'a, F> {
         column: Column<Advice>,
         #[cfg(feature = "display")] context_id: usize,
         row_offset: usize,
-        phase: u8,
+        _phase: u8,
     ) -> AssignedValue<'v, F> {
         match input {
             QuantumCell::Existing(acell) => {
@@ -511,7 +515,7 @@ impl<'a, F: ScalarField> Context<'a, F> {
     // convenience function to deal with rust warnings
     pub fn constrain_equal(&mut self, a: &AssignedValue<F>, b: &AssignedValue<F>) {
         #[cfg(feature = "halo2-axiom")]
-        self.region.constrain_equal(a.cell(), b.cell());
+        self.region.constrain_equal(a.cell(), b.cell()).unwrap();
         #[cfg(not(feature = "halo2-axiom"))]
         self.region.constrain_equal(a.cell(), b.cell()).unwrap();
     }
@@ -563,13 +567,12 @@ impl<'a, F: ScalarField> Context<'a, F> {
 pub struct AssignedPrimitive<'a, T: Into<u64> + Copy, F: ScalarField> {
     pub value: Value<T>,
 
-    #[cfg(feature = "halo2-axiom")]
-    pub cell: AssignedCell<&'a Assigned<F>, F>,
-
+    // #[cfg(feature = "halo2-axiom")]
+    // pub cell: AssignedCell<&'a Assigned<F>, F>,
     #[cfg(feature = "halo2-pse")]
     pub cell: Cell,
     #[cfg(feature = "halo2-pse")]
-    row_offset: usize,
+    _row_offset: usize,
     #[cfg(feature = "halo2-pse")]
     _marker: PhantomData<&'a F>,
 }

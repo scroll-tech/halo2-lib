@@ -5,7 +5,14 @@ use super::{
 use crate::halo2_proofs::{
     circuit::Value,
     plonk::{
-        Advice, Assigned, Column, ConstraintSystem, FirstPhase, Fixed, SecondPhase, Selector,
+        Advice,
+        // Assigned,
+        Column,
+        ConstraintSystem,
+        FirstPhase,
+        Fixed,
+        SecondPhase,
+        Selector,
         ThirdPhase,
     },
     poly::Rotation,
@@ -400,14 +407,14 @@ impl<F: ScalarField> GateInstructions<F> for FlexGateConfig<F> {
             if self.strategy == GateStrategy::PlonkPlus {
                 let q_coeff = q_coeff.unwrap_or([F::one(), F::zero(), F::zero()]);
                 for (j, q_coeff) in q_coeff.into_iter().enumerate() {
-                    #[cfg(feature = "halo2-axiom")]
-                    {
-                        ctx.region.assign_fixed(
-                            basic_gate.q_enable_plus[0],
-                            ((row_offset as isize) + i) as usize + j,
-                            Assigned::Trivial(q_coeff),
-                        );
-                    }
+                    // #[cfg(feature = "halo2-axiom")]
+                    // {
+                    //     ctx.region.assign_fixed(
+                    //         basic_gate.q_enable_plus[0],
+                    //         ((row_offset as isize) + i) as usize + j,
+                    //         Assigned::Trivial(q_coeff),
+                    //     );
+                    // }
                     #[cfg(feature = "halo2-pse")]
                     {
                         ctx.region
@@ -486,14 +493,14 @@ impl<F: ScalarField> GateInstructions<F> for FlexGateConfig<F> {
             if self.strategy == GateStrategy::PlonkPlus {
                 let q_coeff = q_coeff.unwrap_or([F::one(), F::zero(), F::zero()]);
                 for (j, q_coeff) in q_coeff.into_iter().enumerate() {
-                    #[cfg(feature = "halo2-axiom")]
-                    {
-                        ctx.region.assign_fixed(
-                            basic_gate.q_enable_plus[0],
-                            ((row_offset as isize) + i) as usize + j,
-                            Assigned::Trivial(q_coeff),
-                        );
-                    }
+                    // #[cfg(feature = "halo2-axiom")]
+                    // {
+                    //     ctx.region.assign_fixed(
+                    //         basic_gate.q_enable_plus[0],
+                    //         ((row_offset as isize) + i) as usize + j,
+                    //         Assigned::Trivial(q_coeff),
+                    //     );
+                    // }
                     #[cfg(feature = "halo2-pse")]
                     {
                         ctx.region
@@ -750,7 +757,7 @@ impl<F: ScalarField> GateInstructions<F> for FlexGateConfig<F> {
                     ],
                     vec![(0, Some([F::zero(), F::one(), -F::one()])), (3, None)],
                 );
-                ctx.region.constrain_equal(assignments[2].cell(), assignments[5].cell());
+                ctx.region.constrain_equal(assignments[2].cell(), assignments[5].cell()).unwrap();
                 assignments.pop().unwrap()
             }
         }
@@ -815,7 +822,7 @@ impl<F: ScalarField> GateInstructions<F> for FlexGateConfig<F> {
             self.pow_of_two[..range_bits].iter().map(|c| Constant(*c)),
             &mut bit_cells,
         );
-        ctx.region.constrain_equal(a.cell(), acc.cell());
+        ctx.region.constrain_equal(a.cell(), acc.cell()).unwrap();
 
         for bit_cell in &bit_cells {
             self.assign_region(

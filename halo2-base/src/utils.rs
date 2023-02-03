@@ -1,56 +1,56 @@
 #[cfg(feature = "halo2-pse")]
 use crate::halo2_proofs::arithmetic::CurveAffine;
 use crate::halo2_proofs::{arithmetic::FieldExt, circuit::Value};
-use core::hash::Hash;
+// use core::hash::Hash;
 use num_bigint::BigInt;
 use num_bigint::BigUint;
 use num_bigint::Sign;
 use num_traits::Signed;
 use num_traits::{One, Zero};
 
-#[cfg(feature = "halo2-axiom")]
-pub trait BigPrimeField: ScalarField {
-    fn from_u64_digits(val: &[u64]) -> Self;
-}
-#[cfg(feature = "halo2-axiom")]
-impl<F> BigPrimeField for F
-where
-    F: FieldExt + Hash + Into<[u64; 4]> + From<[u64; 4]>,
-{
-    #[inline(always)]
-    fn from_u64_digits(val: &[u64]) -> Self {
-        debug_assert!(val.len() <= 4);
-        let mut raw = [0u64; 4];
-        raw[..val.len()].copy_from_slice(val);
-        Self::from(raw)
-    }
-}
+// #[cfg(feature = "halo2-axiom")]
+// pub trait BigPrimeField: ScalarField {
+//     fn from_u64_digits(val: &[u64]) -> Self;
+// }
+// #[cfg(feature = "halo2-axiom")]
+// impl<F> BigPrimeField for F
+// where
+//     F: FieldExt + Hash + Into<[u64; 4]> + From<[u64; 4]>,
+// {
+//     #[inline(always)]
+//     fn from_u64_digits(val: &[u64]) -> Self {
+//         debug_assert!(val.len() <= 4);
+//         let mut raw = [0u64; 4];
+//         raw[..val.len()].copy_from_slice(val);
+//         Self::from(raw)
+//     }
+// }
 
-#[cfg(feature = "halo2-axiom")]
-pub trait ScalarField: FieldExt + Hash {
-    /// Returns the base `2^bit_len` little endian representation of the prime field element
-    /// up to `num_limbs` number of limbs (truncates any extra limbs)
-    ///
-    /// Basically same as `to_repr` but does not go further into bytes
-    ///
-    /// Undefined behavior if `bit_len > 64`
-    fn to_u64_limbs(self, num_limbs: usize, bit_len: usize) -> Vec<u64>;
-}
-#[cfg(feature = "halo2-axiom")]
-impl<F> ScalarField for F
-where
-    F: FieldExt + Hash + Into<[u64; 4]>,
-{
-    #[inline(always)]
-    fn to_u64_limbs(self, num_limbs: usize, bit_len: usize) -> Vec<u64> {
-        let tmp: [u64; 4] = self.into();
-        decompose_u64_digits_to_limbs(tmp, num_limbs, bit_len)
-    }
-}
+// #[cfg(feature = "halo2-axiom")]
+// pub trait ScalarField: FieldExt + Hash {
+//     /// Returns the base `2^bit_len` little endian representation of the prime field element
+//     /// up to `num_limbs` number of limbs (truncates any extra limbs)
+//     ///
+//     /// Basically same as `to_repr` but does not go further into bytes
+//     ///
+//     /// Undefined behavior if `bit_len > 64`
+//     fn to_u64_limbs(self, num_limbs: usize, bit_len: usize) -> Vec<u64>;
+// }
+// #[cfg(feature = "halo2-axiom")]
+// impl<F> ScalarField for F
+// where
+//     F: FieldExt + Hash + Into<[u64; 4]>,
+// {
+//     #[inline(always)]
+//     fn to_u64_limbs(self, num_limbs: usize, bit_len: usize) -> Vec<u64> {
+//         let tmp: [u64; 4] = self.into();
+//         decompose_u64_digits_to_limbs(tmp, num_limbs, bit_len)
+//     }
+// }
 
 // Later: will need to separate PrimeField from ScalarField when Goldilocks is introduced
-#[cfg(feature = "halo2-axiom")]
-pub trait PrimeField = BigPrimeField;
+// #[cfg(feature = "halo2-axiom")]
+// pub trait PrimeField = BigPrimeField;
 #[cfg(feature = "halo2-pse")]
 pub trait PrimeField = FieldExt<Repr = [u8; 32]>;
 
@@ -113,10 +113,10 @@ pub fn power_of_two<F: PrimeField>(n: usize) -> F {
 
 /// assume `e` less than modulus of F
 pub fn biguint_to_fe<F: PrimeField>(e: &BigUint) -> F {
-    #[cfg(feature = "halo2-axiom")]
-    {
-        F::from_u64_digits(&e.to_u64_digits())
-    }
+    // #[cfg(feature = "halo2-axiom")]
+    // {
+    //     F::from_u64_digits(&e.to_u64_digits())
+    // }
 
     #[cfg(feature = "halo2-pse")]
     {
@@ -129,15 +129,15 @@ pub fn biguint_to_fe<F: PrimeField>(e: &BigUint) -> F {
 
 /// assume `|e|` less than modulus of F
 pub fn bigint_to_fe<F: PrimeField>(e: &BigInt) -> F {
-    #[cfg(feature = "halo2-axiom")]
-    {
-        let (sign, digits) = e.to_u64_digits();
-        if sign == Sign::Minus {
-            -F::from_u64_digits(&digits)
-        } else {
-            F::from_u64_digits(&digits)
-        }
-    }
+    // #[cfg(feature = "halo2-axiom")]
+    // {
+    //     let (sign, digits) = e.to_u64_digits();
+    //     if sign == Sign::Minus {
+    //         -F::from_u64_digits(&digits)
+    //     } else {
+    //         F::from_u64_digits(&digits)
+    //     }
+    // }
     #[cfg(feature = "halo2-pse")]
     {
         let (sign, bytes) = e.to_bytes_le();
@@ -181,10 +181,10 @@ pub fn decompose_fe_to_u64_limbs<F: ScalarField>(
     number_of_limbs: usize,
     bit_len: usize,
 ) -> Vec<u64> {
-    #[cfg(feature = "halo2-axiom")]
-    {
-        e.to_u64_limbs(number_of_limbs, bit_len)
-    }
+    // #[cfg(feature = "halo2-axiom")]
+    // {
+    //     e.to_u64_limbs(number_of_limbs, bit_len)
+    // }
 
     #[cfg(feature = "halo2-pse")]
     {
@@ -262,8 +262,8 @@ fn test_signed_roundtrip() {
     assert_eq!(fe_to_bigint(&bigint_to_fe::<Fr>(&-BigInt::one())), -BigInt::one());
 }
 
-#[cfg(feature = "halo2-axiom")]
-pub use halo2_proofs_axiom::halo2curves::CurveAffineExt;
+// #[cfg(feature = "halo2-axiom")]
+// pub use halo2_proofs_axiom::halo2curves::CurveAffineExt;
 
 #[cfg(feature = "halo2-pse")]
 pub trait CurveAffineExt: CurveAffine {
@@ -290,6 +290,8 @@ pub mod fs {
         },
         poly::{commitment::{Params, ParamsProver}, kzg::commitment::ParamsKZG},
     };
+    use halo2_proofs::poly::commitment::Params;
+    // use halo2_proofs_axiom::poly::commitment::Params;
     use rand_chacha::{rand_core::SeedableRng, ChaCha20Rng};
 
     pub fn read_params(k: u32) -> ParamsKZG<Bn256> {

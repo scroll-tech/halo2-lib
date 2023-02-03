@@ -1,3 +1,10 @@
+use crate::halo2_proofs::{
+    circuit::{Layouter, Value},
+    plonk::{
+        Advice, Column, ConstraintSystem, Error, SecondPhase, Selector, TableColumn, ThirdPhase,
+    },
+    poly::Rotation,
+};
 use crate::{
     gates::{
         flex_gate::{FlexGateConfig, GateStrategy, MAX_PHASE},
@@ -6,16 +13,6 @@ use crate::{
     utils::{decompose_fe_to_u64_limbs, value_to_option, ScalarField},
     AssignedValue,
     QuantumCell::{self, Constant, Existing, Witness},
-};
-use crate::{
-    halo2_proofs::{
-        circuit::{Layouter, Value},
-        plonk::{
-            Advice, Column, ConstraintSystem, Error, SecondPhase, Selector, TableColumn, ThirdPhase,
-        },
-        poly::Rotation,
-    },
-    utils::PrimeField,
 };
 use std::cmp::Ordering;
 
@@ -220,7 +217,7 @@ impl<F: ScalarField> RangeConfig<F> {
                 ),
             };
             // the inner product above must equal `a`
-            ctx.region.constrain_equal(a.cell(), acc.cell());
+            ctx.region.constrain_equal(a.cell(), acc.cell()).unwrap();
         };
         assert_eq!(limbs_assigned.len(), k);
 
