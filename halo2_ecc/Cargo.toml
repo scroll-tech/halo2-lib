@@ -15,7 +15,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 
-ark-std = { version = "0.3.0", features = ["print-trace"] }
+ark-std = { version = "0.3.0" }
 
 # halo2
 halo2_proofs = { git = "https://github.com/privacy-scaling-explorations/halo2.git", tag = "v2022_09_10" }
@@ -31,10 +31,11 @@ plotters = { version = "0.3.0", optional = true }
 tabbycat = { version = "0.1", features = ["attributes"], optional = true }
 
 [dev-dependencies]
-ark-std = { version = "0.3.0", features = ["print-trace"] }
+ark-std = { version = "0.3.0" }
 
 [features]
 default = ["display", "jemalloc"]
 dev-graph = ["halo2_proofs/dev-graph", "plotters"]
 display = ["halo2_base/display"]
 jemalloc = ["dep:jemallocator"]
+profile = ["ark-std/print-trace"]
