@@ -45,7 +45,7 @@ debug = true
 # halo2-ecc = { path = "./halo2-ecc" }
 
 # [patch."https://github.com/privacy-scaling-explorations/halo2.git"]
-# halo2_proofs = { git = "https://github.com/scroll-tech/halo2.git", branch = "scroll-dev-1220" }
+# halo2_proofs = { git = "https://github.com/scroll-tech/halo2.git", branch = "scroll-dev-0220" }
 
 
 
