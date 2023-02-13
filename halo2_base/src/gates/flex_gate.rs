@@ -8,7 +8,7 @@ use halo2_proofs::{
     plonk::{Advice, Column, ConstraintSystem, Error, FirstPhase, Fixed, SecondPhase, ThirdPhase},
     poly::Rotation,
 };
-use std::{marker::PhantomData, rc::Rc};
+use std::{marker::PhantomData, rc::Rc, sync::Arc};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum GateStrategy {
@@ -109,7 +109,7 @@ pub struct FlexGateConfig<F: FieldExt> {
     pub num_advice: usize,
     strategy: GateStrategy,
     gate_len: usize,
-    pub context_id: Rc<String>,
+    pub context_id: Arc<String>,
 }
 
 impl<F: FieldExt> FlexGateConfig<F> {
@@ -143,7 +143,7 @@ impl<F: FieldExt> FlexGateConfig<F> {
                     num_advice,
                     strategy,
                     gate_len: 4,
-                    context_id: Rc::new(context_id),
+                    context_id: Arc::new(context_id),
                 }
             }
         }

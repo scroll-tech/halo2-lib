@@ -5,6 +5,7 @@ use halo2_proofs::{
 };
 use num_bigint::BigUint;
 use std::{borrow::Borrow, collections::HashMap, marker::PhantomData, rc::Rc};
+use std::sync::Arc;
 use utils::fe_to_biguint;
 
 pub mod gates;
@@ -29,9 +30,9 @@ impl<F: FieldExt> QuantumCell<'_, F> {
 
 #[derive(Clone, Debug)]
 pub struct AssignedValue<F: FieldExt> {
-    pub cell: Rc<Cell>,
-    pub value: Rc<Value<F>>,
-    pub context_id: Rc<String>,
+    pub cell: Arc<Cell>,
+    pub value: Arc<Value<F>>,
+    pub context_id: Arc<String>,
     column_index: usize,
     row_offset: usize,
     // the phase is provided for convenience; a more rigorous way to check the phase is to identify the column the cell is in using `column_index` and `row_offset` and call `column.phase()`
@@ -42,14 +43,14 @@ impl<F: FieldExt> AssignedValue<F> {
     pub fn new(
         cell: Cell,
         value: Value<F>,
-        context_id: Rc<String>,
+        context_id: Arc<String>,
         column_index: usize,
         row_offset: usize,
         phase: u8,
     ) -> Self {
         Self {
-            cell: Rc::new(cell),
-            value: Rc::new(value),
+            cell: Arc::new(cell),
+            value: Arc::new(value),
             context_id,
             column_index,
             row_offset,
@@ -59,14 +60,14 @@ impl<F: FieldExt> AssignedValue<F> {
 
     pub fn from_assigned(
         assigned: AssignedCell<F, F>,
-        context_id: Rc<String>,
+        context_id: Arc<String>,
         column_index: usize,
         row_offset: usize,
         phase: u8,
     ) -> Self {
         Self {
-            cell: Rc::new(assigned.cell()),
-            value: Rc::new(assigned.value().copied()),
+            cell: Arc::new(assigned.cell()),
+            value: Arc::new(assigned.value().copied()),
             context_id,
             column_index,
             row_offset,
@@ -217,14 +218,14 @@ impl<'a, F: FieldExt> Context<'a, F> {
         &mut self,
         input: QuantumCell<F>,
         column: Column<Advice>,
-        context_id: &Rc<String>,
+        context_id: &Arc<String>,
         column_index: usize,
         row_offset: usize,
         phase: u8,
     ) -> Result<AssignedValue<F>, Error> {
         match input {
             QuantumCell::Existing(acell) => Ok(AssignedValue {
-                cell: Rc::new(
+                cell: Arc::new(
                     acell
                         .copy_advice(|| "gate: copy advice", &mut self.region, column, row_offset)?
                         .cell(),
@@ -236,12 +237,12 @@ impl<'a, F: FieldExt> Context<'a, F> {
                 phase,
             }),
             QuantumCell::Witness(val) => Ok(AssignedValue {
-                cell: Rc::new(
+                cell: Arc::new(
                     self.region
                         .assign_advice(|| "gate: assign advice", column, row_offset, || val)?
                         .cell(),
                 ),
-                value: Rc::new(val),
+                value: Arc::new(val),
                 context_id: context_id.clone(),
                 column_index,
                 row_offset,
@@ -254,8 +255,8 @@ impl<'a, F: FieldExt> Context<'a, F> {
                     .cell();
                 self.constants_to_assign.push((c, Some(cell)));
                 Ok(AssignedValue {
-                    cell: Rc::new(cell),
-                    value: Rc::new(Value::known(c)),
+                    cell: Arc::new(cell),
+                    value: Arc::new(Value::known(c)),
                     context_id: context_id.clone(),
                     column_index,
                     row_offset,

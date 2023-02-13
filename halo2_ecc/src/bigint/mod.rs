@@ -11,7 +11,7 @@ use halo2_proofs::{
 };
 use num_bigint::{BigInt, BigUint};
 use num_traits::Zero;
-use std::{marker::PhantomData, rc::Rc};
+use std::{marker::PhantomData, sync::Arc};
 
 pub mod add_no_carry;
 pub mod big_is_equal;
@@ -236,7 +236,7 @@ impl<F: FieldExt> FixedCRTInteger<F> {
 pub struct BigIntConfig<F: FieldExt> {
     // everything is empty if strategy is `Simple` or `SimplePlus`
     strategy: BigIntStrategy,
-    context_id: Rc<String>,
+    context_id: Arc<String>,
     _marker: PhantomData<F>,
 }
 
@@ -253,6 +253,6 @@ impl<F: FieldExt> BigIntConfig<F> {
         match strategy {
             _ => {}
         }
-        Self { strategy, _marker: PhantomData, context_id: Rc::new(context_id) }
+        Self { strategy, _marker: PhantomData, context_id: Arc::new(context_id) }
     }
 }
