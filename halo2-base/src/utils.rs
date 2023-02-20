@@ -290,8 +290,6 @@ pub mod fs {
         },
         poly::{commitment::{Params, ParamsProver}, kzg::commitment::ParamsKZG},
     };
-    use halo2_proofs::poly::commitment::Params;
-    // use halo2_proofs_axiom::poly::commitment::Params;
     use rand_chacha::{rand_core::SeedableRng, ChaCha20Rng};
 
     pub fn read_params(k: u32) -> ParamsKZG<Bn256> {
