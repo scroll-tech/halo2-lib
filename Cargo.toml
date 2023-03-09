@@ -51,3 +51,6 @@ debug = true
 
 # [patch."https://github.com/privacy-scaling-explorations/halo2curves.git"]
 # halo2curves = { git = 'https://github.com/scroll-tech/halo2curves', branch = "main" }
+
+[patch."https://github.com/privacy-scaling-explorations/poseidon.git"]
+poseidon = { git = "https://github.com/scroll-tech/poseidon.git", branch = "halo2-ecc-snark-verifier-0220" }

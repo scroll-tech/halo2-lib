@@ -1,6 +1,7 @@
 #[cfg(feature = "halo2-pse")]
 use crate::halo2_proofs::arithmetic::CurveAffine;
-use crate::halo2_proofs::{arithmetic::FieldExt, circuit::Value};
+use crate::halo2_proofs::circuit::Value;
+use crate::halo2_proofs::ff::PrimeField as Halo2ProofPrimeField;
 // use core::hash::Hash;
 use num_bigint::BigInt;
 use num_bigint::BigUint;
@@ -52,10 +53,10 @@ use num_traits::{One, Zero};
 // #[cfg(feature = "halo2-axiom")]
 // pub trait PrimeField = BigPrimeField;
 #[cfg(feature = "halo2-pse")]
-pub trait PrimeField = FieldExt<Repr = [u8; 32]>;
+pub trait PrimeField = Halo2ProofPrimeField<Repr = [u8; 32]>;
 
 #[cfg(feature = "halo2-pse")]
-pub trait ScalarField = FieldExt;
+pub trait ScalarField = Halo2ProofPrimeField<Repr = [u8; 32]>;
 
 #[inline(always)]
 pub(crate) fn decompose_u64_digits_to_limbs(
@@ -104,7 +105,7 @@ pub fn log2_ceil(x: u64) -> usize {
 }
 
 pub fn modulus<F: PrimeField>() -> BigUint {
-    fe_to_biguint(&-F::one()) + 1u64
+    fe_to_biguint(&-F::ONE) + 1u64
 }
 
 pub fn power_of_two<F: PrimeField>(n: usize) -> F {
@@ -152,7 +153,7 @@ pub fn bigint_to_fe<F: PrimeField>(e: &BigInt) -> F {
     }
 }
 
-pub fn fe_to_biguint<F: ff::PrimeField>(fe: &F) -> BigUint {
+pub fn fe_to_biguint<F: Halo2ProofPrimeField>(fe: &F) -> BigUint {
     BigUint::from_bytes_le(fe.to_repr().as_ref())
 }
 
@@ -288,7 +289,10 @@ pub mod fs {
             bn256::{Bn256, G1Affine},
             CurveAffine,
         },
-        poly::{commitment::{Params, ParamsProver}, kzg::commitment::ParamsKZG},
+        poly::{
+            commitment::{Params, ParamsProver},
+            kzg::commitment::ParamsKZG,
+        },
     };
     use rand_chacha::{rand_core::SeedableRng, ChaCha20Rng};
 

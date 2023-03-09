@@ -10,7 +10,6 @@ num-integer = "0.1"
 num-traits = "0.2"
 rand_chacha = "0.3"
 rustc-hash = "1.1"
-ff = "0.12"
 
 # Use Axiom's custom halo2 monorepo for faster proving when feature = "halo2-axiom" is on
 # halo2_proofs_axiom = { git = "https://github.com/axiom-crypto/halo2.git", tag = "v2023_01_17", package = "halo2_proofs", optional = true }

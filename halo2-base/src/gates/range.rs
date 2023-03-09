@@ -102,7 +102,7 @@ impl<F: ScalarField> RangeConfig<F> {
         let mut running_base = limb_base;
         let num_bases = F::NUM_BITS as usize / lookup_bits;
         let mut limb_bases = Vec::with_capacity(num_bases + 1);
-        limb_bases.extend([Constant(F::one()), Constant(running_base)]);
+        limb_bases.extend([Constant(F::ONE), Constant(running_base)]);
         for _ in 2..=num_bases {
             running_base *= &limb_base;
             limb_bases.push(Constant(running_base));
@@ -239,7 +239,7 @@ impl<F: ScalarField> RangeConfig<F> {
                 let check = self.gate.assign_region_last(
                     ctx,
                     vec![
-                        Constant(F::zero()),
+                        Constant(F::ZERO),
                         Existing(&limbs_assigned[k - 1]),
                         Constant(mult_val),
                         Witness(limbs_assigned[k - 1].value().map(|limb| mult_val * limb)),
@@ -288,11 +288,11 @@ impl<F: ScalarField> RangeConfig<F> {
     ) -> AssignedValue<'a, F> {
         let a_v = a.value();
         let bit_v = a_v.map(|a| {
-            let a = a.get_lower_32();
+            let a = a.to_repr()[0];
             if a ^ 1 == 0 {
-                F::zero()
+                F::ZERO
             } else {
-                F::one()
+                F::ONE
             }
         });
         let two = self.gate.get_field_element(2u64);
@@ -350,10 +350,10 @@ impl<F: ScalarField> RangeInstructions<F> for RangeConfig<F> {
                 let cells = vec![
                     Witness(shift_a_val - b.value()),
                     b,
-                    Constant(F::one()),
+                    Constant(F::ONE),
                     Witness(shift_a_val),
                     Constant(-pow_of_two),
-                    Constant(F::one()),
+                    Constant(F::ONE),
                     a,
                 ];
                 let assigned_cells =
@@ -368,8 +368,8 @@ impl<F: ScalarField> RangeInstructions<F> for RangeConfig<F> {
                 let out_val = Value::known(pow_of_two) + a.value() - b.value();
                 let assigned_cells = self.gate.assign_region(
                     ctx,
-                    vec![a, Constant(F::one()), b, Witness(out_val)],
-                    vec![(0, Some([F::zero(), pow_of_two, -F::one()]))],
+                    vec![a, Constant(F::ONE), b, Witness(out_val)],
+                    vec![(0, Some([F::ZERO, pow_of_two, -F::ONE]))],
                 );
                 assigned_cells.into_iter().nth(3).unwrap()
             }
@@ -400,10 +400,10 @@ impl<F: ScalarField> RangeInstructions<F> for RangeConfig<F> {
                     vec![
                         Witness(shifted_val),
                         b,
-                        Constant(F::one()),
+                        Constant(F::ONE),
                         Witness(shift_a_val),
                         Constant(-pow_padded),
-                        Constant(F::one()),
+                        Constant(F::ONE),
                         a,
                     ],
                     vec![0, 3],
@@ -415,7 +415,7 @@ impl<F: ScalarField> RangeInstructions<F> for RangeConfig<F> {
             RangeStrategy::PlonkPlus => self.gate.assign_region_last(
                 ctx,
                 vec![a, Constant(pow_padded), b, Witness(shifted_val)],
-                vec![(0, Some([F::zero(), F::one(), -F::one()]))],
+                vec![(0, Some([F::ZERO, F::ONE, -F::ONE]))],
             ),
         };
 

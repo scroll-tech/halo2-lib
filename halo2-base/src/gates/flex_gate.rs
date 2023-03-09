@@ -154,7 +154,7 @@ impl<F: ScalarField> FlexGateConfig<F> {
         }
         let mut pow_of_two = Vec::with_capacity(F::NUM_BITS as usize);
         let two = F::from(2);
-        pow_of_two.push(F::one());
+        pow_of_two.push(F::ONE);
         pow_of_two.push(two);
         for _ in 2..F::NUM_BITS {
             pow_of_two.push(two * pow_of_two.last().unwrap());
@@ -199,14 +199,14 @@ impl<F: ScalarField> FlexGateConfig<F> {
         let mut a = a.into_iter();
         let mut b = b.into_iter().peekable();
 
-        let cells = if matches!(b.peek(), Some(Constant(c)) if c == &F::one()) {
+        let cells = if matches!(b.peek(), Some(Constant(c)) if c == &F::ONE) {
             b.next();
             let start_a = a.next().unwrap();
             sum = start_a.value().copied();
             iter::once(start_a)
         } else {
-            sum = Value::known(F::zero());
-            iter::once(Constant(F::zero()))
+            sum = Value::known(F::ZERO);
+            iter::once(Constant(F::ZERO))
         }
         .chain(a.zip(b).flat_map(|(a, b)| {
             sum = sum + a.value().zip(b.value()).map(|(a, b)| *a * b);
@@ -230,14 +230,14 @@ impl<F: ScalarField> FlexGateConfig<F> {
         let mut a = a.into_iter();
         let mut b = b.into_iter().peekable();
 
-        let cells = if matches!(b.peek(), Some(Constant(c)) if c == &F::one()) {
+        let cells = if matches!(b.peek(), Some(Constant(c)) if c == &F::ONE) {
             b.next();
             let start_a = a.next().unwrap();
             sum = start_a.value().copied();
             iter::once(start_a)
         } else {
-            sum = Value::known(F::zero());
-            iter::once(Constant(F::zero()))
+            sum = Value::known(F::ZERO);
+            iter::once(Constant(F::ZERO))
         }
         .chain(a.zip(b).flat_map(|(a, b)| {
             sum = sum + a.value().zip(b.value()).map(|(a, b)| *a * b);
@@ -281,7 +281,7 @@ impl<F: ScalarField> FlexGateConfig<F> {
 
                     // we effect a small optimization if we know the constant b0 == 1: then instead of starting from 0 we can start from a0
                     // this is a peculiarity of our plonk-plus gate
-                    let start_ida: usize = (vec_b[0] == F::one()).into();
+                    let start_ida: usize = (vec_b[0] == F::ONE).into();
                     if start_ida == 1 && k == 1 {
                         // this is just a0 * 1 = a0; you're doing nothing, why are you calling this function?
                         return (vec![], self.assign_region_last(ctx, vec_a, vec![]));
@@ -290,14 +290,14 @@ impl<F: ScalarField> FlexGateConfig<F> {
                     let mut cells = Vec::with_capacity(1 + (gate_segment + 1) * k_chunks);
                     let mut gate_offsets = Vec::with_capacity(k_chunks);
                     let mut running_sum =
-                        if start_ida == 1 { vec_a[0].clone() } else { Constant(F::zero()) };
+                        if start_ida == 1 { vec_a[0].clone() } else { Constant(F::ZERO) };
                     cells.push(running_sum.clone());
                     for i in 0..k_chunks {
                         let window = (start_ida + i * gate_segment)
                             ..std::cmp::min(k, start_ida + (i + 1) * gate_segment);
                         // we add a 0 at the start for q_mul = 0
-                        let mut c_window = [&[F::zero()], &vec_b[window.clone()]].concat();
-                        c_window.extend((c_window.len()..(gate_segment + 1)).map(|_| F::zero()));
+                        let mut c_window = [&[F::ZERO], &vec_b[window.clone()]].concat();
+                        c_window.extend((c_window.len()..(gate_segment + 1)).map(|_| F::ZERO));
                         // c_window should have length gate_segment + 1
                         gate_offsets.push((
                             (i * (gate_segment + 1)) as isize,
@@ -305,7 +305,7 @@ impl<F: ScalarField> FlexGateConfig<F> {
                         ));
 
                         cells.extend(window.clone().map(|j| vec_a[j].clone()));
-                        cells.extend((window.len()..gate_segment).map(|_| Constant(F::zero())));
+                        cells.extend((window.len()..gate_segment).map(|_| Constant(F::ZERO)));
                         running_sum = Witness(
                             window.into_iter().fold(running_sum.value().copied(), |sum, j| {
                                 sum + Value::known(vec_b[j]) * vec_a[j].value()
@@ -405,7 +405,7 @@ impl<F: ScalarField> GateInstructions<F> for FlexGateConfig<F> {
                 .expect("enable selector should not fail");
 
             if self.strategy == GateStrategy::PlonkPlus {
-                let q_coeff = q_coeff.unwrap_or([F::one(), F::zero(), F::zero()]);
+                let q_coeff = q_coeff.unwrap_or([F::ONE, F::ZERO, F::ZERO]);
                 for (j, q_coeff) in q_coeff.into_iter().enumerate() {
                     // #[cfg(feature = "halo2-axiom")]
                     // {
@@ -491,7 +491,7 @@ impl<F: ScalarField> GateInstructions<F> for FlexGateConfig<F> {
                 .expect("selector enable should not fail");
 
             if self.strategy == GateStrategy::PlonkPlus {
-                let q_coeff = q_coeff.unwrap_or([F::one(), F::zero(), F::zero()]);
+                let q_coeff = q_coeff.unwrap_or([F::ONE, F::ZERO, F::ZERO]);
                 for (j, q_coeff) in q_coeff.into_iter().enumerate() {
                     // #[cfg(feature = "halo2-axiom")]
                     // {
@@ -552,7 +552,7 @@ impl<F: ScalarField> GateInstructions<F> for FlexGateConfig<F> {
         b: impl IntoIterator<Item = QuantumCell<'a, 'b, F>>,
     ) -> Box<dyn Iterator<Item = AssignedValue<'b, F>> + 'b> {
         let mut b = b.into_iter().peekable();
-        let flag = matches!(b.peek(), Some(&Constant(c)) if c == F::one());
+        let flag = matches!(b.peek(), Some(&Constant(c)) if c == F::ONE);
         let (assignments_without_last, last) =
             self.inner_product_simple_with_assignments(ctx, a, b);
         if flag {
@@ -615,12 +615,12 @@ impl<F: ScalarField> GateInstructions<F> for FlexGateConfig<F> {
 
                 let mut right_one = false;
                 let start = ctx.assign_cell(
-                    if matches!(b.peek(), Some(&Constant(x)) if x == F::one()) {
+                    if matches!(b.peek(), Some(&Constant(x)) if x == F::ONE) {
                         right_one = true;
                         b.next();
                         a.next().unwrap()
                     } else {
-                        Constant(F::zero())
+                        Constant(F::ZERO)
                     },
                     column,
                     #[cfg(feature = "display")]
@@ -687,16 +687,16 @@ impl<F: ScalarField> GateInstructions<F> for FlexGateConfig<F> {
                 for (i, (c, a, b)) in values.into_iter().enumerate() {
                     acc = acc + Value::known(c) * a.value() * b.value();
                     cells.append(&mut vec![a, b, Witness(acc)]);
-                    gate_offsets.push((3 * i as isize, Some([c, F::zero(), F::zero()])));
+                    gate_offsets.push((3 * i as isize, Some([c, F::ZERO, F::ZERO])));
                 }
                 self.assign_region_last(ctx, cells, gate_offsets)
             }
             GateStrategy::Vertical => {
-                let (a, b): (Vec<_>, Vec<_>) = std::iter::once((var, Constant(F::one())))
+                let (a, b): (Vec<_>, Vec<_>) = std::iter::once((var, Constant(F::ONE)))
                     .chain(values.into_iter().filter_map(|(c, va, vb)| {
-                        if c == F::one() {
+                        if c == F::ONE {
                             Some((va, vb))
-                        } else if c != F::zero() {
+                        } else if c != F::ZERO {
                             let prod = self.mul(ctx, va, vb);
                             Some((QuantumCell::ExistingOwned(prod), Constant(c)))
                         } else {
@@ -727,7 +727,7 @@ impl<F: ScalarField> GateInstructions<F> for FlexGateConfig<F> {
             GateStrategy::Vertical => {
                 let cells = vec![
                     Witness(diff_val),
-                    Constant(F::one()),
+                    Constant(F::ONE),
                     b.clone(),
                     a,
                     b,
@@ -747,7 +747,7 @@ impl<F: ScalarField> GateInstructions<F> for FlexGateConfig<F> {
                 let mut assignments = self.assign_region(
                     ctx,
                     vec![
-                        Constant(F::zero()),
+                        Constant(F::ZERO),
                         a,
                         Witness(diff_val),
                         b,
@@ -755,7 +755,7 @@ impl<F: ScalarField> GateInstructions<F> for FlexGateConfig<F> {
                         Witness(diff_val),
                         Witness(out_val),
                     ],
-                    vec![(0, Some([F::zero(), F::one(), -F::one()])), (3, None)],
+                    vec![(0, Some([F::ZERO, F::ONE, -F::ONE])), (3, None)],
                 );
                 ctx.region.constrain_equal(assignments[2].cell(), assignments[5].cell()).unwrap();
                 assignments.pop().unwrap()
@@ -773,20 +773,20 @@ impl<F: ScalarField> GateInstructions<F> for FlexGateConfig<F> {
         c: QuantumCell<'_, 'v, F>,
     ) -> AssignedValue<'v, F> {
         let bc_val = b.value().zip(c.value()).map(|(b, c)| *b * c);
-        let not_bc_val = bc_val.map(|x| F::one() - x);
-        let not_a_val = a.value().map(|x| *x - F::one());
+        let not_bc_val = bc_val.map(|x| F::ONE - x);
+        let not_a_val = a.value().map(|x| *x - F::ONE);
         let out_val = bc_val + a.value() - bc_val * a.value();
         let cells = vec![
             Witness(not_bc_val),
             b,
             c,
-            Constant(F::one()),
+            Constant(F::ONE),
             Witness(not_a_val),
             Witness(not_bc_val),
             Witness(out_val),
             Witness(not_a_val),
-            Constant(F::one()),
-            Constant(F::one()),
+            Constant(F::ONE),
+            Constant(F::ONE),
             a,
         ];
         let assigned_cells =
@@ -828,7 +828,7 @@ impl<F: ScalarField> GateInstructions<F> for FlexGateConfig<F> {
             self.assign_region(
                 ctx,
                 vec![
-                    Constant(F::zero()),
+                    Constant(F::ZERO),
                     Existing(bit_cell),
                     Existing(bit_cell),
                     Existing(bit_cell),
