@@ -5,7 +5,7 @@ use crate::{
     bigint::{CRTInteger, FixedCRTInteger},
     fields::{PrimeFieldChip, Selectable},
 };
-use group::Curve;
+use crate::halo2_proofs::group::Curve;
 use halo2_base::{
     gates::{GateInstructions, RangeInstructions},
     utils::{fe_to_biguint, CurveAffineExt, PrimeField},

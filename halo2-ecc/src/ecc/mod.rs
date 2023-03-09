@@ -2,7 +2,7 @@
 use crate::bigint::CRTInteger;
 use crate::fields::{fp::FpConfig, FieldChip, PrimeFieldChip, Selectable};
 use crate::halo2_proofs::{arithmetic::CurveAffine, circuit::Value};
-use group::{Curve, Group};
+use crate::halo2_proofs::group::{Curve, Group};
 use halo2_base::{
     gates::{GateInstructions, RangeInstructions},
     utils::{modulus, CurveAffineExt, PrimeField},
@@ -68,7 +68,7 @@ pub fn ec_add_unequal<'v, F: PrimeField, FC: FieldChip<F>>(
     if is_strict {
         // constrains that P.x != Q.x
         let x_is_equal = chip.is_equal_unenforced(ctx, &P.x, &Q.x);
-        chip.range().gate().assert_is_const(ctx, &x_is_equal, F::zero());
+        chip.range().gate().assert_is_const(ctx, &x_is_equal, F::ZERO);
     }
 
     let dx = chip.sub_no_carry(ctx, &Q.x, &P.x);
@@ -110,7 +110,7 @@ pub fn ec_sub_unequal<'v, F: PrimeField, FC: FieldChip<F>>(
     if is_strict {
         // constrains that P.x != Q.x
         let x_is_equal = chip.is_equal_unenforced(ctx, &P.x, &Q.x);
-        chip.range().gate().assert_is_const(ctx, &x_is_equal, F::zero());
+        chip.range().gate().assert_is_const(ctx, &x_is_equal, F::ZERO);
     }
 
     let dx = chip.sub_no_carry(ctx, &Q.x, &P.x);
@@ -635,7 +635,7 @@ impl<F: PrimeField, FC: FieldChip<F>> EccChip<F, FC> {
     ) -> AssignedValue<'v, F>
     where
         C: CurveAffine<Base = FC::FieldType>,
-        C::Base: ff::PrimeField,
+        C::Base: crate::halo2_proofs::ff::PrimeField,
     {
         let lhs = self.field_chip.mul_no_carry(ctx, &P.y, &P.y);
         let mut rhs = self.field_chip.mul(ctx, &P.x, &P.x);
@@ -778,7 +778,7 @@ where
     ) -> EcPoint<F, FC::FieldPoint<'v>>
     where
         C: CurveAffineExt<Base = FC::FieldType>,
-        C::Base: ff::PrimeField,
+        C::Base: crate::halo2_proofs::ff::PrimeField,
     {
         #[cfg(feature = "display")]
         println!("computing length {} MSM", P.len());

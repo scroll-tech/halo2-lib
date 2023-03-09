@@ -9,7 +9,7 @@ mod fp {
         halo2curves::bn256::{Fq, Fr},
         plonk::*,
     };
-    use group::ff::Field;
+    use crate::halo2_proofs::group::ff::Field;
     use halo2_base::{
         utils::{fe_to_biguint, modulus, PrimeField},
         SKIP_FIRST_PASS,

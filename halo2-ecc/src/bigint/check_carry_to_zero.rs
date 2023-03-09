@@ -85,7 +85,7 @@ pub fn truncate<'a, F: PrimeField>(
                     Existing(a_limb),
                     Witness(neg_carry_val),
                     Constant(limb_base),
-                    previous.as_ref().map(Existing).unwrap_or_else(|| Constant(F::zero())),
+                    previous.as_ref().map(Existing).unwrap_or_else(|| Constant(F::ZERO)),
                 ],
                 vec![(0, None)],
             )
@@ -100,7 +100,7 @@ pub fn truncate<'a, F: PrimeField>(
             let shift_carry_val = Value::known(shift_val) + neg_carry.value();
             let cells = vec![
                 Existing(&neg_carry),
-                Constant(F::one()),
+                Constant(F::ONE),
                 Constant(shift_val),
                 Witness(shift_carry_val),
             ];
