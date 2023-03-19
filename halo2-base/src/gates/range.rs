@@ -40,7 +40,7 @@ pub struct RangeConfig<F: ScalarField> {
     pub q_lookup: Vec<Option<Selector>>,
     pub lookup: TableColumn,
     pub lookup_bits: usize,
-    pub limb_bases: Vec<QuantumCell<'static, 'static, F>>,
+    pub limb_bases: Vec<QuantumCell<'static, F>>,
     // selector for custom range gate
     // `q_range[k][i]` stores the selector for a custom range gate of length `k`
     // pub q_range: HashMap<usize, Vec<Selector>>,
@@ -171,7 +171,7 @@ impl<F: ScalarField> RangeConfig<F> {
     /// assuming this is called when ctx.region is not in shape mode
     /// `offset` is the offset of the cell in `ctx.region`
     /// `offset` is only used if there is a single advice column
-    fn enable_lookup<'a>(&self, ctx: &mut Context<'a, F>, acell: AssignedValue<'a, F>) {
+    fn enable_lookup<'a>(&self, ctx: &mut Context<'a, F>, acell: AssignedValue<F>) {
         let phase = ctx.current_phase();
         if let Some(q) = &self.q_lookup[phase] {
             q.enable(&mut ctx.region, acell.row()).expect("enable selector should not fail");
@@ -184,9 +184,9 @@ impl<F: ScalarField> RangeConfig<F> {
     fn range_check_simple<'a>(
         &self,
         ctx: &mut Context<'a, F>,
-        a: &AssignedValue<'a, F>,
+        a: &AssignedValue<F>,
         range_bits: usize,
-        limbs_assigned: &mut Vec<AssignedValue<'a, F>>,
+        limbs_assigned: &mut Vec<AssignedValue<F>>,
     ) {
         let k = (range_bits + self.lookup_bits - 1) / self.lookup_bits;
         // println!("range check {} bits {} len", range_bits, k);
@@ -258,9 +258,9 @@ impl<F: ScalarField> RangeConfig<F> {
     pub fn range_check_limbs<'a>(
         &self,
         ctx: &mut Context<'a, F>,
-        a: &AssignedValue<'a, F>,
+        a: &AssignedValue<F>,
         range_bits: usize,
-        limbs_assigned: &mut Vec<AssignedValue<'a, F>>,
+        limbs_assigned: &mut Vec<AssignedValue<F>>,
     ) {
         assert_ne!(range_bits, 0);
         #[cfg(feature = "display")]
@@ -283,9 +283,9 @@ impl<F: ScalarField> RangeConfig<F> {
     pub fn get_last_bit<'a>(
         &self,
         ctx: &mut Context<'a, F>,
-        a: &AssignedValue<'a, F>,
+        a: &AssignedValue<F>,
         limb_bits: usize,
-    ) -> AssignedValue<'a, F> {
+    ) -> AssignedValue<F> {
         let a_v = a.value();
         let bit_v = a_v.map(|a| {
             let a = a.to_repr()[0];
@@ -324,12 +324,7 @@ impl<F: ScalarField> RangeInstructions<F> for RangeConfig<F> {
         self.lookup_bits
     }
 
-    fn range_check<'a>(
-        &self,
-        ctx: &mut Context<'a, F>,
-        a: &AssignedValue<'a, F>,
-        range_bits: usize,
-    ) {
+    fn range_check<'a>(&self, ctx: &mut Context<'a, F>, a: &AssignedValue<F>, range_bits: usize) {
         let tmp = ctx.preallocated_vec_to_assign();
         self.range_check_limbs(ctx, a, range_bits, &mut tmp.as_ref().borrow_mut());
     }
@@ -338,8 +333,8 @@ impl<F: ScalarField> RangeInstructions<F> for RangeConfig<F> {
     fn check_less_than<'a>(
         &self,
         ctx: &mut Context<'a, F>,
-        a: QuantumCell<'_, 'a, F>,
-        b: QuantumCell<'_, 'a, F>,
+        a: QuantumCell<'_, F>,
+        b: QuantumCell<'_, F>,
         num_bits: usize,
     ) {
         let pow_of_two = self.gate.pow_of_two[num_bits];
@@ -382,10 +377,10 @@ impl<F: ScalarField> RangeInstructions<F> for RangeConfig<F> {
     fn is_less_than<'a>(
         &self,
         ctx: &mut Context<'a, F>,
-        a: QuantumCell<'_, 'a, F>,
-        b: QuantumCell<'_, 'a, F>,
+        a: QuantumCell<'_, F>,
+        b: QuantumCell<'_, F>,
         num_bits: usize,
-    ) -> AssignedValue<'a, F> {
+    ) -> AssignedValue<F> {
         // TODO: optimize this for PlonkPlus strategy
         let k = (num_bits + self.lookup_bits - 1) / self.lookup_bits;
         let padded_bits = k * self.lookup_bits;

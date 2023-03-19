@@ -14,11 +14,11 @@ use std::{cmp::max, iter};
 // same as carry_mod::crt but `out = 0` so no need to range check
 //
 // Assumption: the leading two bits (in big endian) are 1, and `a.max_size <= 2^{n * k - 1 + F::NUM_BITS - 2}` (A weaker assumption is also enough)
-pub fn crt<'a, F: PrimeField>(
+pub fn crt<F: PrimeField>(
     range: &impl RangeInstructions<F>,
     // chip: &BigIntConfig<F>,
-    ctx: &mut Context<'a, F>,
-    a: &CRTInteger<'a, F>,
+    ctx: &mut Context<'_, F>,
+    a: &CRTInteger<F>,
     k_bits: usize, // = a.len().bits()
     modulus: &BigInt,
     mod_vec: &[F],
@@ -139,12 +139,7 @@ pub fn crt<'a, F: PrimeField>(
             // | quot_cell | 2^n | 1 | quot_cell + 2^n |
             range.gate().assign_region_last(
                 ctx,
-                vec![
-                    Existing(quot_cell),
-                    Constant(limb_base),
-                    Constant(F::ONE),
-                    Witness(out_val),
-                ],
+                vec![Existing(quot_cell), Constant(limb_base), Constant(F::ONE), Witness(out_val)],
                 vec![(0, None)],
             )
         };

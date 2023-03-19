@@ -189,12 +189,12 @@ impl<F: ScalarField> FlexGateConfig<F> {
         }
     }
 
-    pub fn inner_product_simple<'a, 'b: 'a>(
+    pub fn inner_product_simple<'a>(
         &self,
         ctx: &mut Context<'_, F>,
-        a: impl IntoIterator<Item = QuantumCell<'a, 'b, F>>,
-        b: impl IntoIterator<Item = QuantumCell<'a, 'b, F>>,
-    ) -> AssignedValue<'b, F> {
+        a: impl IntoIterator<Item = QuantumCell<'a, F>>,
+        b: impl IntoIterator<Item = QuantumCell<'a, F>>,
+    ) -> AssignedValue<F> {
         let mut sum;
         let mut a = a.into_iter();
         let mut b = b.into_iter().peekable();
@@ -220,12 +220,12 @@ impl<F: ScalarField> FlexGateConfig<F> {
         self.assign_region_last(ctx, cells, gate_offsets)
     }
 
-    pub fn inner_product_simple_with_assignments<'a, 'b: 'a>(
+    pub fn inner_product_simple_with_assignments<'a>(
         &self,
         ctx: &mut Context<'_, F>,
-        a: impl IntoIterator<Item = QuantumCell<'a, 'b, F>>,
-        b: impl IntoIterator<Item = QuantumCell<'a, 'b, F>>,
-    ) -> (Vec<AssignedValue<'b, F>>, AssignedValue<'b, F>) {
+        a: impl IntoIterator<Item = QuantumCell<'a, F>>,
+        b: impl IntoIterator<Item = QuantumCell<'a, F>>,
+    ) -> (Vec<AssignedValue<F>>, AssignedValue<F>) {
         let mut sum;
         let mut a = a.into_iter();
         let mut b = b.into_iter().peekable();
@@ -253,12 +253,12 @@ impl<F: ScalarField> FlexGateConfig<F> {
         (assignments, last)
     }
 
-    fn inner_product_with_assignments<'a, 'b: 'a>(
+    fn inner_product_with_assignments<'a>(
         &self,
         ctx: &mut Context<'_, F>,
-        a: impl IntoIterator<Item = QuantumCell<'a, 'b, F>>,
-        b: impl IntoIterator<Item = QuantumCell<'a, 'b, F>>,
-    ) -> (Vec<AssignedValue<'b, F>>, AssignedValue<'b, F>) {
+        a: impl IntoIterator<Item = QuantumCell<'a, F>>,
+        b: impl IntoIterator<Item = QuantumCell<'a, F>>,
+    ) -> (Vec<AssignedValue<F>>, AssignedValue<F>) {
         // we will do special handling of the cases where one of the vectors is all constants
         match self.strategy {
             GateStrategy::PlonkPlus => {
@@ -353,13 +353,13 @@ impl<F: ScalarField> GateInstructions<F> for FlexGateConfig<F> {
     /// * gate_index can either be set if you know the specific column you want to assign to, or None if you want to auto-select index
     /// * only selects from advice columns in `ctx.current_phase`
     // same as `assign_region` except you can specify the `phase` to assign in
-    fn assign_region_in<'a, 'b: 'a>(
+    fn assign_region_in<'a>(
         &self,
         ctx: &mut Context<'_, F>,
-        inputs: impl IntoIterator<Item = QuantumCell<'a, 'b, F>>,
+        inputs: impl IntoIterator<Item = QuantumCell<'a, F>>,
         gate_offsets: impl IntoIterator<Item = (isize, Option<[F; 3]>)>,
         phase: usize,
-    ) -> Vec<AssignedValue<'b, F>> {
+    ) -> Vec<AssignedValue<F>> {
         // We enforce the pattern that you should assign everything in current phase at once and then move onto next phase
         debug_assert_eq!(phase, ctx.current_phase());
 
@@ -440,13 +440,13 @@ impl<F: ScalarField> GateInstructions<F> for FlexGateConfig<F> {
         assignments
     }
 
-    fn assign_region_last_in<'a, 'b: 'a>(
+    fn assign_region_last_in<'a>(
         &self,
         ctx: &mut Context<'_, F>,
-        inputs: impl IntoIterator<Item = QuantumCell<'a, 'b, F>>,
+        inputs: impl IntoIterator<Item = QuantumCell<'a, F>>,
         gate_offsets: impl IntoIterator<Item = (isize, Option<[F; 3]>)>,
         phase: usize,
-    ) -> AssignedValue<'b, F> {
+    ) -> AssignedValue<F> {
         // We enforce the pattern that you should assign everything in current phase at once and then move onto next phase
         debug_assert_eq!(phase, ctx.current_phase());
 
@@ -529,12 +529,12 @@ impl<F: ScalarField> GateInstructions<F> for FlexGateConfig<F> {
     // Takes two vectors of `QuantumCell` and constrains a witness output to the inner product of `<vec_a, vec_b>`
     // outputs are (assignments except last, out_cell)
     // Currently the only places `assignments` is used are: `num_to_bits, range_check, carry_mod, check_carry_mod_to_zero`
-    fn inner_product<'a, 'b: 'a>(
+    fn inner_product<'a>(
         &self,
         ctx: &mut Context<'_, F>,
-        a: impl IntoIterator<Item = QuantumCell<'a, 'b, F>>,
-        b: impl IntoIterator<Item = QuantumCell<'a, 'b, F>>,
-    ) -> AssignedValue<'b, F> {
+        a: impl IntoIterator<Item = QuantumCell<'a, F>>,
+        b: impl IntoIterator<Item = QuantumCell<'a, F>>,
+    ) -> AssignedValue<F> {
         // we will do special handling of the cases where one of the vectors is all constants
         match self.strategy {
             GateStrategy::PlonkPlus => {
@@ -545,12 +545,12 @@ impl<F: ScalarField> GateInstructions<F> for FlexGateConfig<F> {
         }
     }
 
-    fn inner_product_with_sums<'a, 'b: 'a>(
+    fn inner_product_with_sums<'a>(
         &self,
         ctx: &mut Context<'_, F>,
-        a: impl IntoIterator<Item = QuantumCell<'a, 'b, F>>,
-        b: impl IntoIterator<Item = QuantumCell<'a, 'b, F>>,
-    ) -> Box<dyn Iterator<Item = AssignedValue<'b, F>> + 'b> {
+        a: impl IntoIterator<Item = QuantumCell<'a, F>>,
+        b: impl IntoIterator<Item = QuantumCell<'a, F>>,
+    ) -> Box<dyn Iterator<Item = AssignedValue<F>>> {
         let mut b = b.into_iter().peekable();
         let flag = matches!(b.peek(), Some(&Constant(c)) if c == F::ONE);
         let (assignments_without_last, last) =
@@ -563,13 +563,13 @@ impl<F: ScalarField> GateInstructions<F> for FlexGateConfig<F> {
         }
     }
 
-    fn inner_product_left<'a, 'b: 'a>(
+    fn inner_product_left<'a>(
         &self,
         ctx: &mut Context<'_, F>,
-        a: impl IntoIterator<Item = QuantumCell<'a, 'b, F>>,
-        b: impl IntoIterator<Item = QuantumCell<'a, 'b, F>>,
-        a_assigned: &mut Vec<AssignedValue<'b, F>>,
-    ) -> AssignedValue<'b, F> {
+        a: impl IntoIterator<Item = QuantumCell<'a, F>>,
+        b: impl IntoIterator<Item = QuantumCell<'a, F>>,
+        a_assigned: &mut Vec<AssignedValue<F>>,
+    ) -> AssignedValue<F> {
         match self.strategy {
             GateStrategy::PlonkPlus => {
                 let a = a.into_iter();
@@ -671,12 +671,12 @@ impl<F: ScalarField> GateInstructions<F> for FlexGateConfig<F> {
         }
     }
 
-    fn sum_products_with_coeff_and_var<'a, 'b: 'a>(
+    fn sum_products_with_coeff_and_var<'a>(
         &self,
         ctx: &mut Context<'_, F>,
-        values: impl IntoIterator<Item = (F, QuantumCell<'a, 'b, F>, QuantumCell<'a, 'b, F>)>,
-        var: QuantumCell<'a, 'b, F>,
-    ) -> AssignedValue<'b, F> {
+        values: impl IntoIterator<Item = (F, QuantumCell<'a, F>, QuantumCell<'a, F>)>,
+        var: QuantumCell<'a, F>,
+    ) -> AssignedValue<F> {
         // TODO: optimize
         match self.strategy {
             GateStrategy::PlonkPlus => {
@@ -712,13 +712,13 @@ impl<F: ScalarField> GateInstructions<F> for FlexGateConfig<F> {
     /// assumes sel is boolean
     /// returns
     ///   a * sel + b * (1 - sel)
-    fn select<'v>(
+    fn select(
         &self,
         ctx: &mut Context<'_, F>,
-        a: QuantumCell<'_, 'v, F>,
-        b: QuantumCell<'_, 'v, F>,
-        sel: QuantumCell<'_, 'v, F>,
-    ) -> AssignedValue<'v, F> {
+        a: QuantumCell<'_, F>,
+        b: QuantumCell<'_, F>,
+        sel: QuantumCell<'_, F>,
+    ) -> AssignedValue<F> {
         let diff_val: Value<F> = a.value().zip(b.value()).map(|(a, b)| *a - b);
         let out_val = diff_val * sel.value() + b.value();
         match self.strategy {
@@ -765,13 +765,13 @@ impl<F: ScalarField> GateInstructions<F> for FlexGateConfig<F> {
 
     /// returns: a || (b && c)
     // | 1 - b c | b | c | 1 | a - 1 | 1 - b c | out | a - 1 | 1 | 1 | a |
-    fn or_and<'v>(
+    fn or_and(
         &self,
         ctx: &mut Context<'_, F>,
-        a: QuantumCell<'_, 'v, F>,
-        b: QuantumCell<'_, 'v, F>,
-        c: QuantumCell<'_, 'v, F>,
-    ) -> AssignedValue<'v, F> {
+        a: QuantumCell<'_, F>,
+        b: QuantumCell<'_, F>,
+        c: QuantumCell<'_, F>,
+    ) -> AssignedValue<F> {
         let bc_val = b.value().zip(c.value()).map(|(b, c)| *b * c);
         let not_bc_val = bc_val.map(|x| F::ONE - x);
         let not_a_val = a.value().map(|x| *x - F::ONE);
@@ -795,12 +795,12 @@ impl<F: ScalarField> GateInstructions<F> for FlexGateConfig<F> {
     }
 
     // returns little-endian bit vectors
-    fn num_to_bits<'v>(
+    fn num_to_bits(
         &self,
         ctx: &mut Context<'_, F>,
-        a: &AssignedValue<'v, F>,
+        a: &AssignedValue<F>,
         range_bits: usize,
-    ) -> Vec<AssignedValue<'v, F>> {
+    ) -> Vec<AssignedValue<F>> {
         let bits = a
             .value()
             .map(|a| {
@@ -827,12 +827,7 @@ impl<F: ScalarField> GateInstructions<F> for FlexGateConfig<F> {
         for bit_cell in &bit_cells {
             self.assign_region(
                 ctx,
-                vec![
-                    Constant(F::ZERO),
-                    Existing(bit_cell),
-                    Existing(bit_cell),
-                    Existing(bit_cell),
-                ],
+                vec![Constant(F::ZERO), Existing(bit_cell), Existing(bit_cell), Existing(bit_cell)],
                 vec![(0, None)],
             );
         }

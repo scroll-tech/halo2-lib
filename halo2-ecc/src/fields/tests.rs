@@ -3,13 +3,13 @@ mod fp {
         fp::{FpConfig, FpStrategy},
         FieldChip,
     };
+    use crate::halo2_proofs::group::ff::Field;
     use crate::halo2_proofs::{
         circuit::*,
         dev::MockProver,
         halo2curves::bn256::{Fq, Fr},
         plonk::*,
     };
-    use crate::halo2_proofs::group::ff::Field;
     use halo2_base::{
         utils::{fe_to_biguint, modulus, PrimeField},
         SKIP_FIRST_PASS,
@@ -89,9 +89,7 @@ mod fp {
 
                     #[cfg(feature = "display")]
                     {
-                        println!(
-                            "Using {NUM_ADVICE} advice columns and {NUM_FIXED} fixed columns"
-                        );
+                        println!("Using {NUM_ADVICE} advice columns and {NUM_FIXED} fixed columns");
                         println!("total cells: {}", ctx.total_advice);
 
                         let (const_rows, _) = ctx.fixed_stats();
@@ -222,9 +220,7 @@ mod fp12 {
 
                     #[cfg(feature = "display")]
                     {
-                        println!(
-                            "Using {NUM_ADVICE} advice columns and {NUM_FIXED} fixed columns"
-                        );
+                        println!("Using {NUM_ADVICE} advice columns and {NUM_FIXED} fixed columns");
                         println!("total advice cells: {}", ctx.total_advice);
 
                         let (const_rows, _) = ctx.fixed_stats();

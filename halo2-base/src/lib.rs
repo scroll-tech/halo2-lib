@@ -55,15 +55,15 @@ pub mod utils;
 pub const SKIP_FIRST_PASS: bool = true;
 
 #[derive(Clone, Debug)]
-pub enum QuantumCell<'a, 'b: 'a, F: ScalarField> {
-    Existing(&'a AssignedValue<'b, F>),
-    ExistingOwned(AssignedValue<'b, F>), // this is similar to the Cow enum
+pub enum QuantumCell<'a, F: ScalarField> {
+    Existing(&'a AssignedValue<F>),
+    ExistingOwned(AssignedValue<F>), // this is similar to the Cow enum
     Witness(Value<F>),
     WitnessFraction(Value<Assigned<F>>),
     Constant(F),
 }
 
-impl<F: ScalarField> QuantumCell<'_, '_, F> {
+impl<F: ScalarField> QuantumCell<'_, F> {
     pub fn value(&self) -> Value<&F> {
         match self {
             Self::Existing(a) => a.value(),
@@ -78,7 +78,7 @@ impl<F: ScalarField> QuantumCell<'_, '_, F> {
 }
 
 #[derive(Clone, Debug)]
-pub struct AssignedValue<'a, F: ScalarField> {
+pub struct AssignedValue<F: ScalarField> {
     // #[cfg(feature = "halo2-axiom")]
     // pub cell: AssignedCell<&'a Assigned<F>, F>,
     #[cfg(feature = "halo2-pse")]
@@ -88,13 +88,13 @@ pub struct AssignedValue<'a, F: ScalarField> {
     #[cfg(feature = "halo2-pse")]
     pub row_offset: usize,
     #[cfg(feature = "halo2-pse")]
-    pub _marker: PhantomData<&'a F>,
+    pub _marker: PhantomData<F>,
 
     #[cfg(feature = "display")]
     pub context_id: usize,
 }
 
-impl<'a, F: ScalarField> AssignedValue<'a, F> {
+impl<F: ScalarField> AssignedValue<F> {
     #[cfg(feature = "display")]
     pub fn context_id(&self) -> usize {
         self.context_id
@@ -136,7 +136,7 @@ impl<'a, F: ScalarField> AssignedValue<'a, F> {
     }
 
     // #[cfg(feature = "halo2-axiom")]
-    // pub fn copy_advice<'v>(
+    // pub fn copy_advice(
     //     &'a self,
     //     region: &mut Region<'_, F>,
     //     column: Column<Advice>,
@@ -152,7 +152,7 @@ impl<'a, F: ScalarField> AssignedValue<'a, F> {
 
     #[cfg(feature = "halo2-pse")]
     pub fn copy_advice(
-        &'a self,
+        &self,
         region: &mut Region<'_, F>,
         column: Column<Advice>,
         offset: usize,
@@ -189,7 +189,7 @@ pub struct Context<'a, F: ScalarField> {
     // To save time from re-allocating new temporary vectors that get quickly dropped (e.g., for some range checks), we keep a vector with high capacity around that we `clear` before use each time
     // Need to use RefCell to avoid borrow rules
     // Need to use Rc to borrow this and mutably borrow self at same time
-    preallocated_vec_to_assign: Rc<RefCell<Vec<AssignedValue<'a, F>>>>,
+    preallocated_vec_to_assign: Rc<RefCell<Vec<AssignedValue<F>>>>,
 
     // `assigned_constants` is a HashMap keeping track of all constants that we use throughout
     // we assign them to fixed columns as we go, re-using a fixed cell if the constant value has been assigned previously
@@ -203,10 +203,10 @@ pub struct Context<'a, F: ScalarField> {
     #[cfg(feature = "halo2-pse")]
     pub assigned_constants: FxHashMap<Vec<u8>, Cell>,
 
-    pub zero_cell: Option<AssignedValue<'a, F>>,
+    pub zero_cell: Option<AssignedValue<F>>,
 
     // `cells_to_lookup` is a vector keeping track of all cells that we want to enable lookup for. When there is more than 1 advice column we will copy_advice all of these cells to the single lookup enabled column and do lookups there
-    pub cells_to_lookup: Vec<AssignedValue<'a, F>>,
+    pub cells_to_lookup: Vec<AssignedValue<F>>,
 
     current_phase: usize,
 
@@ -273,7 +273,7 @@ impl<'a, F: ScalarField> Context<'a, F> {
         }
     }
 
-    pub fn preallocated_vec_to_assign(&self) -> Rc<RefCell<Vec<AssignedValue<'a, F>>>> {
+    pub fn preallocated_vec_to_assign(&self) -> Rc<RefCell<Vec<AssignedValue<F>>>> {
         Rc::clone(&self.preallocated_vec_to_assign)
     }
 
@@ -364,13 +364,13 @@ impl<'a, F: ScalarField> Context<'a, F> {
 
     // /// Assuming that this is only called if ctx.region is not in shape mode!
     // #[cfg(feature = "halo2-axiom")]
-    // pub fn assign_cell<'v>(
+    // pub fn assign_cell(
     //     &mut self,
     //     input: QuantumCell<'_, 'v, F>,
     //     column: Column<Advice>,
     //     #[cfg(feature = "display")] context_id: usize,
     //     row_offset: usize,
-    // ) -> AssignedValue<'v, F> {
+    // ) -> AssignedValue<F> {
     //     match input {
     //         QuantumCell::Existing(acell) => {
     //             AssignedValue {
@@ -429,14 +429,14 @@ impl<'a, F: ScalarField> Context<'a, F> {
     // }
 
     #[cfg(feature = "halo2-pse")]
-    pub fn assign_cell<'v>(
+    pub fn assign_cell(
         &mut self,
-        input: QuantumCell<'_, 'v, F>,
+        input: QuantumCell<'_, F>,
         column: Column<Advice>,
         #[cfg(feature = "display")] context_id: usize,
         row_offset: usize,
         _phase: u8,
-    ) -> AssignedValue<'v, F> {
+    ) -> AssignedValue<F> {
         match input {
             QuantumCell::Existing(acell) => {
                 AssignedValue {
@@ -564,7 +564,7 @@ impl<'a, F: ScalarField> Context<'a, F> {
 }
 
 #[derive(Clone, Debug)]
-pub struct AssignedPrimitive<'a, T: Into<u64> + Copy, F: ScalarField> {
+pub struct AssignedPrimitive<T: Into<u64> + Copy, F: ScalarField> {
     pub value: Value<T>,
 
     // #[cfg(feature = "halo2-axiom")]
@@ -574,5 +574,5 @@ pub struct AssignedPrimitive<'a, T: Into<u64> + Copy, F: ScalarField> {
     #[cfg(feature = "halo2-pse")]
     _row_offset: usize,
     #[cfg(feature = "halo2-pse")]
-    _marker: PhantomData<&'a F>,
+    _marker: PhantomData<F>,
 }

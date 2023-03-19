@@ -1,6 +1,6 @@
 #![allow(non_snake_case)]
-use ark_std::{end_timer, start_timer};
 use crate::halo2_proofs::group::Curve;
+use ark_std::{end_timer, start_timer};
 use serde::{Deserialize, Serialize};
 use std::io::Write;
 use std::marker::PhantomData;

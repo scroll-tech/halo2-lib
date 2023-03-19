@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 use crate::bigint::CRTInteger;
 use crate::fields::{fp::FpConfig, FieldChip, PrimeFieldChip, Selectable};
-use crate::halo2_proofs::{arithmetic::CurveAffine, circuit::Value};
 use crate::halo2_proofs::group::{Curve, Group};
+use crate::halo2_proofs::{arithmetic::CurveAffine, circuit::Value};
 use halo2_base::{
     gates::{GateInstructions, RangeInstructions},
     utils::{modulus, CurveAffineExt, PrimeField},
@@ -60,11 +60,11 @@ impl<F: PrimeField, FieldPoint: Clone> EcPoint<F, FieldPoint> {
 /// For optimization reasons, we assume that if you are using this with `is_strict = true`, then you have already called `chip.enforce_less_than_p` on both `P.x` and `P.y`
 pub fn ec_add_unequal<'v, F: PrimeField, FC: FieldChip<F>>(
     chip: &FC,
-    ctx: &mut Context<'v, F>,
-    P: &EcPoint<F, FC::FieldPoint<'v>>,
-    Q: &EcPoint<F, FC::FieldPoint<'v>>,
+    ctx: &mut Context<'_, F>,
+    P: &EcPoint<F, FC::FieldPoint>,
+    Q: &EcPoint<F, FC::FieldPoint>,
     is_strict: bool,
-) -> EcPoint<F, FC::FieldPoint<'v>> {
+) -> EcPoint<F, FC::FieldPoint> {
     if is_strict {
         // constrains that P.x != Q.x
         let x_is_equal = chip.is_equal_unenforced(ctx, &P.x, &Q.x);
@@ -102,11 +102,11 @@ pub fn ec_add_unequal<'v, F: PrimeField, FC: FieldChip<F>>(
 /// For optimization reasons, we assume that if you are using this with `is_strict = true`, then you have already called `chip.enforce_less_than_p` on both `P.x` and `P.y`
 pub fn ec_sub_unequal<'v, F: PrimeField, FC: FieldChip<F>>(
     chip: &FC,
-    ctx: &mut Context<'v, F>,
-    P: &EcPoint<F, FC::FieldPoint<'v>>,
-    Q: &EcPoint<F, FC::FieldPoint<'v>>,
+    ctx: &mut Context<'_, F>,
+    P: &EcPoint<F, FC::FieldPoint>,
+    Q: &EcPoint<F, FC::FieldPoint>,
     is_strict: bool,
-) -> EcPoint<F, FC::FieldPoint<'v>> {
+) -> EcPoint<F, FC::FieldPoint> {
     if is_strict {
         // constrains that P.x != Q.x
         let x_is_equal = chip.is_equal_unenforced(ctx, &P.x, &Q.x);
@@ -152,9 +152,9 @@ pub fn ec_sub_unequal<'v, F: PrimeField, FC: FieldChip<F>>(
 //                 y_3 = lambda (x - x_3) - y (mod p)
 pub fn ec_double<'v, F: PrimeField, FC: FieldChip<F>>(
     chip: &FC,
-    ctx: &mut Context<'v, F>,
-    P: &EcPoint<F, FC::FieldPoint<'v>>,
-) -> EcPoint<F, FC::FieldPoint<'v>> {
+    ctx: &mut Context<'_, F>,
+    P: &EcPoint<F, FC::FieldPoint>,
+) -> EcPoint<F, FC::FieldPoint> {
     // removed optimization that computes `2 * lambda` while assigning witness to `lambda` simultaneously, in favor of readability. The difference is just copying `lambda` once
     let two_y = chip.scalar_mul_no_carry(ctx, &P.y, 2);
     let three_x = chip.scalar_mul_no_carry(ctx, &P.x, 3);
@@ -179,12 +179,12 @@ pub fn ec_double<'v, F: PrimeField, FC: FieldChip<F>>(
 pub fn ec_select<'v, F: PrimeField, FC>(
     chip: &FC,
     ctx: &mut Context<'_, F>,
-    P: &EcPoint<F, FC::FieldPoint<'v>>,
-    Q: &EcPoint<F, FC::FieldPoint<'v>>,
-    sel: &AssignedValue<'v, F>,
-) -> EcPoint<F, FC::FieldPoint<'v>>
+    P: &EcPoint<F, FC::FieldPoint>,
+    Q: &EcPoint<F, FC::FieldPoint>,
+    sel: &AssignedValue<F>,
+) -> EcPoint<F, FC::FieldPoint>
 where
-    FC: FieldChip<F> + Selectable<F, Point<'v> = FC::FieldPoint<'v>>,
+    FC: FieldChip<F> + Selectable<F, Point = FC::FieldPoint>,
 {
     let Rx = chip.select(ctx, &P.x, &Q.x, sel);
     let Ry = chip.select(ctx, &P.y, &Q.y, sel);
@@ -196,11 +196,11 @@ where
 pub fn ec_select_by_indicator<'v, F: PrimeField, FC>(
     chip: &FC,
     ctx: &mut Context<'_, F>,
-    points: &[EcPoint<F, FC::FieldPoint<'v>>],
-    coeffs: &[AssignedValue<'v, F>],
-) -> EcPoint<F, FC::FieldPoint<'v>>
+    points: &[EcPoint<F, FC::FieldPoint>],
+    coeffs: &[AssignedValue<F>],
+) -> EcPoint<F, FC::FieldPoint>
 where
-    FC: FieldChip<F> + Selectable<F, Point<'v> = FC::FieldPoint<'v>>,
+    FC: FieldChip<F> + Selectable<F, Point = FC::FieldPoint>,
 {
     let x_coords = points.iter().map(|P| P.x.clone()).collect::<Vec<_>>();
     let y_coords = points.iter().map(|P| P.y.clone()).collect::<Vec<_>>();
@@ -213,11 +213,11 @@ where
 pub fn ec_select_from_bits<'v, F: PrimeField, FC>(
     chip: &FC,
     ctx: &mut Context<'_, F>,
-    points: &[EcPoint<F, FC::FieldPoint<'v>>],
-    sel: &[AssignedValue<'v, F>],
-) -> EcPoint<F, FC::FieldPoint<'v>>
+    points: &[EcPoint<F, FC::FieldPoint>],
+    sel: &[AssignedValue<F>],
+) -> EcPoint<F, FC::FieldPoint>
 where
-    FC: FieldChip<F> + Selectable<F, Point<'v> = FC::FieldPoint<'v>>,
+    FC: FieldChip<F> + Selectable<F, Point = FC::FieldPoint>,
 {
     let w = sel.len();
     let num_points = points.len();
@@ -236,14 +236,14 @@ where
 //   * P has order given by the scalar field modulus
 pub fn scalar_multiply<'v, F: PrimeField, FC>(
     chip: &FC,
-    ctx: &mut Context<'v, F>,
-    P: &EcPoint<F, FC::FieldPoint<'v>>,
-    scalar: &Vec<AssignedValue<'v, F>>,
+    ctx: &mut Context<'_, F>,
+    P: &EcPoint<F, FC::FieldPoint>,
+    scalar: &Vec<AssignedValue<F>>,
     max_bits: usize,
     window_bits: usize,
-) -> EcPoint<F, FC::FieldPoint<'v>>
+) -> EcPoint<F, FC::FieldPoint>
 where
-    FC: FieldChip<F> + Selectable<F, Point<'v> = FC::FieldPoint<'v>>,
+    FC: FieldChip<F> + Selectable<F, Point = FC::FieldPoint>,
 {
     assert!(!scalar.is_empty());
     assert!((max_bits as u64) <= modulus::<F>().bits());
@@ -337,8 +337,8 @@ where
 
 pub fn is_on_curve<'v, F, FC, C>(
     chip: &FC,
-    ctx: &mut Context<'v, F>,
-    P: &EcPoint<F, FC::FieldPoint<'v>>,
+    ctx: &mut Context<'_, F>,
+    P: &EcPoint<F, FC::FieldPoint>,
 ) where
     F: PrimeField,
     FC: FieldChip<F>,
@@ -356,8 +356,8 @@ pub fn is_on_curve<'v, F, FC, C>(
 
 pub fn load_random_point<'v, F, FC, C>(
     chip: &FC,
-    ctx: &mut Context<'v, F>,
-) -> EcPoint<F, FC::FieldPoint<'v>>
+    ctx: &mut Context<'_, F>,
+) -> EcPoint<F, FC::FieldPoint>
 where
     F: PrimeField,
     FC: FieldChip<F>,
@@ -385,14 +385,14 @@ where
 // - each `scalar` in `scalars` satisfies same assumptions as in `scalar_multiply` above
 pub fn multi_scalar_multiply<'v, F: PrimeField, FC, C>(
     chip: &FC,
-    ctx: &mut Context<'v, F>,
-    P: &[EcPoint<F, FC::FieldPoint<'v>>],
-    scalars: &[Vec<AssignedValue<'v, F>>],
+    ctx: &mut Context<'_, F>,
+    P: &[EcPoint<F, FC::FieldPoint>],
+    scalars: &[Vec<AssignedValue<F>>],
     max_bits: usize,
     window_bits: usize,
-) -> EcPoint<F, FC::FieldPoint<'v>>
+) -> EcPoint<F, FC::FieldPoint>
 where
-    FC: FieldChip<F> + Selectable<F, Point<'v> = FC::FieldPoint<'v>>,
+    FC: FieldChip<F> + Selectable<F, Point = FC::FieldPoint>,
     C: CurveAffineExt<Base = FC::FieldType>,
 {
     let k = P.len();
@@ -481,9 +481,8 @@ where
         for _ in 0..window_bits {
             curr_point = ec_double(chip, ctx, &curr_point);
         }
-        for (cached_points, rounded_bits) in cached_points
-            .chunks(cache_size)
-            .zip(rounded_bits.chunks(rounded_bitlen))
+        for (cached_points, rounded_bits) in
+            cached_points.chunks(cache_size).zip(rounded_bits.chunks(rounded_bitlen))
         {
             let add_point = ec_select_from_bits::<F, FC>(
                 chip,
@@ -566,11 +565,11 @@ impl<F: PrimeField, FC: FieldChip<F>> EccChip<F, FC> {
         &self.field_chip
     }
 
-    pub fn load_private<'v>(
+    pub fn load_private(
         &self,
         ctx: &mut Context<'_, F>,
         point: (Value<FC::FieldType>, Value<FC::FieldType>),
-    ) -> EcPoint<F, FC::FieldPoint<'v>> {
+    ) -> EcPoint<F, FC::FieldPoint> {
         let (x, y) = (FC::fe_to_witness(&point.0), FC::fe_to_witness(&point.1));
 
         let x_assigned = self.field_chip.load_private(ctx, x);
@@ -584,7 +583,7 @@ impl<F: PrimeField, FC: FieldChip<F>> EccChip<F, FC> {
         &self,
         ctx: &mut Context<'_, F>,
         g: Value<C>,
-    ) -> EcPoint<F, FC::FieldPoint<'v>>
+    ) -> EcPoint<F, FC::FieldPoint>
     where
         C: CurveAffineExt<Base = FC::FieldType>,
     {
@@ -596,7 +595,7 @@ impl<F: PrimeField, FC: FieldChip<F>> EccChip<F, FC> {
         &self,
         ctx: &mut Context<'_, F>,
         g: C,
-    ) -> EcPoint<F, FC::FieldPoint<'v>>
+    ) -> EcPoint<F, FC::FieldPoint>
     where
         C: CurveAffineExt<Base = FC::FieldType>,
     {
@@ -608,10 +607,7 @@ impl<F: PrimeField, FC: FieldChip<F>> EccChip<F, FC> {
         EcPoint::construct(x, y)
     }
 
-    pub fn load_random_point<'v, C>(
-        &self,
-        ctx: &mut Context<'v, F>,
-    ) -> EcPoint<F, FC::FieldPoint<'v>>
+    pub fn load_random_point<'v, C>(&self, ctx: &mut Context<'_, F>) -> EcPoint<F, FC::FieldPoint>
     where
         C: CurveAffineExt<Base = FC::FieldType>,
     {
@@ -620,8 +616,8 @@ impl<F: PrimeField, FC: FieldChip<F>> EccChip<F, FC> {
 
     pub fn assert_is_on_curve<'v, C>(
         &self,
-        ctx: &mut Context<'v, F>,
-        P: &EcPoint<F, FC::FieldPoint<'v>>,
+        ctx: &mut Context<'_, F>,
+        P: &EcPoint<F, FC::FieldPoint>,
     ) where
         C: CurveAffine<Base = FC::FieldType>,
     {
@@ -630,9 +626,9 @@ impl<F: PrimeField, FC: FieldChip<F>> EccChip<F, FC> {
 
     pub fn is_on_curve_or_infinity<'v, C>(
         &self,
-        ctx: &mut Context<'v, F>,
-        P: &EcPoint<F, FC::FieldPoint<'v>>,
-    ) -> AssignedValue<'v, F>
+        ctx: &mut Context<'_, F>,
+        P: &EcPoint<F, FC::FieldPoint>,
+    ) -> AssignedValue<F>
     where
         C: CurveAffine<Base = FC::FieldType>,
         C::Base: crate::halo2_proofs::ff::PrimeField,
@@ -659,63 +655,63 @@ impl<F: PrimeField, FC: FieldChip<F>> EccChip<F, FC> {
         )
     }
 
-    pub fn negate<'v>(
+    pub fn negate(
         &self,
-        ctx: &mut Context<'v, F>,
-        P: &EcPoint<F, FC::FieldPoint<'v>>,
-    ) -> EcPoint<F, FC::FieldPoint<'v>> {
+        ctx: &mut Context<'_, F>,
+        P: &EcPoint<F, FC::FieldPoint>,
+    ) -> EcPoint<F, FC::FieldPoint> {
         EcPoint::construct(P.x.clone(), self.field_chip.negate(ctx, &P.y))
     }
 
     /// Assumes that P.x != Q.x
     /// If `is_strict == true`, then actually constrains that `P.x != Q.x`
-    pub fn add_unequal<'v>(
+    pub fn add_unequal(
         &self,
-        ctx: &mut Context<'v, F>,
-        P: &EcPoint<F, FC::FieldPoint<'v>>,
-        Q: &EcPoint<F, FC::FieldPoint<'v>>,
+        ctx: &mut Context<'_, F>,
+        P: &EcPoint<F, FC::FieldPoint>,
+        Q: &EcPoint<F, FC::FieldPoint>,
         is_strict: bool,
-    ) -> EcPoint<F, FC::FieldPoint<'v>> {
+    ) -> EcPoint<F, FC::FieldPoint> {
         ec_add_unequal(&self.field_chip, ctx, P, Q, is_strict)
     }
 
     /// Assumes that P.x != Q.x
     /// Otherwise will panic
-    pub fn sub_unequal<'v>(
+    pub fn sub_unequal(
         &self,
-        ctx: &mut Context<'v, F>,
-        P: &EcPoint<F, FC::FieldPoint<'v>>,
-        Q: &EcPoint<F, FC::FieldPoint<'v>>,
+        ctx: &mut Context<'_, F>,
+        P: &EcPoint<F, FC::FieldPoint>,
+        Q: &EcPoint<F, FC::FieldPoint>,
         is_strict: bool,
-    ) -> EcPoint<F, FC::FieldPoint<'v>> {
+    ) -> EcPoint<F, FC::FieldPoint> {
         ec_sub_unequal(&self.field_chip, ctx, P, Q, is_strict)
     }
 
-    pub fn double<'v>(
+    pub fn double(
         &self,
-        ctx: &mut Context<'v, F>,
-        P: &EcPoint<F, FC::FieldPoint<'v>>,
-    ) -> EcPoint<F, FC::FieldPoint<'v>> {
+        ctx: &mut Context<'_, F>,
+        P: &EcPoint<F, FC::FieldPoint>,
+    ) -> EcPoint<F, FC::FieldPoint> {
         ec_double(&self.field_chip, ctx, P)
     }
 
-    pub fn is_equal<'v>(
+    pub fn is_equal(
         &self,
-        ctx: &mut Context<'v, F>,
-        P: &EcPoint<F, FC::FieldPoint<'v>>,
-        Q: &EcPoint<F, FC::FieldPoint<'v>>,
-    ) -> AssignedValue<'v, F> {
+        ctx: &mut Context<'_, F>,
+        P: &EcPoint<F, FC::FieldPoint>,
+        Q: &EcPoint<F, FC::FieldPoint>,
+    ) -> AssignedValue<F> {
         // TODO: optimize
         let x_is_equal = self.field_chip.is_equal(ctx, &P.x, &Q.x);
         let y_is_equal = self.field_chip.is_equal(ctx, &P.y, &Q.y);
         self.field_chip.range().gate().and(ctx, Existing(&x_is_equal), Existing(&y_is_equal))
     }
 
-    pub fn assert_equal<'v>(
+    pub fn assert_equal(
         &self,
-        ctx: &mut Context<'v, F>,
-        P: &EcPoint<F, FC::FieldPoint<'v>>,
-        Q: &EcPoint<F, FC::FieldPoint<'v>>,
+        ctx: &mut Context<'_, F>,
+        P: &EcPoint<F, FC::FieldPoint>,
+        Q: &EcPoint<F, FC::FieldPoint>,
     ) {
         self.field_chip.assert_equal(ctx, &P.x, &Q.x);
         self.field_chip.assert_equal(ctx, &P.y, &Q.y);
@@ -723,12 +719,12 @@ impl<F: PrimeField, FC: FieldChip<F>> EccChip<F, FC> {
 
     pub fn sum<'b, 'v: 'b, C>(
         &self,
-        ctx: &mut Context<'v, F>,
-        points: impl Iterator<Item = &'b EcPoint<F, FC::FieldPoint<'v>>>,
-    ) -> EcPoint<F, FC::FieldPoint<'v>>
+        ctx: &mut Context<'_, F>,
+        points: impl Iterator<Item = &'b EcPoint<F, FC::FieldPoint>>,
+    ) -> EcPoint<F, FC::FieldPoint>
     where
         C: CurveAffineExt<Base = FC::FieldType>,
-        FC::FieldPoint<'v>: 'b,
+        FC::FieldPoint: 'b,
     {
         let rand_point = self.load_random_point::<C>(ctx);
         self.field_chip.enforce_less_than(ctx, rand_point.x());
@@ -744,38 +740,38 @@ impl<F: PrimeField, FC: FieldChip<F>> EccChip<F, FC> {
 
 impl<F: PrimeField, FC: FieldChip<F>> EccChip<F, FC>
 where
-    for<'v> FC: Selectable<F, Point<'v> = FC::FieldPoint<'v>>,
+    FC: Selectable<F, Point = FC::FieldPoint>,
 {
-    pub fn select<'v>(
+    pub fn select(
         &self,
         ctx: &mut Context<'_, F>,
-        P: &EcPoint<F, FC::FieldPoint<'v>>,
-        Q: &EcPoint<F, FC::FieldPoint<'v>>,
-        condition: &AssignedValue<'v, F>,
-    ) -> EcPoint<F, FC::FieldPoint<'v>> {
+        P: &EcPoint<F, FC::FieldPoint>,
+        Q: &EcPoint<F, FC::FieldPoint>,
+        condition: &AssignedValue<F>,
+    ) -> EcPoint<F, FC::FieldPoint> {
         ec_select(&self.field_chip, ctx, P, Q, condition)
     }
 
-    pub fn scalar_mult<'v>(
+    pub fn scalar_mult(
         &self,
-        ctx: &mut Context<'v, F>,
-        P: &EcPoint<F, FC::FieldPoint<'v>>,
-        scalar: &Vec<AssignedValue<'v, F>>,
+        ctx: &mut Context<'_, F>,
+        P: &EcPoint<F, FC::FieldPoint>,
+        scalar: &Vec<AssignedValue<F>>,
         max_bits: usize,
         window_bits: usize,
-    ) -> EcPoint<F, FC::FieldPoint<'v>> {
+    ) -> EcPoint<F, FC::FieldPoint> {
         scalar_multiply::<F, FC>(&self.field_chip, ctx, P, scalar, max_bits, window_bits)
     }
 
     // TODO: put a check in place that scalar is < modulus of C::Scalar
     pub fn variable_base_msm<'v, C>(
         &self,
-        ctx: &mut Context<'v, F>,
-        P: &[EcPoint<F, FC::FieldPoint<'v>>],
-        scalars: &[Vec<AssignedValue<'v, F>>],
+        ctx: &mut Context<'_, F>,
+        P: &[EcPoint<F, FC::FieldPoint>],
+        scalars: &[Vec<AssignedValue<F>>],
         max_bits: usize,
         window_bits: usize,
-    ) -> EcPoint<F, FC::FieldPoint<'v>>
+    ) -> EcPoint<F, FC::FieldPoint>
     where
         C: CurveAffineExt<Base = FC::FieldType>,
         C::Base: crate::halo2_proofs::ff::PrimeField,
@@ -821,16 +817,16 @@ where
     // TODO: put a check in place that scalar is < modulus of C::Scalar
     pub fn fixed_base_scalar_mult<'v, C>(
         &self,
-        ctx: &mut Context<'v, F>,
+        ctx: &mut Context<'_, F>,
         point: &C,
-        scalar: &[AssignedValue<'v, F>],
+        scalar: &[AssignedValue<F>],
         max_bits: usize,
         window_bits: usize,
-    ) -> EcPoint<F, FC::FieldPoint<'v>>
+    ) -> EcPoint<F, FC::FieldPoint>
     where
         C: CurveAffineExt,
-        FC: PrimeFieldChip<F, FieldType = C::Base, FieldPoint<'v> = CRTInteger<'v, F>>
-            + Selectable<F, Point<'v> = FC::FieldPoint<'v>>,
+        FC: PrimeFieldChip<F, FieldType = C::Base, FieldPoint = CRTInteger<F>>
+            + Selectable<F, Point = FC::FieldPoint>,
     {
         fixed_base::scalar_multiply::<F, _, _>(
             &self.field_chip,
@@ -849,17 +845,17 @@ where
     /// The user should filter out base points that are identity beforehand; we do not separately do this here
     pub fn fixed_base_msm<'v, C>(
         &self,
-        ctx: &mut Context<'v, F>,
+        ctx: &mut Context<'_, F>,
         points: &[C],
-        scalars: &[Vec<AssignedValue<'v, F>>],
+        scalars: &[Vec<AssignedValue<F>>],
         max_scalar_bits_per_cell: usize,
         _radix: usize,
         clump_factor: usize,
-    ) -> EcPoint<F, FC::FieldPoint<'v>>
+    ) -> EcPoint<F, FC::FieldPoint>
     where
         C: CurveAffineExt,
-        FC: PrimeFieldChip<F, FieldType = C::Base, FieldPoint<'v> = CRTInteger<'v, F>>
-            + Selectable<F, Point<'v> = FC::FieldPoint<'v>>,
+        FC: PrimeFieldChip<F, FieldType = C::Base, FieldPoint = CRTInteger<F>>
+            + Selectable<F, Point = FC::FieldPoint>,
     {
         assert_eq!(points.len(), scalars.len());
         #[cfg(feature = "display")]
