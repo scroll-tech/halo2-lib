@@ -14,11 +14,11 @@ use std::{cmp::max, iter};
 // same as carry_mod::crt but `out = 0` so no need to range check
 //
 // Assumption: the leading two bits (in big endian) are 1, and `a.max_size <= 2^{n * k - 1 + F::NUM_BITS - 2}` (A weaker assumption is also enough)
-pub fn crt<'a, F: PrimeField>(
+pub fn crt<F: PrimeField>(
     range: &impl RangeInstructions<F>,
     // chip: &BigIntConfig<F>,
-    ctx: &mut Context<'a, F>,
-    a: &CRTInteger<'a, F>,
+    ctx: &mut Context<'_, F>,
+    a: &CRTInteger<F>,
     k_bits: usize, // = a.len().bits()
     modulus: &BigInt,
     mod_vec: &[F],
@@ -111,7 +111,7 @@ pub fn crt<'a, F: PrimeField>(
             let check_val = prod.value().zip(a_limb.value()).map(|(prod, a)| *prod - a);
             let check_cell = range.gate().assign_region_last(
                 ctx,
-                vec![Constant(-F::one()), Existing(a_limb), Witness(check_val)],
+                vec![Constant(-F::ONE), Existing(a_limb), Witness(check_val)],
                 vec![(-1, None)],
             );
 
@@ -139,12 +139,7 @@ pub fn crt<'a, F: PrimeField>(
             // | quot_cell | 2^n | 1 | quot_cell + 2^n |
             range.gate().assign_region_last(
                 ctx,
-                vec![
-                    Existing(quot_cell),
-                    Constant(limb_base),
-                    Constant(F::one()),
-                    Witness(out_val),
-                ],
+                vec![Existing(quot_cell), Constant(limb_base), Constant(F::ONE), Witness(out_val)],
                 vec![(0, None)],
             )
         };
@@ -179,7 +174,7 @@ pub fn crt<'a, F: PrimeField>(
     let _native_computation = range.gate().assign_region(
         ctx,
         vec![
-            Constant(F::zero()),
+            Constant(F::ZERO),
             Constant(mod_native),
             Existing(&quot_native_assigned),
             Existing(&a.native),

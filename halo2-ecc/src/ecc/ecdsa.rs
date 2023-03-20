@@ -16,14 +16,14 @@ use super::{ec_add_unequal, scalar_multiply, EcPoint};
 // Only valid when p is very close to n in size (e.g. for Secp256k1)
 pub fn ecdsa_verify_no_pubkey_check<'v, F: PrimeField, CF: PrimeField, SF: PrimeField, GA>(
     base_chip: &FpConfig<F, CF>,
-    ctx: &mut Context<'v, F>,
-    pubkey: &EcPoint<F, <FpConfig<F, CF> as FieldChip<F>>::FieldPoint<'v>>,
-    r: &CRTInteger<'v, F>,
-    s: &CRTInteger<'v, F>,
-    msghash: &CRTInteger<'v, F>,
+    ctx: &mut Context<'_, F>,
+    pubkey: &EcPoint<F, <FpConfig<F, CF> as FieldChip<F>>::FieldPoint>,
+    r: &CRTInteger<F>,
+    s: &CRTInteger<F>,
+    msghash: &CRTInteger<F>,
     var_window_bits: usize,
     fixed_window_bits: usize,
-) -> AssignedValue<'v, F>
+) -> AssignedValue<F>
 where
     GA: CurveAffineExt<Base = CF, ScalarExt = SF>,
 {

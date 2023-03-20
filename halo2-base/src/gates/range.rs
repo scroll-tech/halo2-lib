@@ -1,3 +1,10 @@
+use crate::halo2_proofs::{
+    circuit::{Layouter, Value},
+    plonk::{
+        Advice, Column, ConstraintSystem, Error, SecondPhase, Selector, TableColumn, ThirdPhase,
+    },
+    poly::Rotation,
+};
 use crate::{
     gates::{
         flex_gate::{FlexGateConfig, GateStrategy, MAX_PHASE},
@@ -6,16 +13,6 @@ use crate::{
     utils::{decompose_fe_to_u64_limbs, value_to_option, ScalarField},
     AssignedValue,
     QuantumCell::{self, Constant, Existing, Witness},
-};
-use crate::{
-    halo2_proofs::{
-        circuit::{Layouter, Value},
-        plonk::{
-            Advice, Column, ConstraintSystem, Error, SecondPhase, Selector, TableColumn, ThirdPhase,
-        },
-        poly::Rotation,
-    },
-    utils::PrimeField,
 };
 use std::cmp::Ordering;
 
@@ -43,7 +40,7 @@ pub struct RangeConfig<F: ScalarField> {
     pub q_lookup: Vec<Option<Selector>>,
     pub lookup: TableColumn,
     pub lookup_bits: usize,
-    pub limb_bases: Vec<QuantumCell<'static, 'static, F>>,
+    pub limb_bases: Vec<QuantumCell<'static, F>>,
     // selector for custom range gate
     // `q_range[k][i]` stores the selector for a custom range gate of length `k`
     // pub q_range: HashMap<usize, Vec<Selector>>,
@@ -105,7 +102,7 @@ impl<F: ScalarField> RangeConfig<F> {
         let mut running_base = limb_base;
         let num_bases = F::NUM_BITS as usize / lookup_bits;
         let mut limb_bases = Vec::with_capacity(num_bases + 1);
-        limb_bases.extend([Constant(F::one()), Constant(running_base)]);
+        limb_bases.extend([Constant(F::ONE), Constant(running_base)]);
         for _ in 2..=num_bases {
             running_base *= &limb_base;
             limb_bases.push(Constant(running_base));
@@ -174,7 +171,7 @@ impl<F: ScalarField> RangeConfig<F> {
     /// assuming this is called when ctx.region is not in shape mode
     /// `offset` is the offset of the cell in `ctx.region`
     /// `offset` is only used if there is a single advice column
-    fn enable_lookup<'a>(&self, ctx: &mut Context<'a, F>, acell: AssignedValue<'a, F>) {
+    fn enable_lookup<'a>(&self, ctx: &mut Context<'a, F>, acell: AssignedValue<F>) {
         let phase = ctx.current_phase();
         if let Some(q) = &self.q_lookup[phase] {
             q.enable(&mut ctx.region, acell.row()).expect("enable selector should not fail");
@@ -187,9 +184,9 @@ impl<F: ScalarField> RangeConfig<F> {
     fn range_check_simple<'a>(
         &self,
         ctx: &mut Context<'a, F>,
-        a: &AssignedValue<'a, F>,
+        a: &AssignedValue<F>,
         range_bits: usize,
-        limbs_assigned: &mut Vec<AssignedValue<'a, F>>,
+        limbs_assigned: &mut Vec<AssignedValue<F>>,
     ) {
         let k = (range_bits + self.lookup_bits - 1) / self.lookup_bits;
         // println!("range check {} bits {} len", range_bits, k);
@@ -220,7 +217,7 @@ impl<F: ScalarField> RangeConfig<F> {
                 ),
             };
             // the inner product above must equal `a`
-            ctx.region.constrain_equal(a.cell(), acc.cell());
+            ctx.region.constrain_equal(a.cell(), acc.cell()).unwrap();
         };
         assert_eq!(limbs_assigned.len(), k);
 
@@ -242,7 +239,7 @@ impl<F: ScalarField> RangeConfig<F> {
                 let check = self.gate.assign_region_last(
                     ctx,
                     vec![
-                        Constant(F::zero()),
+                        Constant(F::ZERO),
                         Existing(&limbs_assigned[k - 1]),
                         Constant(mult_val),
                         Witness(limbs_assigned[k - 1].value().map(|limb| mult_val * limb)),
@@ -261,9 +258,9 @@ impl<F: ScalarField> RangeConfig<F> {
     pub fn range_check_limbs<'a>(
         &self,
         ctx: &mut Context<'a, F>,
-        a: &AssignedValue<'a, F>,
+        a: &AssignedValue<F>,
         range_bits: usize,
-        limbs_assigned: &mut Vec<AssignedValue<'a, F>>,
+        limbs_assigned: &mut Vec<AssignedValue<F>>,
     ) {
         assert_ne!(range_bits, 0);
         #[cfg(feature = "display")]
@@ -286,16 +283,16 @@ impl<F: ScalarField> RangeConfig<F> {
     pub fn get_last_bit<'a>(
         &self,
         ctx: &mut Context<'a, F>,
-        a: &AssignedValue<'a, F>,
+        a: &AssignedValue<F>,
         limb_bits: usize,
-    ) -> AssignedValue<'a, F> {
+    ) -> AssignedValue<F> {
         let a_v = a.value();
         let bit_v = a_v.map(|a| {
-            let a = a.get_lower_32();
+            let a = a.to_repr()[0];
             if a ^ 1 == 0 {
-                F::zero()
+                F::ZERO
             } else {
-                F::one()
+                F::ONE
             }
         });
         let two = self.gate.get_field_element(2u64);
@@ -327,12 +324,7 @@ impl<F: ScalarField> RangeInstructions<F> for RangeConfig<F> {
         self.lookup_bits
     }
 
-    fn range_check<'a>(
-        &self,
-        ctx: &mut Context<'a, F>,
-        a: &AssignedValue<'a, F>,
-        range_bits: usize,
-    ) {
+    fn range_check<'a>(&self, ctx: &mut Context<'a, F>, a: &AssignedValue<F>, range_bits: usize) {
         let tmp = ctx.preallocated_vec_to_assign();
         self.range_check_limbs(ctx, a, range_bits, &mut tmp.as_ref().borrow_mut());
     }
@@ -341,8 +333,8 @@ impl<F: ScalarField> RangeInstructions<F> for RangeConfig<F> {
     fn check_less_than<'a>(
         &self,
         ctx: &mut Context<'a, F>,
-        a: QuantumCell<'_, 'a, F>,
-        b: QuantumCell<'_, 'a, F>,
+        a: QuantumCell<'_, F>,
+        b: QuantumCell<'_, F>,
         num_bits: usize,
     ) {
         let pow_of_two = self.gate.pow_of_two[num_bits];
@@ -353,10 +345,10 @@ impl<F: ScalarField> RangeInstructions<F> for RangeConfig<F> {
                 let cells = vec![
                     Witness(shift_a_val - b.value()),
                     b,
-                    Constant(F::one()),
+                    Constant(F::ONE),
                     Witness(shift_a_val),
                     Constant(-pow_of_two),
-                    Constant(F::one()),
+                    Constant(F::ONE),
                     a,
                 ];
                 let assigned_cells =
@@ -371,8 +363,8 @@ impl<F: ScalarField> RangeInstructions<F> for RangeConfig<F> {
                 let out_val = Value::known(pow_of_two) + a.value() - b.value();
                 let assigned_cells = self.gate.assign_region(
                     ctx,
-                    vec![a, Constant(F::one()), b, Witness(out_val)],
-                    vec![(0, Some([F::zero(), pow_of_two, -F::one()]))],
+                    vec![a, Constant(F::ONE), b, Witness(out_val)],
+                    vec![(0, Some([F::ZERO, pow_of_two, -F::ONE]))],
                 );
                 assigned_cells.into_iter().nth(3).unwrap()
             }
@@ -385,10 +377,10 @@ impl<F: ScalarField> RangeInstructions<F> for RangeConfig<F> {
     fn is_less_than<'a>(
         &self,
         ctx: &mut Context<'a, F>,
-        a: QuantumCell<'_, 'a, F>,
-        b: QuantumCell<'_, 'a, F>,
+        a: QuantumCell<'_, F>,
+        b: QuantumCell<'_, F>,
         num_bits: usize,
-    ) -> AssignedValue<'a, F> {
+    ) -> AssignedValue<F> {
         // TODO: optimize this for PlonkPlus strategy
         let k = (num_bits + self.lookup_bits - 1) / self.lookup_bits;
         let padded_bits = k * self.lookup_bits;
@@ -403,10 +395,10 @@ impl<F: ScalarField> RangeInstructions<F> for RangeConfig<F> {
                     vec![
                         Witness(shifted_val),
                         b,
-                        Constant(F::one()),
+                        Constant(F::ONE),
                         Witness(shift_a_val),
                         Constant(-pow_padded),
-                        Constant(F::one()),
+                        Constant(F::ONE),
                         a,
                     ],
                     vec![0, 3],
@@ -418,7 +410,7 @@ impl<F: ScalarField> RangeInstructions<F> for RangeConfig<F> {
             RangeStrategy::PlonkPlus => self.gate.assign_region_last(
                 ctx,
                 vec![a, Constant(pow_padded), b, Witness(shifted_val)],
-                vec![(0, Some([F::zero(), F::one(), -F::one()]))],
+                vec![(0, Some([F::ZERO, F::ONE, -F::ONE]))],
             ),
         };
 

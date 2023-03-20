@@ -26,10 +26,10 @@ use num_traits::One;
 // a_i * 2^{n*w} + a_{i - 1} * 2^{n*(w-1)} + ... + a_{i - w} + c_{i - w - 1} = c_i * 2^{n*(w+1)}
 // which is valid as long as `(m - n + EPSILON) + n * (w+1) < native_modulus::<F>().bits() - 1`
 // so we only need to range check `c_i` every `w + 1` steps, starting with `i = w`
-pub fn truncate<'a, F: PrimeField>(
+pub fn truncate<F: PrimeField>(
     range: &impl RangeInstructions<F>,
-    ctx: &mut Context<'a, F>,
-    a: &OverflowInteger<'a, F>,
+    ctx: &mut Context<'_, F>,
+    a: &OverflowInteger<F>,
     limb_bits: usize,
     limb_base: F,
     limb_base_big: &BigInt,
@@ -85,7 +85,7 @@ pub fn truncate<'a, F: PrimeField>(
                     Existing(a_limb),
                     Witness(neg_carry_val),
                     Constant(limb_base),
-                    previous.as_ref().map(Existing).unwrap_or_else(|| Constant(F::zero())),
+                    previous.as_ref().map(Existing).unwrap_or_else(|| Constant(F::ZERO)),
                 ],
                 vec![(0, None)],
             )
@@ -100,7 +100,7 @@ pub fn truncate<'a, F: PrimeField>(
             let shift_carry_val = Value::known(shift_val) + neg_carry.value();
             let cells = vec![
                 Existing(&neg_carry),
-                Constant(F::one()),
+                Constant(F::ONE),
                 Constant(shift_val),
                 Witness(shift_carry_val),
             ];

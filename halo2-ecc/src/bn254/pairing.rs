@@ -30,9 +30,9 @@ const XI_0: i64 = 9;
 pub fn sparse_line_function_unequal<'a, F: PrimeField>(
     fp2_chip: &Fp2Chip<F>,
     ctx: &mut Context<'a, F>,
-    Q: (&EcPoint<F, FqPoint<'a, F>>, &EcPoint<F, FqPoint<'a, F>>),
-    P: &EcPoint<F, FpPoint<'a, F>>,
-) -> Vec<Option<FqPoint<'a, F>>> {
+    Q: (&EcPoint<F, FqPoint<F>>, &EcPoint<F, FqPoint<F>>),
+    P: &EcPoint<F, FpPoint<F>>,
+) -> Vec<Option<FqPoint<F>>> {
     let (x_1, y_1) = (&Q.0.x, &Q.0.y);
     let (x_2, y_2) = (&Q.1.x, &Q.1.y);
     let (X, Y) = (&P.x, &P.y);
@@ -69,9 +69,9 @@ pub fn sparse_line_function_unequal<'a, F: PrimeField>(
 pub fn sparse_line_function_equal<'a, F: PrimeField>(
     fp2_chip: &Fp2Chip<F>,
     ctx: &mut Context<'a, F>,
-    Q: &EcPoint<F, FqPoint<'a, F>>,
-    P: &EcPoint<F, FpPoint<'a, F>>,
-) -> Vec<Option<FqPoint<'a, F>>> {
+    Q: &EcPoint<F, FqPoint<F>>,
+    P: &EcPoint<F, FpPoint<F>>,
+) -> Vec<Option<FqPoint<F>>> {
     let (x, y) = (&Q.x, &Q.y);
     assert_eq!(x.coeffs.len(), 2);
     assert_eq!(y.coeffs.len(), 2);
@@ -104,9 +104,9 @@ pub fn sparse_line_function_equal<'a, F: PrimeField>(
 pub fn sparse_fp12_multiply<'a, F: PrimeField>(
     fp2_chip: &Fp2Chip<F>,
     ctx: &mut Context<'a, F>,
-    a: &FqPoint<'a, F>,
-    b_fp2_coeffs: &Vec<Option<FqPoint<'a, F>>>,
-) -> FieldExtPoint<FpPoint<'a, F>> {
+    a: &FqPoint<F>,
+    b_fp2_coeffs: &Vec<Option<FqPoint<F>>>,
+) -> FieldExtPoint<FpPoint<F>> {
     assert_eq!(a.coeffs.len(), 12);
     assert_eq!(b_fp2_coeffs.len(), 6);
     let mut a_fp2_coeffs = Vec::with_capacity(6);
@@ -171,10 +171,10 @@ pub fn sparse_fp12_multiply<'a, F: PrimeField>(
 pub fn fp12_multiply_with_line_unequal<'a, F: PrimeField>(
     fp2_chip: &Fp2Chip<F>,
     ctx: &mut Context<'a, F>,
-    g: &FqPoint<'a, F>,
-    Q: (&EcPoint<F, FqPoint<'a, F>>, &EcPoint<F, FqPoint<'a, F>>),
-    P: &EcPoint<F, FpPoint<'a, F>>,
-) -> FqPoint<'a, F> {
+    g: &FqPoint<F>,
+    Q: (&EcPoint<F, FqPoint<F>>, &EcPoint<F, FqPoint<F>>),
+    P: &EcPoint<F, FpPoint<F>>,
+) -> FqPoint<F> {
     let line = sparse_line_function_unequal::<F>(fp2_chip, ctx, Q, P);
     sparse_fp12_multiply::<F>(fp2_chip, ctx, g, &line)
 }
@@ -188,10 +188,10 @@ pub fn fp12_multiply_with_line_unequal<'a, F: PrimeField>(
 pub fn fp12_multiply_with_line_equal<'a, F: PrimeField>(
     fp2_chip: &Fp2Chip<F>,
     ctx: &mut Context<'a, F>,
-    g: &FqPoint<'a, F>,
-    Q: &EcPoint<F, FqPoint<'a, F>>,
-    P: &EcPoint<F, FpPoint<'a, F>>,
-) -> FqPoint<'a, F> {
+    g: &FqPoint<F>,
+    Q: &EcPoint<F, FqPoint<F>>,
+    P: &EcPoint<F, FpPoint<F>>,
+) -> FqPoint<F> {
     let line = sparse_line_function_equal::<F>(fp2_chip, ctx, Q, P);
     sparse_fp12_multiply::<F>(fp2_chip, ctx, g, &line)
 }
@@ -217,10 +217,10 @@ pub fn fp12_multiply_with_line_equal<'a, F: PrimeField>(
 pub fn miller_loop_BN<'a, 'b, F: PrimeField>(
     ecc_chip: &EccChip<F, Fp2Chip<'a, F>>,
     ctx: &mut Context<'b, F>,
-    Q: &EcPoint<F, FqPoint<'b, F>>,
-    P: &EcPoint<F, FpPoint<'b, F>>,
+    Q: &EcPoint<F, FqPoint<F>>,
+    P: &EcPoint<F, FpPoint<F>>,
     pseudo_binary_encoding: &[i8],
-) -> FqPoint<'b, F> {
+) -> FqPoint<F> {
     let mut i = pseudo_binary_encoding.len() - 1;
     while pseudo_binary_encoding[i] == 0 {
         i -= 1;
@@ -302,9 +302,9 @@ pub fn miller_loop_BN<'a, 'b, F: PrimeField>(
 pub fn multi_miller_loop_BN<'a, 'b, F: PrimeField>(
     ecc_chip: &EccChip<F, Fp2Chip<'a, F>>,
     ctx: &mut Context<'b, F>,
-    pairs: Vec<(&EcPoint<F, FpPoint<'b, F>>, &EcPoint<F, FqPoint<'b, F>>)>,
+    pairs: Vec<(&EcPoint<F, FpPoint<F>>, &EcPoint<F, FqPoint<F>>)>,
     pseudo_binary_encoding: &[i8],
-) -> FqPoint<'b, F> {
+) -> FqPoint<F> {
     let mut i = pseudo_binary_encoding.len() - 1;
     while pseudo_binary_encoding[i] == 0 {
         i -= 1;
@@ -404,10 +404,10 @@ pub fn multi_miller_loop_BN<'a, 'b, F: PrimeField>(
 pub fn twisted_frobenius<'a, 'b, F: PrimeField>(
     ecc_chip: &EccChip<F, Fp2Chip<'a, F>>,
     ctx: &mut Context<'b, F>,
-    Q: &EcPoint<F, FqPoint<'b, F>>,
-    c2: &FqPoint<'b, F>,
-    c3: &FqPoint<'b, F>,
-) -> EcPoint<F, FqPoint<'b, F>> {
+    Q: &EcPoint<F, FqPoint<F>>,
+    c2: &FqPoint<F>,
+    c3: &FqPoint<F>,
+) -> EcPoint<F, FqPoint<F>> {
     assert_eq!(c2.coeffs.len(), 2);
     assert_eq!(c3.coeffs.len(), 2);
 
@@ -427,10 +427,10 @@ pub fn twisted_frobenius<'a, 'b, F: PrimeField>(
 pub fn neg_twisted_frobenius<'a, 'b, F: PrimeField>(
     ecc_chip: &EccChip<F, Fp2Chip<'a, F>>,
     ctx: &mut Context<'b, F>,
-    Q: &EcPoint<F, FqPoint<'b, F>>,
-    c2: &FqPoint<'b, F>,
-    c3: &FqPoint<'b, F>,
-) -> EcPoint<F, FqPoint<'b, F>> {
+    Q: &EcPoint<F, FqPoint<F>>,
+    c2: &FqPoint<F>,
+    c3: &FqPoint<F>,
+) -> EcPoint<F, FqPoint<F>> {
     assert_eq!(c2.coeffs.len(), 2);
     assert_eq!(c3.coeffs.len(), 2);
 
@@ -482,7 +482,7 @@ impl<'a, F: PrimeField> PairingChip<'a, F> {
         &self,
         ctx: &mut Context<'_, F>,
         point: Value<G1Affine>,
-    ) -> EcPoint<F, FpPoint<'v, F>> {
+    ) -> EcPoint<F, FpPoint<F>> {
         // go from pse/pairing::bn256::Fq to forked Fq
         let convert_fp = |x: bn256::Fq| biguint_to_fe(&fe_to_biguint(&x));
         let g1_chip = EccChip::construct(self.fp_chip.clone());
@@ -494,7 +494,7 @@ impl<'a, F: PrimeField> PairingChip<'a, F> {
         &self,
         ctx: &mut Context<'_, F>,
         point: Value<G2Affine>,
-    ) -> EcPoint<F, FieldExtPoint<FpPoint<'v, F>>> {
+    ) -> EcPoint<F, FieldExtPoint<FpPoint<F>>> {
         let fp2_chip = Fp2Chip::<F>::construct(self.fp_chip);
         let g2_chip = EccChip::construct(fp2_chip);
         // go from pse/pairing::bn256::Fq2 to forked public Fq2
@@ -510,10 +510,10 @@ impl<'a, F: PrimeField> PairingChip<'a, F> {
 
     pub fn miller_loop<'v>(
         &self,
-        ctx: &mut Context<'v, F>,
-        Q: &EcPoint<F, FqPoint<'v, F>>,
-        P: &EcPoint<F, FpPoint<'v, F>>,
-    ) -> FqPoint<'v, F> {
+        ctx: &mut Context<'_, F>,
+        Q: &EcPoint<F, FqPoint<F>>,
+        P: &EcPoint<F, FpPoint<F>>,
+    ) -> FqPoint<F> {
         let fp2_chip = Fp2Chip::<F>::construct(self.fp_chip);
         let g2_chip = EccChip::construct(fp2_chip);
         miller_loop_BN::<F>(
@@ -527,9 +527,9 @@ impl<'a, F: PrimeField> PairingChip<'a, F> {
 
     pub fn multi_miller_loop<'v>(
         &self,
-        ctx: &mut Context<'v, F>,
-        pairs: Vec<(&EcPoint<F, FpPoint<'v, F>>, &EcPoint<F, FqPoint<'v, F>>)>,
-    ) -> FqPoint<'v, F> {
+        ctx: &mut Context<'_, F>,
+        pairs: Vec<(&EcPoint<F, FpPoint<F>>, &EcPoint<F, FqPoint<F>>)>,
+    ) -> FqPoint<F> {
         let fp2_chip = Fp2Chip::<F>::construct(self.fp_chip);
         let g2_chip = EccChip::construct(fp2_chip);
         multi_miller_loop_BN::<F>(
@@ -540,7 +540,7 @@ impl<'a, F: PrimeField> PairingChip<'a, F> {
         )
     }
 
-    pub fn final_exp<'v>(&self, ctx: &mut Context<'v, F>, f: &FqPoint<'v, F>) -> FqPoint<'v, F> {
+    pub fn final_exp<'v>(&self, ctx: &mut Context<'_, F>, f: &FqPoint<F>) -> FqPoint<F> {
         let fp12_chip = Fp12Chip::<F>::construct(self.fp_chip);
         fp12_chip.final_exp(ctx, f)
     }
@@ -548,10 +548,10 @@ impl<'a, F: PrimeField> PairingChip<'a, F> {
     // optimal Ate pairing
     pub fn pairing<'v>(
         &self,
-        ctx: &mut Context<'v, F>,
-        Q: &EcPoint<F, FqPoint<'v, F>>,
-        P: &EcPoint<F, FpPoint<'v, F>>,
-    ) -> FqPoint<'v, F> {
+        ctx: &mut Context<'_, F>,
+        Q: &EcPoint<F, FqPoint<F>>,
+        P: &EcPoint<F, FpPoint<F>>,
+    ) -> FqPoint<F> {
         let f0 = self.miller_loop(ctx, Q, P);
         let fp12_chip = Fp12Chip::<F>::construct(self.fp_chip);
         // final_exp implemented in final_exp module

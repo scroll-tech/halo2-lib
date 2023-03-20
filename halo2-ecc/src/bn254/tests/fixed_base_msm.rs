@@ -4,6 +4,7 @@ use std::{env::var, fs::File};
 use crate::ecc::fixed_base::FixedEcPoint;
 
 use super::*;
+use halo2_base::halo2_proofs::group::Curve;
 use halo2_base::{halo2_proofs::halo2curves::bn256::G1, SKIP_FIRST_PASS};
 
 #[derive(Serialize, Deserialize, Debug)]

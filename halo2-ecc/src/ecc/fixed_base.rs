@@ -1,11 +1,11 @@
 #![allow(non_snake_case)]
 use super::{ec_add_unequal, ec_select, ec_select_from_bits, EcPoint, EccChip};
 use crate::halo2_proofs::arithmetic::CurveAffine;
+use crate::halo2_proofs::group::Curve;
 use crate::{
     bigint::{CRTInteger, FixedCRTInteger},
     fields::{PrimeFieldChip, Selectable},
 };
-use group::Curve;
 use halo2_base::{
     gates::{GateInstructions, RangeInstructions},
     utils::{fe_to_biguint, CurveAffineExt, PrimeField},
@@ -44,9 +44,9 @@ where
         chip: &FC,
         ctx: &mut Context<'_, F>,
         native_modulus: &BigUint,
-    ) -> EcPoint<F, FC::FieldPoint<'v>>
+    ) -> EcPoint<F, FC::FieldPoint>
     where
-        FC: PrimeFieldChip<F, FieldType = C::Base, FieldPoint<'v> = CRTInteger<'v, F>>,
+        FC: PrimeFieldChip<F, FieldType = C::Base, FieldPoint = CRTInteger<F>>,
     {
         let assigned_x = self.x.assign(chip.range().gate(), ctx, chip.limb_bits(), native_modulus);
         let assigned_y = self.y.assign(chip.range().gate(), ctx, chip.limb_bits(), native_modulus);
@@ -58,9 +58,9 @@ where
         chip: &FC,
         ctx: &mut Context<'_, F>,
         native_modulus: &BigUint,
-    ) -> EcPoint<F, FC::FieldPoint<'v>>
+    ) -> EcPoint<F, FC::FieldPoint>
     where
-        FC: PrimeFieldChip<F, FieldType = C::Base, FieldPoint<'v> = CRTInteger<'v, F>>,
+        FC: PrimeFieldChip<F, FieldType = C::Base, FieldPoint = CRTInteger<F>>,
     {
         let assigned_x = self.x.assign_without_caching(
             chip.range().gate(),
@@ -88,18 +88,18 @@ where
 
 pub fn scalar_multiply<'v, F, FC, C>(
     chip: &FC,
-    ctx: &mut Context<'v, F>,
+    ctx: &mut Context<'_, F>,
     point: &C,
-    scalar: &[AssignedValue<'v, F>],
+    scalar: &[AssignedValue<F>],
     max_bits: usize,
     window_bits: usize,
-) -> EcPoint<F, FC::FieldPoint<'v>>
+) -> EcPoint<F, FC::FieldPoint>
 where
     F: PrimeField,
     C: CurveAffineExt,
     C::Base: PrimeField,
-    FC: PrimeFieldChip<F, FieldType = C::Base, FieldPoint<'v> = CRTInteger<'v, F>>
-        + Selectable<F, Point<'v> = FC::FieldPoint<'v>>,
+    FC: PrimeFieldChip<F, FieldType = C::Base, FieldPoint = CRTInteger<F>>
+        + Selectable<F, Point = FC::FieldPoint>,
 {
     if point.is_identity().into() {
         let point = FixedEcPoint::from_curve(*point, chip.num_limbs(), chip.limb_bits());
@@ -187,18 +187,18 @@ where
 // we also use the random accumulator for some extra efficiency (which also works in scalar multiply case but that is TODO)
 pub fn msm<'v, F, FC, C>(
     chip: &EccChip<F, FC>,
-    ctx: &mut Context<'v, F>,
+    ctx: &mut Context<'_, F>,
     points: &[C],
-    scalars: &[Vec<AssignedValue<'v, F>>],
+    scalars: &[Vec<AssignedValue<F>>],
     max_scalar_bits_per_cell: usize,
     window_bits: usize,
-) -> EcPoint<F, FC::FieldPoint<'v>>
+) -> EcPoint<F, FC::FieldPoint>
 where
     F: PrimeField,
     C: CurveAffineExt,
     C::Base: PrimeField,
-    FC: PrimeFieldChip<F, FieldType = C::Base, FieldPoint<'v> = CRTInteger<'v, F>>
-        + Selectable<F, Point<'v> = FC::FieldPoint<'v>>,
+    FC: PrimeFieldChip<F, FieldType = C::Base, FieldPoint = CRTInteger<F>>
+        + Selectable<F, Point = FC::FieldPoint>,
 {
     assert!((max_scalar_bits_per_cell as u32) <= F::NUM_BITS);
     let scalar_len = scalars[0].len();
@@ -263,8 +263,7 @@ where
         .chunks(cached_points.len() / points.len())
         .zip(bits.chunks(total_bits))
         .map(|(cached_points, bits)| {
-            let cached_point_window_rev =
-                cached_points.chunks(1usize << window_bits).rev();
+            let cached_point_window_rev = cached_points.chunks(1usize << window_bits).rev();
             let bit_window_rev = bits.chunks(window_bits).rev();
             let mut curr_point = None;
             // `is_started` is just a way to deal with if `curr_point` is actually identity
