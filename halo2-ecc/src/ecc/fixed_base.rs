@@ -230,8 +230,7 @@ where
         .chunks(cached_points.len() / points.len())
         .zip(bits.chunks(total_bits))
         .map(|(cached_points, bits)| {
-            let cached_point_window_rev =
-                cached_points.chunks(1usize << window_bits).rev();
+            let cached_point_window_rev = cached_points.chunks(1usize << window_bits).rev();
             let bit_window_rev = bits.chunks(window_bits).rev();
             let mut curr_point = None;
             // `is_started` is just a way to deal with if `curr_point` is actually identity
