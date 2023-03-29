@@ -524,9 +524,8 @@ where
         for _ in 0..window_bits {
             curr_point = ec_double(chip, ctx, &curr_point);
         }
-        for (cached_points, rounded_bits) in cached_points
-            .chunks(cache_size)
-            .zip(rounded_bits.chunks(rounded_bitlen))
+        for (cached_points, rounded_bits) in
+            cached_points.chunks(cache_size).zip(rounded_bits.chunks(rounded_bitlen))
         {
             let add_point = ec_select_from_bits::<F, FC>(
                 chip,
