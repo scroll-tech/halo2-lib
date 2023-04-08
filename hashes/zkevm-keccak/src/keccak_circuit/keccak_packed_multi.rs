@@ -1,14 +1,15 @@
 use super::keccak_table::KeccakTable;
-use super::{assign_advice_custom, KeccakAssignedValue};
-use super::{cell_manager::*, param::*};
-
+use super::param::{
+    CHI_BASE_LOOKUP_TABLE, NUM_BYTES_PER_WORD, NUM_ROUNDS, NUM_WORDS_TO_ABSORB,
+    NUM_WORDS_TO_SQUEEZE, RATE, RATE_IN_BITS, RHO_MATRIX, ROUND_CST,
+};
 use super::util::{
     constraint_builder::BaseConstraintBuilder, eth_types::Field, expression::Expr, field_xor,
     get_absorb_positions, get_num_bits_per_lookup, into_bits, pack, pack_u64, pack_with_base,
-    rotate, target_part_sizes, to_bytes, unpack, CHI_BASE_LOOKUP_TABLE, NUM_BYTES_PER_WORD,
-    NUM_ROUNDS, NUM_WORDS_TO_ABSORB, NUM_WORDS_TO_SQUEEZE, RATE, RATE_IN_BITS, RHO_MATRIX,
-    ROUND_CST,
+    rotate, target_part_sizes, to_bytes, unpack,
 };
+use super::{assign_advice_custom, KeccakAssignedValue};
+use super::{cell_manager::*, param::*};
 
 use crate::halo2_proofs::{
     arithmetic::FieldExt,
@@ -149,7 +150,7 @@ impl<F: FieldExt> KeccakRegion<F> {
 
 /// Recombines parts back together
 pub(crate) mod decode {
-    use super::super::util::BIT_COUNT;
+    use super::super::param::BIT_COUNT;
     use super::{Expr, FieldExt, Part, PartValue};
     use crate::halo2_proofs::plonk::Expression;
 
@@ -240,8 +241,9 @@ pub(crate) mod split {
 // Split into parts, but storing the parts in a specific way to have the same
 // table layout in `output_cells` regardless of rotation.
 pub(crate) mod split_uniform {
+    use super::super::param::BIT_SIZE;
     use super::super::util::{
-        eth_types::Field, pack, pack_part, rotate, rotate_rev, unpack, WordParts, BIT_SIZE,
+        eth_types::Field, pack, pack_part, rotate, rotate_rev, unpack, WordParts,
     };
     use super::{
         decode, target_part_sizes, BaseConstraintBuilder, Cell, CellManager, Expr, FieldExt,
