@@ -1,79 +1,17 @@
 //! Utility traits, functions used in the crate.
 
+use super::param::*;
 use crate::halo2_proofs::{
     circuit::{Layouter, Value},
     plonk::{Error, TableColumn},
 };
+use eth_types::{Field, ToScalar, Word};
 use itertools::Itertools;
 use std::env::var;
 
 pub mod constraint_builder;
 pub mod eth_types;
 pub mod expression;
-
-use eth_types::{Field, ToScalar, Word};
-
-pub const NUM_BITS_PER_BYTE: usize = 8;
-pub const NUM_BYTES_PER_WORD: usize = 8;
-pub const NUM_BITS_PER_WORD: usize = NUM_BYTES_PER_WORD * NUM_BITS_PER_BYTE;
-pub const KECCAK_WIDTH: usize = 5 * 5;
-pub const KECCAK_WIDTH_IN_BITS: usize = KECCAK_WIDTH * NUM_BITS_PER_WORD;
-pub const NUM_ROUNDS: usize = 24;
-pub const NUM_WORDS_TO_ABSORB: usize = 17;
-pub const NUM_BYTES_TO_ABSORB: usize = NUM_WORDS_TO_ABSORB * NUM_BYTES_PER_WORD;
-pub const NUM_WORDS_TO_SQUEEZE: usize = 4;
-pub const NUM_BYTES_TO_SQUEEZE: usize = NUM_WORDS_TO_SQUEEZE * NUM_BYTES_PER_WORD;
-pub const ABSORB_WIDTH_PER_ROW: usize = NUM_BITS_PER_WORD;
-pub const ABSORB_WIDTH_PER_ROW_BYTES: usize = ABSORB_WIDTH_PER_ROW / NUM_BITS_PER_BYTE;
-pub const RATE: usize = NUM_WORDS_TO_ABSORB * NUM_BYTES_PER_WORD;
-pub const RATE_IN_BITS: usize = RATE * NUM_BITS_PER_BYTE;
-// pub(crate) const THETA_C_WIDTH: usize = 5 * NUM_BITS_PER_WORD;
-pub(crate) const RHO_MATRIX: [[usize; 5]; 5] = [
-    [0, 36, 3, 41, 18],
-    [1, 44, 10, 45, 2],
-    [62, 6, 43, 15, 61],
-    [28, 55, 25, 21, 56],
-    [27, 20, 39, 8, 14],
-];
-pub(crate) const ROUND_CST: [u64; NUM_ROUNDS + 1] = [
-    0x0000000000000001,
-    0x0000000000008082,
-    0x800000000000808a,
-    0x8000000080008000,
-    0x000000000000808b,
-    0x0000000080000001,
-    0x8000000080008081,
-    0x8000000000008009,
-    0x000000000000008a,
-    0x0000000000000088,
-    0x0000000080008009,
-    0x000000008000000a,
-    0x000000008000808b,
-    0x800000000000008b,
-    0x8000000000008089,
-    0x8000000000008003,
-    0x8000000000008002,
-    0x8000000000000080,
-    0x000000000000800a,
-    0x800000008000000a,
-    0x8000000080008081,
-    0x8000000000008080,
-    0x0000000080000001,
-    0x8000000080008008,
-    0x0000000000000000, // absorb round
-];
-// Bit positions that have a non-zero value in `IOTA_ROUND_CST`.
-// pub(crate) const ROUND_CST_BIT_POS: [usize; 7] = [0, 1, 3, 7, 15, 31, 63];
-
-// The number of bits used in the sparse word representation per bit
-pub const BIT_COUNT: usize = 3;
-// The base of the bit in the sparse word representation
-pub const BIT_SIZE: usize = 2usize.pow(BIT_COUNT as u32);
-
-// `a ^ ((~b) & c)` is calculated by doing `lookup[3 - 2*a + b - c]`
-pub(crate) const CHI_BASE_LOOKUP_TABLE: [u8; 5] = [0, 1, 1, 0, 0];
-// `a ^ ((~b) & c) ^ d` is calculated by doing `lookup[5 - 2*a - b + c - 2*d]`
-// pub(crate) const CHI_EXT_LOOKUP_TABLE: [u8; 7] = [0, 0, 1, 1, 0, 0, 1];
 
 /// Description of which bits (positions) a part contains
 #[derive(Clone, Debug)]
@@ -89,19 +27,66 @@ pub struct WordParts {
     pub parts: Vec<PartInfo>,
 }
 
-/// Packs bits into bytes
-pub mod to_bytes {
-    pub(crate) fn value(bits: &[u8]) -> Vec<u8> {
-        debug_assert!(bits.len() % 8 == 0, "bits not a multiple of 8");
-        let mut bytes = Vec::new();
-        for byte_bits in bits.chunks(8) {
-            let mut value = 0u8;
-            for (idx, bit) in byte_bits.iter().enumerate() {
-                value += *bit << idx;
+impl WordParts {
+    /// Returns a description of how a word will be split into parts
+    pub fn new(part_size: usize, rot: usize, normalize: bool) -> Self {
+        let mut bits = (0usize..64).collect::<Vec<_>>();
+        bits.rotate_right(rot);
+
+        let mut parts = Vec::new();
+        let mut rot_idx = 0;
+
+        let mut idx = 0;
+        let target_sizes = if normalize {
+            // After the rotation we want the parts of all the words to be at the same
+            // positions
+            target_part_sizes(part_size)
+        } else {
+            // Here we only care about minimizing the number of parts
+            let num_parts_a = rot / part_size;
+            let partial_part_a = rot % part_size;
+
+            let num_parts_b = (64 - rot) / part_size;
+            let partial_part_b = (64 - rot) % part_size;
+
+            let mut part_sizes = vec![part_size; num_parts_a];
+            if partial_part_a > 0 {
+                part_sizes.push(partial_part_a);
             }
-            bytes.push(value);
+
+            part_sizes.extend(vec![part_size; num_parts_b]);
+            if partial_part_b > 0 {
+                part_sizes.push(partial_part_b);
+            }
+
+            part_sizes
+        };
+        // Split into parts bit by bit
+        for part_size in target_sizes {
+            let mut num_consumed = 0;
+            while num_consumed < part_size {
+                let mut part_bits: Vec<usize> = Vec::new();
+                while num_consumed < part_size {
+                    if !part_bits.is_empty() && bits[idx] == 0 {
+                        break;
+                    }
+                    if bits[idx] == 0 {
+                        rot_idx = parts.len();
+                    }
+                    part_bits.push(bits[idx]);
+                    idx += 1;
+                    num_consumed += 1;
+                }
+                parts.push(PartInfo { bits: part_bits });
+            }
         }
-        bytes
+
+        debug_assert_eq!(get_rotate_count(rot, part_size), rot_idx);
+
+        parts.rotate_left(rot_idx);
+        debug_assert_eq!(parts[0].bits[0], 0);
+
+        Self { parts }
     }
 }
 
@@ -124,16 +109,6 @@ pub fn rotate_left(bits: &[u8], count: usize) -> [u8; NUM_BITS_PER_WORD] {
     let mut rotated = bits.to_vec();
     rotated.rotate_left(count);
     rotated.try_into().unwrap()
-}
-
-/// Scatters a value into a packed word constant
-pub mod scatter {
-    use super::{eth_types::Field, pack};
-    use crate::halo2_proofs::plonk::Expression;
-
-    pub(crate) fn expr<F: Field>(value: u8, count: usize) -> Expression<F> {
-        Expression::Constant(pack(&vec![value; count]))
-    }
 }
 
 /// The words that absorb data
@@ -223,69 +198,6 @@ pub fn get_rotate_count(count: usize, part_size: usize) -> usize {
     (count + part_size - 1) / part_size
 }
 
-impl WordParts {
-    /// Returns a description of how a word will be split into parts
-    pub fn new(part_size: usize, rot: usize, normalize: bool) -> Self {
-        let mut bits = (0usize..64).collect::<Vec<_>>();
-        bits.rotate_right(rot);
-
-        let mut parts = Vec::new();
-        let mut rot_idx = 0;
-
-        let mut idx = 0;
-        let target_sizes = if normalize {
-            // After the rotation we want the parts of all the words to be at the same
-            // positions
-            target_part_sizes(part_size)
-        } else {
-            // Here we only care about minimizing the number of parts
-            let num_parts_a = rot / part_size;
-            let partial_part_a = rot % part_size;
-
-            let num_parts_b = (64 - rot) / part_size;
-            let partial_part_b = (64 - rot) % part_size;
-
-            let mut part_sizes = vec![part_size; num_parts_a];
-            if partial_part_a > 0 {
-                part_sizes.push(partial_part_a);
-            }
-
-            part_sizes.extend(vec![part_size; num_parts_b]);
-            if partial_part_b > 0 {
-                part_sizes.push(partial_part_b);
-            }
-
-            part_sizes
-        };
-        // Split into parts bit by bit
-        for part_size in target_sizes {
-            let mut num_consumed = 0;
-            while num_consumed < part_size {
-                let mut part_bits: Vec<usize> = Vec::new();
-                while num_consumed < part_size {
-                    if !part_bits.is_empty() && bits[idx] == 0 {
-                        break;
-                    }
-                    if bits[idx] == 0 {
-                        rot_idx = parts.len();
-                    }
-                    part_bits.push(bits[idx]);
-                    idx += 1;
-                    num_consumed += 1;
-                }
-                parts.push(PartInfo { bits: part_bits });
-            }
-        }
-
-        debug_assert_eq!(get_rotate_count(rot, part_size), rot_idx);
-
-        parts.rotate_left(rot_idx);
-        debug_assert_eq!(parts[0].bits[0], 0);
-
-        Self { parts }
-    }
-}
-
 /// Get the degree of the circuit from the KECCAK_DEGREE env variable
 pub fn get_degree() -> usize {
     var("KECCAK_DEGREE")
@@ -304,4 +216,30 @@ pub fn get_num_bits_per_lookup(range: usize) -> usize {
         num_bits += 1;
     }
     num_bits as usize
+}
+
+/// Scatters a value into a packed word constant
+pub mod scatter {
+    use super::{eth_types::Field, pack};
+    use crate::halo2_proofs::plonk::Expression;
+
+    pub(crate) fn expr<F: Field>(value: u8, count: usize) -> Expression<F> {
+        Expression::Constant(pack(&vec![value; count]))
+    }
+}
+
+/// Packs bits into bytes
+pub mod to_bytes {
+    pub(crate) fn value(bits: &[u8]) -> Vec<u8> {
+        debug_assert!(bits.len() % 8 == 0, "bits not a multiple of 8");
+        let mut bytes = Vec::new();
+        for byte_bits in bits.chunks(8) {
+            let mut value = 0u8;
+            for (idx, bit) in byte_bits.iter().enumerate() {
+                value += *bit << idx;
+            }
+            bytes.push(value);
+        }
+        bytes
+    }
 }
