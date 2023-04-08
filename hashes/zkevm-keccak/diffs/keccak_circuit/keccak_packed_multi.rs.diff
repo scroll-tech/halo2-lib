@@ -1,19 +1,20 @@
 diff --git a/src/keccak_circuit/keccak_packed_multi.rs b/home/a/scroll/zkevm-circuits/zkevm-circuits/src/keccak_circuit/keccak_packed_multi.rs
-index 903d74d..066c464 100644
+index ae67551..066c464 100644
 --- a/src/keccak_circuit/keccak_packed_multi.rs
 +++ b/home/a/scroll/zkevm-circuits/zkevm-circuits/src/keccak_circuit/keccak_packed_multi.rs
-@@ -1,27 +1,17 @@
+@@ -1,28 +1,17 @@
 -use super::keccak_table::KeccakTable;
--use super::{assign_advice_custom, KeccakAssignedValue};
--use super::{cell_manager::*, param::*};
--
+-use super::param::{
+-    CHI_BASE_LOOKUP_TABLE, NUM_BYTES_PER_WORD, NUM_ROUNDS, NUM_WORDS_TO_ABSORB,
+-    NUM_WORDS_TO_SQUEEZE, RATE, RATE_IN_BITS, RHO_MATRIX, ROUND_CST,
+-};
 -use super::util::{
 -    constraint_builder::BaseConstraintBuilder, eth_types::Field, expression::Expr, field_xor,
 -    get_absorb_positions, get_num_bits_per_lookup, into_bits, pack, pack_u64, pack_with_base,
--    rotate, target_part_sizes, to_bytes, unpack, CHI_BASE_LOOKUP_TABLE, NUM_BYTES_PER_WORD,
--    NUM_ROUNDS, NUM_WORDS_TO_ABSORB, NUM_WORDS_TO_SQUEEZE, RATE, RATE_IN_BITS, RHO_MATRIX,
--    ROUND_CST,
+-    rotate, target_part_sizes, to_bytes, unpack,
 -};
+-use super::{assign_advice_custom, KeccakAssignedValue};
+-use super::{cell_manager::*, param::*};
 -
 -use crate::halo2_proofs::{
 +use super::{cell_manager::*, param::*, util::*};
@@ -37,7 +38,7 @@ index 903d74d..066c464 100644
          .parse()
          .expect("Cannot parse KECCAK_ROWS env var as usize")
  }
-@@ -42,39 +32,24 @@ pub(crate) fn get_num_bits_per_base_chi_lookup() -> usize {
+@@ -43,39 +32,24 @@ pub(crate) fn get_num_bits_per_base_chi_lookup() -> usize {
      get_num_bits_per_lookup(CHI_BASE_LOOKUP_RANGE.max(RHO_PI_LOOKUP_RANGE))
  }
  
@@ -83,7 +84,7 @@ index 903d74d..066c464 100644
      pub(crate) q_round: bool,
      pub(crate) q_absorb: bool,
      pub(crate) q_round_last: bool,
-@@ -83,35 +58,14 @@ pub struct KeccakRow<F: FieldExt> {
+@@ -84,35 +58,14 @@ pub struct KeccakRow<F: FieldExt> {
      pub(crate) round_cst: F,
      pub(crate) is_final: bool,
      pub(crate) cell_values: Vec<F>,
@@ -123,7 +124,7 @@ index 903d74d..066c464 100644
      pub(crate) cell: Cell<F>,
      pub(crate) expr: Expression<F>,
      pub(crate) num_bits: usize,
-@@ -119,10 +73,10 @@ pub(crate) struct Part<F: FieldExt> {
+@@ -120,10 +73,10 @@ pub(crate) struct Part<F: FieldExt> {
  
  /// Part Value
  #[derive(Clone, Copy, Debug)]
@@ -138,11 +139,11 @@ index 903d74d..066c464 100644
  }
  
  #[derive(Clone, Debug)]
-@@ -149,17 +103,18 @@ impl<F: FieldExt> KeccakRegion<F> {
+@@ -150,17 +103,18 @@ impl<F: FieldExt> KeccakRegion<F> {
  
  /// Recombines parts back together
  pub(crate) mod decode {
--    use super::super::util::BIT_COUNT;
+-    use super::super::param::BIT_COUNT;
 -    use super::{Expr, FieldExt, Part, PartValue};
 -    use crate::halo2_proofs::plonk::Expression;
 +    use super::{Part, PartValue};
@@ -162,7 +163,7 @@ index 903d74d..066c464 100644
          parts.iter().rev().fold(F::zero(), |acc, part| {
              acc * F::from(1u64 << (BIT_COUNT * part.num_bits)) + part.value
          })
-@@ -168,32 +123,28 @@ pub(crate) mod decode {
+@@ -169,32 +123,28 @@ pub(crate) mod decode {
  
  /// Splits a word into parts
  pub(crate) mod split {
@@ -206,7 +207,7 @@ index 903d74d..066c464 100644
              parts.push(Part {
                  num_bits: word_part.bits.len(),
                  cell: cell.clone(),
-@@ -211,20 +162,15 @@ pub(crate) mod split {
+@@ -212,20 +162,15 @@ pub(crate) mod split {
          input: F,
          rot: usize,
          target_part_size: usize,
@@ -231,12 +232,13 @@ index 903d74d..066c464 100644
              cell.assign(region, 0, F::from(value));
              parts.push(PartValue {
                  num_bits: word_part.bits.len(),
-@@ -240,17 +186,20 @@ pub(crate) mod split {
+@@ -241,18 +186,20 @@ pub(crate) mod split {
  // Split into parts, but storing the parts in a specific way to have the same
  // table layout in `output_cells` regardless of rotation.
  pub(crate) mod split_uniform {
+-    use super::super::param::BIT_SIZE;
 -    use super::super::util::{
--        eth_types::Field, pack, pack_part, rotate, rotate_rev, unpack, WordParts, BIT_SIZE,
+-        eth_types::Field, pack, pack_part, rotate, rotate_rev, unpack, WordParts,
 -    };
 -    use super::{
 -        decode, target_part_sizes, BaseConstraintBuilder, Cell, CellManager, Expr, FieldExt,
@@ -260,7 +262,7 @@ index 903d74d..066c464 100644
          meta: &mut ConstraintSystem<F>,
          output_cells: &[Cell<F>],
          cell_manager: &mut CellManager<F>,
-@@ -258,11 +207,10 @@ pub(crate) mod split_uniform {
+@@ -260,11 +207,10 @@ pub(crate) mod split_uniform {
          input: Expression<F>,
          rot: usize,
          target_part_size: usize,
@@ -273,7 +275,7 @@ index 903d74d..066c464 100644
  
          let word = rotate(word.parts, rot, target_part_size);
  
-@@ -294,8 +242,7 @@ pub(crate) mod split_uniform {
+@@ -296,8 +242,7 @@ pub(crate) mod split_uniform {
  
                  // Make sure the parts combined equal the value in the uniform output
                  let expr = part_a.expr()
@@ -283,7 +285,7 @@ index 903d74d..066c464 100644
                  cb.require_equal("rot part", expr, output_cells[counter].expr());
  
                  // Input needs the two parts because it needs to be able to undo the rotation
-@@ -334,14 +281,13 @@ pub(crate) mod split_uniform {
+@@ -336,14 +281,13 @@ pub(crate) mod split_uniform {
          input: F,
          rot: usize,
          target_part_size: usize,
@@ -299,7 +301,7 @@ index 903d74d..066c464 100644
  
          let word = rotate(word.parts, rot, target_part_size);
  
-@@ -378,7 +324,7 @@ pub(crate) mod split_uniform {
+@@ -380,7 +324,7 @@ pub(crate) mod split_uniform {
                  part_a.assign(region, 0, F::from(value_a));
                  part_b.assign(region, 0, F::from(value_b));
  
@@ -308,7 +310,7 @@ index 903d74d..066c464 100644
  
                  output_cells[counter].assign(region, 0, F::from(value));
  
-@@ -410,12 +356,12 @@ pub(crate) mod split_uniform {
+@@ -412,12 +356,12 @@ pub(crate) mod split_uniform {
  
  // Transform values using a lookup table
  pub(crate) mod transform {
@@ -325,7 +327,7 @@ index 903d74d..066c464 100644
          name: &'static str,
          meta: &mut ConstraintSystem<F>,
          cell_manager: &mut CellManager<F>,
-@@ -424,16 +370,14 @@ pub(crate) mod transform {
+@@ -426,16 +370,14 @@ pub(crate) mod transform {
          transform_table: [TableColumn; 2],
          uniform_lookup: bool,
      ) -> Vec<Part<F>> {
@@ -350,7 +352,7 @@ index 903d74d..066c464 100644
          transform_to::expr(
              name,
              meta,
-@@ -453,28 +397,30 @@ pub(crate) mod transform {
+@@ -455,28 +397,30 @@ pub(crate) mod transform {
          f: fn(&u8) -> u8,
          uniform_lookup: bool,
      ) -> Vec<PartValue<F>> {
@@ -395,7 +397,7 @@ index 903d74d..066c464 100644
          name: &'static str,
          meta: &mut ConstraintSystem<F>,
          cells: &[Cell<F>],
-@@ -483,7 +429,7 @@ pub(crate) mod transform_to {
+@@ -485,7 +429,7 @@ pub(crate) mod transform_to {
          transform_table: [TableColumn; 2],
          uniform_lookup: bool,
      ) -> Vec<Part<F>> {
@@ -404,7 +406,7 @@ index 903d74d..066c464 100644
          for (idx, input_part) in input.iter().enumerate() {
              let output_part = cells[idx].clone();
              if !uniform_lookup || input_part.cell.rotation == 0 {
-@@ -532,61 +478,15 @@ pub(crate) mod transform_to {
+@@ -534,61 +478,15 @@ pub(crate) mod transform_to {
      }
  }
  
@@ -468,7 +470,7 @@ index 903d74d..066c464 100644
      let two = F::from(2u64);
  
      // Padding
-@@ -596,13 +496,10 @@ pub(crate) fn keccak_phase0<F: Field>(
+@@ -598,13 +496,10 @@ pub(crate) fn keccak_phase0<F: Field>(
      }
      bits.push(1);
  
@@ -484,7 +486,7 @@ index 903d74d..066c464 100644
      for (idx, chunk) in chunks.enumerate() {
          let is_final_block = idx == num_chunks - 1;
  
-@@ -612,15 +509,23 @@ pub(crate) fn keccak_phase0<F: Field>(
+@@ -614,15 +509,23 @@ pub(crate) fn keccak_phase0<F: Field>(
              let absorb = pack(&chunk[idx * 64..(idx + 1) * 64]);
              let from = s[i][j];
              s[i][j] = field_xor(s[i][j], absorb);
@@ -513,7 +515,7 @@ index 903d74d..066c464 100644
              let mut region = KeccakRegion::new();
  
              let mut absorb_row = AbsorbData::default();
-@@ -648,8 +553,7 @@ pub(crate) fn keccak_phase0<F: Field>(
+@@ -650,8 +553,7 @@ pub(crate) fn keccak_phase0<F: Field>(
              cell_manager.start_region();
              let part_size = get_num_bits_per_absorb_lookup();
              let input = absorb_row.from + absorb_row.absorb;
@@ -523,7 +525,7 @@ index 903d74d..066c464 100644
              cell_manager.start_region();
              let _absorb_result = transform::value(
                  &mut cell_manager,
-@@ -664,22 +568,44 @@ pub(crate) fn keccak_phase0<F: Field>(
+@@ -666,22 +568,44 @@ pub(crate) fn keccak_phase0<F: Field>(
              cell_manager.start_region();
              // Unpack a single word into bytes (for the absorption)
              // Potential optimization: could do multiple bytes per lookup
@@ -577,7 +579,7 @@ index 903d74d..066c464 100644
              cell_manager.start_region();
  
              if round != NUM_ROUNDS {
-@@ -688,8 +614,7 @@ pub(crate) fn keccak_phase0<F: Field>(
+@@ -690,8 +614,7 @@ pub(crate) fn keccak_phase0<F: Field>(
                  let mut bcf = Vec::new();
                  for s in &s {
                      let c = s[0] + s[1] + s[2] + s[3] + s[4];
@@ -587,7 +589,7 @@ index 903d74d..066c464 100644
                      bcf.push(bc_fat);
                  }
                  cell_manager.start_region();
-@@ -735,7 +660,7 @@ pub(crate) fn keccak_phase0<F: Field>(
+@@ -737,7 +660,7 @@ pub(crate) fn keccak_phase0<F: Field>(
                                  rho_pi_chi_cells[p][i][j]
                                      .push(cell_manager.query_cell_value_at_row(row_idx as i32));
                              }
@@ -596,7 +598,7 @@ index 903d74d..066c464 100644
                          }
                      }
                  }
-@@ -751,7 +676,6 @@ pub(crate) fn keccak_phase0<F: Field>(
+@@ -753,7 +676,6 @@ pub(crate) fn keccak_phase0<F: Field>(
                              s[i][j],
                              RHO_MATRIX[i][j],
                              part_size,
@@ -604,7 +606,7 @@ index 903d74d..066c464 100644
                          );
  
                          let s_parts = transform_to::value(
-@@ -801,15 +725,8 @@ pub(crate) fn keccak_phase0<F: Field>(
+@@ -803,15 +725,8 @@ pub(crate) fn keccak_phase0<F: Field>(
                  // iota
                  let part_size = get_num_bits_per_absorb_lookup();
                  let input = s[0][0] + pack_u64::<F>(ROUND_CST[round]);
@@ -622,7 +624,7 @@ index 903d74d..066c464 100644
                  cell_manager.start_region();
                  s[0][0] = decode::value(transform::value(
                      &mut cell_manager,
-@@ -821,11 +738,26 @@ pub(crate) fn keccak_phase0<F: Field>(
+@@ -823,11 +738,26 @@ pub(crate) fn keccak_phase0<F: Field>(
                  ));
              }
  
@@ -654,7 +656,7 @@ index 903d74d..066c464 100644
  
              cell_managers.push(cell_manager);
              regions.push(region);
-@@ -842,19 +774,16 @@ pub(crate) fn keccak_phase0<F: Field>(
+@@ -844,19 +774,16 @@ pub(crate) fn keccak_phase0<F: Field>(
              squeeze_packed.assign(region, 0, *word);
  
              cell_manager.start_region();
@@ -676,7 +678,7 @@ index 903d74d..066c464 100644
                      q_round: row_idx == 0 && round < NUM_ROUNDS,
                      q_absorb: row_idx == 0 && round == NUM_ROUNDS,
                      q_round_last: row_idx == 0 && round == NUM_ROUNDS,
-@@ -862,22 +791,16 @@ pub(crate) fn keccak_phase0<F: Field>(
+@@ -864,22 +791,16 @@ pub(crate) fn keccak_phase0<F: Field>(
                      q_padding_last: row_idx == 0 && round == NUM_WORDS_TO_ABSORB - 1,
                      round_cst,
                      is_final: is_final_block && round == NUM_ROUNDS && row_idx == 0,
@@ -704,7 +706,7 @@ index 903d74d..066c464 100644
          let hash_bytes = s
              .into_iter()
              .take(4)
-@@ -891,91 +814,52 @@ pub(crate) fn keccak_phase0<F: Field>(
+@@ -893,91 +814,52 @@ pub(crate) fn keccak_phase0<F: Field>(
              })
              .collect::<Vec<_>>();
          debug!("hash: {:x?}", &(hash_bytes[0..4].concat()));
