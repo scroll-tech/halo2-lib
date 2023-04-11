@@ -1,0 +1,137 @@
+diff --git a/src/keccak_circuit/cell_manager.rs b/home/a/scroll/zkevm-circuits/zkevm-circuits/src/keccak_circuit/cell_manager.rs
+index efc6025..98fdaf4 100644
+--- a/src/keccak_circuit/cell_manager.rs
++++ b/home/a/scroll/zkevm-circuits/zkevm-circuits/src/keccak_circuit/cell_manager.rs
+@@ -1,10 +1,11 @@
+-use super::util::expression::Expr;
+-use crate::halo2_proofs::{
++use crate::keccak_circuit::{util::extract_field, KeccakRegion};
++use gadgets::util::Expr;
++use halo2_proofs::{
+     arithmetic::FieldExt,
++    circuit::Value,
+     plonk::{Advice, Column, ConstraintSystem, Expression, VirtualCells},
+     poly::Rotation,
+ };
+-use crate::keccak_circuit::KeccakRegion;
+ 
+ #[derive(Clone, Debug)]
+ pub(crate) struct Cell<F> {
+@@ -58,7 +59,25 @@ impl<F: FieldExt> Cell<F> {
+     }
+ 
+     pub(crate) fn assign(&self, region: &mut KeccakRegion<F>, offset: i32, value: F) {
+-        region.assign(self.column_idx, (offset + self.rotation) as usize, value);
++        region.assign(
++            self.column_idx,
++            ((offset as i32) + self.rotation) as usize,
++            value,
++        );
++    }
++
++    pub(crate) fn assign_value(&self, region: &mut KeccakRegion<F>, offset: i32, value: Value<F>) {
++        // This is really ugly. But since there's no way to easily adapt the CellManager
++        // API customized for this impl specifically, for now I'm opening the
++        // value and extracting it. Once https://github.com/privacy-scaling-explorations/zkevm-circuits/issues/933 is resolved,
++        // this shouldn't be needed.
++        let value_f = extract_field(value);
++
++        region.assign(
++            self.column_idx,
++            ((offset as i32) + self.rotation) as usize,
++            value_f,
++        );
+     }
+ }
+ 
+@@ -85,10 +104,7 @@ pub(crate) struct CellColumn<F> {
+ #[derive(Clone, Debug)]
+ pub(crate) struct CellManager<F> {
+     height: usize,
+-    width: usize,
+-    current_row: usize,
+     columns: Vec<CellColumn<F>>,
+-    // rows[i] gives the number of columns already used in row `i`
+     rows: Vec<usize>,
+     num_unused_cells: usize,
+ }
+@@ -97,8 +113,6 @@ impl<F: FieldExt> CellManager<F> {
+     pub(crate) fn new(height: usize) -> Self {
+         Self {
+             height,
+-            width: 0,
+-            current_row: 0,
+             columns: Vec::new(),
+             rows: vec![0; height],
+             num_unused_cells: 0,
+@@ -117,8 +131,6 @@ impl<F: FieldExt> CellManager<F> {
+     ) -> Cell<F> {
+         let column_idx = self.rows[row_idx as usize];
+         self.rows[row_idx as usize] += 1;
+-        self.width = self.width.max(column_idx + 1);
+-        self.current_row = (row_idx as usize + 1) % self.height;
+         self.query_cell_at_pos(meta, row_idx, column_idx)
+     }
+ 
+@@ -130,24 +142,21 @@ impl<F: FieldExt> CellManager<F> {
+     pub(crate) fn query_cell_value_at_row(&mut self, row_idx: i32) -> Cell<F> {
+         let column_idx = self.rows[row_idx as usize];
+         self.rows[row_idx as usize] += 1;
+-        self.width = self.width.max(column_idx + 1);
+-        self.current_row = (row_idx as usize + 1) % self.height;
+         self.query_cell_value_at_pos(row_idx, column_idx)
+     }
+ 
+     pub(crate) fn start_region(&mut self) -> usize {
+         // Make sure all rows start at the same column
+         let width = self.get_width();
+-        #[cfg(debug_assertions)]
+         for row in self.rows.iter_mut() {
+             self.num_unused_cells += width - *row;
++            *row = width;
+         }
+-        self.rows = vec![width; self.height];
+         width
+     }
+ 
+     pub(crate) fn get_width(&self) -> usize {
+-        self.width
++        self.rows.iter().cloned().max().unwrap()
+     }
+ 
+     pub(crate) fn columns(&self) -> &[CellColumn<F>] {
+@@ -158,7 +167,7 @@ impl<F: FieldExt> CellManager<F> {
+         self.num_unused_cells
+     }
+ 
+-    pub(crate) fn query_cell_at_pos(
++    fn query_cell_at_pos(
+         &mut self,
+         meta: &mut ConstraintSystem<F>,
+         row_idx: i32,
+@@ -185,16 +194,20 @@ impl<F: FieldExt> CellManager<F> {
+         cells[0].clone()
+     }
+ 
+-    pub(crate) fn query_cell_value_at_pos(&mut self, row_idx: i32, column_idx: usize) -> Cell<F> {
++    fn query_cell_value_at_pos(&mut self, row_idx: i32, column_idx: usize) -> Cell<F> {
+         Cell::new_value(column_idx, row_idx)
+     }
+ 
+     fn get_position(&mut self) -> (usize, usize) {
+-        let best_row_idx = self.current_row;
+-        let best_row_pos = self.rows[best_row_idx];
++        let mut best_row_idx = 0usize;
++        let mut best_row_pos = 100000usize;
++        for (row_idx, row) in self.rows.iter().enumerate() {
++            if *row < best_row_pos {
++                best_row_pos = *row;
++                best_row_idx = row_idx;
++            }
++        }
+         self.rows[best_row_idx] += 1;
+-        self.width = self.width.max(best_row_pos + 1);
+-        self.current_row = (best_row_idx + 1) % self.height;
+         (best_row_idx, best_row_pos)
+     }
+ }

@@ -1,0 +1,260 @@
+diff --git a/src/keccak_circuit/test.rs b/home/a/scroll/zkevm-circuits/zkevm-circuits/src/keccak_circuit/test.rs
+index c87fd5d..74e9f2a 100644
+--- a/src/keccak_circuit/test.rs
++++ b/home/a/scroll/zkevm-circuits/zkevm-circuits/src/keccak_circuit/test.rs
+@@ -1,115 +1,29 @@
+-use super::*;
+-use crate::halo2_proofs::{
+-    circuit::SimpleFloorPlanner,
+-    dev::MockProver,
+-    halo2curves::bn256::Fr,
+-    halo2curves::bn256::{Bn256, G1Affine},
+-    plonk::{create_proof, keygen_pk, keygen_vk, verify_proof},
+-    plonk::{Circuit, FirstPhase},
+-    poly::{
+-        commitment::ParamsProver,
+-        kzg::{
+-            commitment::{KZGCommitmentScheme, ParamsKZG, ParamsVerifierKZG},
+-            multiopen::{ProverSHPLONK, VerifierSHPLONK},
+-            strategy::SingleStrategy,
+-        },
+-    },
+-    transcript::{
+-        Blake2bRead, Blake2bWrite, Challenge255, TranscriptReadBuffer, TranscriptWriterBuffer,
+-    },
+-};
+-use rand_core::OsRng;
+-use std::env::var;
++use crate::keccak_circuit::KeccakCircuit;
++use eth_types::Field;
++use halo2_proofs::{dev::MockProver, halo2curves::bn256::Fr};
++use log::error;
++use std::iter::zip;
+ 
+-/// KeccakCircuit
+-#[derive(Default, Clone, Debug)]
+-pub struct KeccakCircuit<F: Field> {
+-    inputs: Vec<Vec<u8>>,
+-    num_rows: Option<usize>,
+-    _marker: PhantomData<F>,
+-}
+-
+-#[cfg(any(feature = "test", test))]
+-impl<F: Field> Circuit<F> for KeccakCircuit<F> {
+-    type Config = KeccakCircuitConfig<F>;
+-    type FloorPlanner = SimpleFloorPlanner;
+-
+-    fn without_witnesses(&self) -> Self {
+-        Self::default()
+-    }
+-
+-    fn configure(meta: &mut ConstraintSystem<F>) -> Self::Config {
+-        // MockProver complains if you only have columns in SecondPhase, so let's just make an empty column in FirstPhase
+-        meta.advice_column();
+-
+-        let challenge = meta.challenge_usable_after(FirstPhase);
+-        KeccakCircuitConfig::new(meta, challenge)
+-    }
+-
+-    fn synthesize(
+-        &self,
+-        config: Self::Config,
+-        mut layouter: impl Layouter<F>,
+-    ) -> Result<(), Error> {
+-        config.load_aux_tables(&mut layouter)?;
+-        let mut challenge = layouter.get_challenge(config.challenge);
+-        let mut first_pass = true;
+-        layouter.assign_region(
+-            || "keccak circuit",
+-            |mut region| {
+-                if first_pass {
+-                    first_pass = false;
+-                    return Ok(());
+-                }
+-                let (witness, squeeze_digests) = multi_keccak_phase0(&self.inputs, self.capacity());
+-                config.assign(&mut region, &witness);
+-
+-                #[cfg(feature = "halo2-axiom")]
+-                {
+-                    region.next_phase();
+-                    challenge = region.get_challenge(config.challenge);
+-                }
+-                multi_keccak_phase1(
+-                    &mut region,
+-                    &config.keccak_table,
+-                    self.inputs.iter().map(|v| v.as_slice()),
+-                    challenge,
+-                    squeeze_digests,
+-                );
+-                Ok(())
+-            },
+-        )?;
+-
+-        Ok(())
+-    }
+-}
+-
+-impl<F: Field> KeccakCircuit<F> {
+-    /// Creates a new circuit instance
+-    pub fn new(num_rows: Option<usize>, inputs: Vec<Vec<u8>>) -> Self {
+-        KeccakCircuit { inputs, num_rows, _marker: PhantomData }
+-    }
++use super::util::{target_part_sizes, target_part_sizes_rot, WordParts};
+ 
+-    /// The number of keccak_f's that can be done in this circuit
+-    pub fn capacity(&self) -> Option<usize> {
+-        // Subtract two for unusable rows
+-        self.num_rows.map(|num_rows| num_rows / ((NUM_ROUNDS + 1) * get_num_rows_per_round()) - 2)
+-    }
+-}
+-
+-fn verify<F: Field>(k: u32, inputs: Vec<Vec<u8>>, _success: bool) {
+-    let circuit = KeccakCircuit::new(Some(2usize.pow(k)), inputs);
++fn verify<F: Field>(k: u32, inputs: Vec<Vec<u8>>, success: bool) {
++    let circuit = KeccakCircuit::new(2usize.pow(k), inputs);
+ 
+     let prover = MockProver::<F>::run(k, &circuit, vec![]).unwrap();
+-    prover.assert_satisfied();
++    let verify_result = prover.verify();
++    if verify_result.is_ok() != success {
++        if let Some(errors) = verify_result.err() {
++            for error in errors.iter() {
++                error!("{}", error);
++            }
++        }
++        panic!();
++    }
+ }
+ 
+-/// Cmdline: KECCAK_ROWS=28 KECCAK_DEGREE=14 RUST_LOG=info cargo test -- --nocapture packed_multi_keccak_simple
+ #[test]
+ fn packed_multi_keccak_simple() {
+-    let _ = env_logger::builder().is_test(true).try_init();
+-
+-    let k = 14;
++    let k = 11;
+     let inputs = vec![
+         vec![],
+         (0u8..1).collect::<Vec<_>>(),
+@@ -121,12 +35,15 @@ fn packed_multi_keccak_simple() {
+ }
+ 
+ #[test]
+-fn packed_multi_keccak_prover() {
+-    let _ = env_logger::builder().is_test(true).try_init();
+-
+-    let k: u32 = var("KECCAK_DEGREE").unwrap_or_else(|_| "14".to_string()).parse().unwrap();
+-    let params = ParamsKZG::<Bn256>::setup(k, OsRng);
+-
++fn variadic_size_check() {
++    let k = 11;
++    let num_rows = 2usize.pow(k);
++    // Empty
++    let inputs = vec![];
++    let circuit = KeccakCircuit::new(num_rows, inputs);
++    let prover1 = MockProver::<Fr>::run(k, &circuit, vec![]).unwrap();
++
++    // Non-empty
+     let inputs = vec![
+         vec![],
+         (0u8..1).collect::<Vec<_>>(),
+@@ -134,34 +51,73 @@ fn packed_multi_keccak_prover() {
+         (0u8..136).collect::<Vec<_>>(),
+         (0u8..200).collect::<Vec<_>>(),
+     ];
+-    let circuit = KeccakCircuit::new(Some(2usize.pow(k)), inputs);
++    let circuit = KeccakCircuit::new(num_rows, inputs);
++    let prover2 = MockProver::<Fr>::run(k, &circuit, vec![]).unwrap();
+ 
+-    let vk = keygen_vk(&params, &circuit).unwrap();
+-    let pk = keygen_pk(&params, vk, &circuit).unwrap();
+-
+-    let verifier_params: ParamsVerifierKZG<Bn256> = params.verifier_params().clone();
+-    let mut transcript = Blake2bWrite::<_, G1Affine, Challenge255<_>>::init(vec![]);
++    assert_eq!(prover1.fixed(), prover2.fixed());
++    assert_eq!(prover1.permutation(), prover2.permutation());
++}
+ 
+-    create_proof::<
+-        KZGCommitmentScheme<Bn256>,
+-        ProverSHPLONK<'_, Bn256>,
+-        Challenge255<G1Affine>,
+-        _,
+-        Blake2bWrite<Vec<u8>, G1Affine, Challenge255<G1Affine>>,
+-        _,
+-    >(&params, &pk, &[circuit], &[&[]], OsRng, &mut transcript)
+-    .expect("proof generation should not fail");
+-    let proof = transcript.finalize();
++#[test]
++fn test_target_part_sizes() {
++    // Uniform 8 parts of 8 bits each.
++    assert_eq!(target_part_sizes_rot(8, 0), vec![8, 8, 8, 8, 8, 8, 8, 8]);
++    // With rotations.
++    assert_eq!(target_part_sizes_rot(8, 1), vec![1, 8, 8, 8, 8, 8, 8, 8, 7]);
++    assert_eq!(target_part_sizes_rot(8, 2), vec![2, 8, 8, 8, 8, 8, 8, 8, 6]);
++    assert_eq!(target_part_sizes_rot(8, 8), vec![8, 8, 8, 8, 8, 8, 8, 8]);
++    assert_eq!(target_part_sizes_rot(8, 9), vec![8, 1, 8, 8, 8, 8, 8, 8, 7]);
++
++    // Parts of 11 bits and the remaining 9 bits.
++    assert_eq!(target_part_sizes_rot(11, 0), vec![11, 11, 11, 11, 11, 9]);
++    // With rotations.
++    assert_eq!(target_part_sizes_rot(11, 1), vec![1, 11, 11, 11, 11, 11, 8]);
++    assert_eq!(target_part_sizes_rot(11, 2), vec![2, 11, 11, 11, 11, 11, 7]);
++    assert_eq!(target_part_sizes_rot(11, 11), vec![11, 11, 11, 11, 11, 9]);
++    assert_eq!(
++        target_part_sizes_rot(11, 12),
++        vec![11, 1, 11, 11, 11, 11, 8]
++    );
++
++    // "uniform" is the same as rot=0
++    assert_eq!(target_part_sizes(8), target_part_sizes_rot(8, 0));
++    assert_eq!(target_part_sizes(11), target_part_sizes_rot(11, 0));
++}
+ 
+-    let mut verifier_transcript = Blake2bRead::<_, G1Affine, Challenge255<_>>::init(&proof[..]);
+-    let strategy = SingleStrategy::new(&params);
++#[test]
++fn test_word_parts() {
++    {
++        let word = WordParts::new(11, 0, true);
++        // Parts of bits.
++        let expected: Vec<Vec<usize>> = vec![
++            (0..11).collect(),  // Length 11
++            (11..22).collect(), // …
++            (22..33).collect(), // …
++            (33..44).collect(), // …
++            (44..55).collect(), // …
++            (55..64).collect(), // Length 9
++        ];
++        assert_eq!(word.parts.len(), expected.len());
++        for (part, xbits) in zip(word.parts, expected) {
++            assert_eq!(part.bits, xbits);
++        }
++    }
+ 
+-    verify_proof::<
+-        KZGCommitmentScheme<Bn256>,
+-        VerifierSHPLONK<'_, Bn256>,
+-        Challenge255<G1Affine>,
+-        Blake2bRead<&[u8], G1Affine, Challenge255<G1Affine>>,
+-        SingleStrategy<'_, Bn256>,
+-    >(&verifier_params, pk.get_vk(), strategy, &[&[]], &mut verifier_transcript)
+-    .expect("failed to verify bench circuit");
++    {
++        let word = WordParts::new(11, 1, false);
++        // Parts of bits.
++        let expected: Vec<Vec<usize>> = vec![
++            (0..11).collect(),  // Length 11
++            (11..22).collect(), // …
++            (22..33).collect(), // …
++            (33..44).collect(), // …
++            (44..55).collect(), // …
++            (55..63).collect(), // Length 8
++            (63..64).collect(), // Length 1
++        ];
++        assert_eq!(word.parts.len(), expected.len());
++        for (part, xbits) in zip(word.parts, expected) {
++            assert_eq!(part.bits, xbits);
++        }
++    }
+ }
