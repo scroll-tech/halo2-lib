@@ -397,7 +397,7 @@ pub fn assign_advice_custom<'v, F: Field>(
     {
         region.assign_advice(column, offset, value)
     }
-    #[cfg(feature = "halo2-pse")]
+    #[cfg(feature = "halo2-scroll")]
     {
         region
             .assign_advice(|| format!("assign advice {}", offset), column, offset, || value)
@@ -415,7 +415,7 @@ pub fn assign_fixed_custom<F: Field>(
     {
         region.assign_fixed(column, offset, value);
     }
-    #[cfg(feature = "halo2-pse")]
+    #[cfg(feature = "halo2-scroll")]
     {
         region
             .assign_fixed(

@@ -28,10 +28,10 @@ criterion = "0.4"
 criterion-macro = "0.4"
 
 [features]
-default = ["jemallocator", "halo2-pse", "display"]
+default = ["jemallocator", "halo2-scroll", "display"]
 dev-graph = ["halo2-base/dev-graph"]
 display = ["halo2-base/display"]
-halo2-pse = ["halo2-base/halo2-pse"]
+halo2-scroll = ["halo2-base/halo2-scroll"]
 halo2-axiom = ["halo2-base/halo2-axiom"]
 jemallocator = ["halo2-base/jemallocator"]
 mimalloc = ["halo2-base/mimalloc"]

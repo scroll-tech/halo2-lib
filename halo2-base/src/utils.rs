@@ -1,4 +1,4 @@
-#[cfg(feature = "halo2-pse")]
+#[cfg(feature = "halo2-scroll")]
 use crate::halo2_proofs::arithmetic::CurveAffine;
 use crate::halo2_proofs::{arithmetic::FieldExt, circuit::Value};
 use core::hash::Hash;
@@ -50,10 +50,10 @@ where
 
 // Later: will need to separate BigPrimeField from ScalarField when Goldilocks is introduced
 
-#[cfg(feature = "halo2-pse")]
+#[cfg(feature = "halo2-scroll")]
 pub trait BigPrimeField = FieldExt<Repr = [u8; 32]> + Hash;
 
-#[cfg(feature = "halo2-pse")]
+#[cfg(feature = "halo2-scroll")]
 pub trait ScalarField = FieldExt + Hash;
 
 #[inline(always)]
@@ -117,7 +117,7 @@ pub fn biguint_to_fe<F: BigPrimeField>(e: &BigUint) -> F {
         F::from_u64_digits(&e.to_u64_digits())
     }
 
-    #[cfg(feature = "halo2-pse")]
+    #[cfg(feature = "halo2-scroll")]
     {
         let mut repr = F::Repr::default();
         let bytes = e.to_bytes_le();
@@ -137,7 +137,7 @@ pub fn bigint_to_fe<F: BigPrimeField>(e: &BigInt) -> F {
             F::from_u64_digits(&digits)
         }
     }
-    #[cfg(feature = "halo2-pse")]
+    #[cfg(feature = "halo2-scroll")]
     {
         let (sign, bytes) = e.to_bytes_le();
         let mut repr = F::Repr::default();
@@ -185,7 +185,7 @@ pub fn decompose_fe_to_u64_limbs<F: ScalarField>(
         e.to_u64_limbs(number_of_limbs, bit_len)
     }
 
-    #[cfg(feature = "halo2-pse")]
+    #[cfg(feature = "halo2-scroll")]
     {
         decompose_u64_digits_to_limbs(fe_to_biguint(e).iter_u64_digits(), number_of_limbs, bit_len)
     }
@@ -261,7 +261,7 @@ pub fn compose(input: Vec<BigUint>, bit_len: usize) -> BigUint {
 #[cfg(feature = "halo2-axiom")]
 pub use halo2_proofs_axiom::halo2curves::CurveAffineExt;
 
-#[cfg(feature = "halo2-pse")]
+#[cfg(feature = "halo2-scroll")]
 pub trait CurveAffineExt: CurveAffine {
     /// Unlike the `Coordinates` trait, this just returns the raw affine coordinantes without checking `is_on_curve`
     fn into_coordinates(self) -> (Self::Base, Self::Base) {
@@ -269,7 +269,7 @@ pub trait CurveAffineExt: CurveAffine {
         (*coordinates.x(), *coordinates.y())
     }
 }
-#[cfg(feature = "halo2-pse")]
+#[cfg(feature = "halo2-scroll")]
 impl<C: CurveAffine> CurveAffineExt for C {}
 
 pub mod fs {

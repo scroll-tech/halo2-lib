@@ -18,15 +18,15 @@ use mimalloc::MiMalloc;
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
-#[cfg(all(feature = "halo2-pse", feature = "halo2-axiom"))]
+#[cfg(all(feature = "halo2-scroll", feature = "halo2-axiom"))]
 compile_error!(
     "Cannot have both \"halo2-pse\" and \"halo2-axiom\" features enabled at the same time!"
 );
-#[cfg(not(any(feature = "halo2-pse", feature = "halo2-axiom")))]
+#[cfg(not(any(feature = "halo2-scroll", feature = "halo2-axiom")))]
 compile_error!("Must enable exactly one of \"halo2-pse\" or \"halo2-axiom\" features to choose which halo2_proofs crate to use.");
 
 // use gates::flex_gate::MAX_PHASE;
-#[cfg(feature = "halo2-pse")]
+#[cfg(feature = "halo2-scroll")]
 pub use halo2_proofs;
 #[cfg(feature = "halo2-axiom")]
 pub use halo2_proofs_axiom as halo2_proofs;
@@ -39,7 +39,7 @@ pub mod utils;
 
 #[cfg(feature = "halo2-axiom")]
 pub const SKIP_FIRST_PASS: bool = false;
-#[cfg(feature = "halo2-pse")]
+#[cfg(feature = "halo2-scroll")]
 pub const SKIP_FIRST_PASS: bool = true;
 
 #[derive(Clone, Copy, Debug)]
