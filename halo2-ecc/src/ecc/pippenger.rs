@@ -72,6 +72,7 @@ pub fn multi_product<'v, F: PrimeField, FC, C>(
 where
     FC: FieldChip<F> + Selectable<F, Point<'v> = FC::FieldPoint<'v>>,
     C: CurveAffineExt<Base = FC::FieldType>,
+    FC::FieldType: From<u64>,
 {
     let c = clumping_factor; // this is `b` in Section 3 of Bootle
 
@@ -150,6 +151,7 @@ pub fn multi_exp<'v, F: PrimeField, FC, C>(
 where
     FC: FieldChip<F> + Selectable<F, Point<'v> = FC::FieldPoint<'v>>,
     C: CurveAffineExt<Base = FC::FieldType>,
+    FC::FieldType: From<u64>,
 {
     let (points, bool_scalars) =
         decompose::<F, _>(chip, ctx, points, scalars, max_scalar_bits_per_cell, radix);

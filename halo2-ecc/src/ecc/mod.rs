@@ -2,7 +2,9 @@
 use crate::bigint::CRTInteger;
 use crate::fields::{fp::FpConfig, FieldChip, PrimeFieldChip, Selectable};
 use crate::halo2_proofs::{arithmetic::CurveAffine, circuit::Value};
+use ff::Field;
 use group::{Curve, Group};
+use halo2_base::halo2_proofs::halo2curves::bn256::{Bn256, G1Affine};
 use halo2_base::{
     gates::{GateInstructions, RangeInstructions},
     utils::{modulus, CurveAffineExt, PrimeField},
@@ -47,6 +49,80 @@ impl<F: PrimeField, FieldPoint: Clone> EcPoint<F, FieldPoint> {
     }
 }
 
+fn get_value<F: Default + Clone>(a: Value<F>) -> F {
+    let mut t = F::default();
+    a.map(|x| t = x);
+    t
+}
+
+pub fn ec_add_unequal<'v, F: PrimeField, FC: FieldChip<F>>(
+    chip: &FC,
+    ctx: &mut Context<'v, F>,
+    P: &EcPoint<F, FC::FieldPoint<'v>>,
+    Q: &EcPoint<F, FC::FieldPoint<'v>>,
+    is_strict: bool,
+) -> EcPoint<F, FC::FieldPoint<'v>>
+where
+    FC::FieldType: From<u64>,
+{
+    // let R2 = ec_add_unequal_old(chip, ctx, P, Q, is_strict);
+    println!("using the new formula");
+    // compute the result R := (rx, ry) = P + Q in the clear
+    let R: EcPoint<F, FC::FieldPoint<'v>> = {
+        let px = get_value(chip.get_assigned_value(P.x()));
+        let py = get_value(chip.get_assigned_value(P.y()));
+        let qx = get_value(chip.get_assigned_value(Q.x()));
+        let qy = get_value(chip.get_assigned_value(Q.y()));
+
+        assert_ne!(px, qx);
+        assert_ne!(py, qy);
+
+        // let rx2 = get_value(chip.get_assigned_value(R2.x()));
+        // let ry2 = get_value(chip.get_assigned_value(R2.y()));
+
+        //  lambda = (y_2-y_1)/(x_2-x_1)
+        let lambda = (qy - py) * (qx - px).invert().unwrap();
+        //  x_3 = lambda^2 - x_1 - x_2 (mod p)
+        let rx = lambda * lambda - px - qx;
+        //  y_3 = lambda (x_1 - x_3) - y_1 mod p
+        let ry = lambda * (px - rx) - py;
+        // assert_eq!(rx, rx2);
+        // assert_eq!(ry, ry2);
+
+        let rx_wire = chip.load_private(ctx, FC::fe_to_witness(&Value::known(rx)));
+        let ry_wire = chip.load_private(ctx, FC::fe_to_witness(&Value::known(ry)));
+        EcPoint::construct(rx_wire, ry_wire)
+    };
+
+    // check R is on curve
+    {
+        let lhs = chip.mul_no_carry(ctx, &R.y, &R.y);
+        let mut rhs = chip.mul(ctx, &R.x, &R.x);
+        rhs = chip.mul_no_carry(ctx, &rhs, &R.x);
+        // hard code for bn curve -- fixme for other curves
+        let b = FC::fe_to_constant(<FC as FieldChip<F>>::FieldType::from(3u64));
+        rhs = chip.add_constant_no_carry(ctx, &rhs, b);
+        let diff = chip.sub_no_carry(ctx, &lhs, &rhs);
+        chip.check_carry_mod_to_zero(ctx, &diff);
+    }
+    // check (y3 - y1)(x2 - x1) = (y2 - y1)(x3 - x1)
+    {
+        // (y3 - y1)(x2 - x1)
+        let mut lhs = chip.sub_no_carry(ctx, &R.y, &P.y);
+        let tmp = chip.sub_no_carry(ctx, &Q.x, &P.x);
+        lhs = chip.mul_no_carry(ctx, &lhs, &tmp);
+        // (y2 - y1)(x3 - x1)
+        let mut rhs = chip.sub_no_carry(ctx, &Q.y, &P.y);
+        let tmp = chip.sub_no_carry(ctx, &R.x, &P.x);
+        rhs = chip.mul_no_carry(ctx, &rhs, &tmp);
+
+        let diff = chip.sub_no_carry(ctx, &lhs, &rhs);
+        chip.check_carry_mod_to_zero(ctx, &diff);
+    }
+
+    R
+}
+
 // Implements:
 //  Given P = (x_1, y_1) and Q = (x_2, y_2), ecc points over the field F_p
 //      assume x_1 != x_2
@@ -58,7 +134,7 @@ impl<F: PrimeField, FieldPoint: Clone> EcPoint<F, FieldPoint> {
 //  y_3 = lambda (x_1 - x_3) - y_1 mod p
 //
 /// For optimization reasons, we assume that if you are using this with `is_strict = true`, then you have already called `chip.enforce_less_than_p` on both `P.x` and `P.y`
-pub fn ec_add_unequal<'v, F: PrimeField, FC: FieldChip<F>>(
+pub fn ec_add_unequal_old<'v, F: PrimeField, FC: FieldChip<F>>(
     chip: &FC,
     ctx: &mut Context<'v, F>,
     P: &EcPoint<F, FC::FieldPoint<'v>>,
@@ -244,6 +320,7 @@ pub fn scalar_multiply<'v, F: PrimeField, FC>(
 ) -> EcPoint<F, FC::FieldPoint<'v>>
 where
     FC: FieldChip<F> + Selectable<F, Point<'v> = FC::FieldPoint<'v>>,
+    FC::FieldType: From<u64>,
 {
     assert!(!scalar.is_empty());
     assert!((max_bits as u64) <= modulus::<F>().bits());
@@ -394,6 +471,7 @@ pub fn multi_scalar_multiply<'v, F: PrimeField, FC, C>(
 where
     FC: FieldChip<F> + Selectable<F, Point<'v> = FC::FieldPoint<'v>>,
     C: CurveAffineExt<Base = FC::FieldType>,
+    FC::FieldType: From<u64>,
 {
     let k = P.len();
     assert_eq!(k, scalars.len());
@@ -481,9 +559,8 @@ where
         for _ in 0..window_bits {
             curr_point = ec_double(chip, ctx, &curr_point);
         }
-        for (cached_points, rounded_bits) in cached_points
-            .chunks(cache_size)
-            .zip(rounded_bits.chunks(rounded_bitlen))
+        for (cached_points, rounded_bits) in
+            cached_points.chunks(cache_size).zip(rounded_bits.chunks(rounded_bitlen))
         {
             let add_point = ec_select_from_bits::<F, FC>(
                 chip,
@@ -675,7 +752,10 @@ impl<F: PrimeField, FC: FieldChip<F>> EccChip<F, FC> {
         P: &EcPoint<F, FC::FieldPoint<'v>>,
         Q: &EcPoint<F, FC::FieldPoint<'v>>,
         is_strict: bool,
-    ) -> EcPoint<F, FC::FieldPoint<'v>> {
+    ) -> EcPoint<F, FC::FieldPoint<'v>>
+    where
+        FC::FieldType: From<u64>,
+    {
         ec_add_unequal(&self.field_chip, ctx, P, Q, is_strict)
     }
 
@@ -729,6 +809,7 @@ impl<F: PrimeField, FC: FieldChip<F>> EccChip<F, FC> {
     where
         C: CurveAffineExt<Base = FC::FieldType>,
         FC::FieldPoint<'v>: 'b,
+        FC::FieldType: From<u64>,
     {
         let rand_point = self.load_random_point::<C>(ctx);
         self.field_chip.enforce_less_than(ctx, rand_point.x());
@@ -763,7 +844,10 @@ where
         scalar: &Vec<AssignedValue<'v, F>>,
         max_bits: usize,
         window_bits: usize,
-    ) -> EcPoint<F, FC::FieldPoint<'v>> {
+    ) -> EcPoint<F, FC::FieldPoint<'v>>
+    where
+        FC::FieldType: From<u64>,
+    {
         scalar_multiply::<F, FC>(&self.field_chip, ctx, P, scalar, max_bits, window_bits)
     }
 

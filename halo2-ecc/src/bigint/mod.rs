@@ -29,8 +29,7 @@ pub mod select_by_indicator;
 pub mod sub;
 pub mod sub_no_carry;
 
-#[derive(Clone, Debug, PartialEq)]
-#[derive(Default)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub enum BigIntStrategy {
     // use existing gates
     #[default]
@@ -39,8 +38,6 @@ pub enum BigIntStrategy {
     // we restrict to gate of length 4 since this uses the same set of evaluation points Rotation(0..=3) as our simple gate
     // CustomVerticalShort,
 }
-
-
 
 #[derive(Clone, Debug)]
 pub struct OverflowInteger<'v, F: PrimeField> {

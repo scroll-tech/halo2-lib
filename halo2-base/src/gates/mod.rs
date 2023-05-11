@@ -78,7 +78,9 @@ pub trait GateInstructions<F: ScalarField> {
         let assignments =
             self.assign_region(ctx, inputs, gate_offsets.into_iter().map(|i| (i as isize, None)));
         for (offset1, offset2) in equality_offsets.into_iter() {
-            ctx.region.constrain_equal(assignments[offset1].cell(), assignments[offset2].cell()).unwrap();
+            ctx.region
+                .constrain_equal(assignments[offset1].cell(), assignments[offset2].cell())
+                .unwrap();
         }
         for (assigned, eq_offset) in external_equality.into_iter() {
             ctx.region.constrain_equal(assigned.cell(), assignments[eq_offset].cell()).unwrap();

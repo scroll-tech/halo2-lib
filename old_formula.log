@@ -1,0 +1,7 @@
+running 1 test
+add unequal witness OK
+double witness OK
+Using 2 advice columns and 2 fixed columns
+total advice cells: 2031
+maximum rows used by a fixed column: 1
+test ecc::tests::test_ecc ... ok
