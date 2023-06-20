@@ -189,7 +189,11 @@ pub fn decompose_fe_to_u64_limbs<F: ScalarField>(
     }
 }
 
-pub fn decompose_biguint<F: BigPrimeField>(e: &BigUint, num_limbs: usize, bit_len: usize) -> Vec<F> {
+pub fn decompose_biguint<F: BigPrimeField>(
+    e: &BigUint,
+    num_limbs: usize,
+    bit_len: usize,
+) -> Vec<F> {
     debug_assert!((64..128).contains(&bit_len));
     let mut e = e.iter_u64_digits();
 
