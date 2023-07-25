@@ -346,10 +346,14 @@ impl<'a, F: ScalarField> Context<'a, F> {
         {
             self.total_fixed += 1;
         }
-        self.fixed_col += 1;
-        if self.fixed_col == self.fixed_columns.len() {
-            self.fixed_col = 0;
-            self.fixed_offset += 1;
+        self.fixed_offset += 1;
+        if self.fixed_offset == self.max_rows {
+            self.fixed_col += 1;
+            self.fixed_offset = 0;
+
+            if self.fixed_col >= self.fixed_columns.len() {
+                panic!("NOT ENOUGH FIXED COLUMNS");
+            }
         }
         cell
     }
