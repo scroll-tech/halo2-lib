@@ -709,6 +709,23 @@ pub trait GateInstructions<F: ScalarField> {
         self.mul(ctx, a, b)
     }
 
+    fn and_many(
+        &self,
+        ctx: &mut Context<F>,
+        values: impl IntoIterator<Item = QuantumCell<F>>,
+    ) -> AssignedValue<F> {
+        let mut values = values.into_iter();
+        let (len, hi) = values.size_hint();
+        // TODO: is is safe to assume that len >= 2 (cc @rohit)
+        assert!(len >= 2, "at least 2 elements to perform AND operation");
+        debug_assert_eq!(Some(len), hi);
+
+        let a = values.next().unwrap();
+        let b = values.next().unwrap();
+        let and_many_acc = self.and(ctx, a, b);
+        values.fold(and_many_acc, |acc, b| self.and(ctx, Existing(acc), b))
+    }
+
     fn not(&self, ctx: &mut Context<F>, a: impl Into<QuantumCell<F>>) -> AssignedValue<F> {
         self.sub(ctx, Constant(F::one()), a)
     }

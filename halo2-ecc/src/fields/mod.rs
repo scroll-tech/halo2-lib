@@ -157,7 +157,20 @@ pub trait FieldChip<F: PrimeField> {
         self.carry_mod(ctx, &no_carry)
     }
 
+    // constrains safe division.
+    // - if b==0 => undefined behavior
+    // - else => return quot * b - a = 0 mod p
     fn divide(
+        &self,
+        ctx: &mut Context<F>,
+        a: &Self::FieldPoint,
+        b: &Self::FieldPoint,
+    ) -> Self::FieldPoint;
+
+    // constrains unsafe division.
+    // - if b==0 => undefined behavior
+    // - else => return quot * b - a = 0 mod p
+    fn divide_unsafe(
         &self,
         ctx: &mut Context<F>,
         a: &Self::FieldPoint,
@@ -181,6 +194,16 @@ pub trait FieldChip<F: PrimeField> {
     // constrain and output -a / b
     // this is usually cheaper constraint-wise than computing -a and then (-a) / b separately
     fn neg_divide(
+        &self,
+        ctx: &mut Context<F>,
+        a: &Self::FieldPoint,
+        b: &Self::FieldPoint,
+    ) -> Self::FieldPoint;
+
+    // constrains unsafe division.
+    // constrain and output -a / b
+    // this is usually cheaper constraint-wise than computing -a and then (-a) / b separately
+    fn neg_divide_unsafe(
         &self,
         ctx: &mut Context<F>,
         a: &Self::FieldPoint,

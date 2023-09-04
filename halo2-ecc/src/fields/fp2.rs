@@ -368,6 +368,24 @@ where
             self.fp_chip.assert_equal(ctx, a_coeff, b_coeff)
         }
     }
+
+    fn divide(
+        &self,
+        _ctx: &mut Context<F>,
+        _a: &Self::FieldPoint,
+        _b: &Self::FieldPoint,
+    ) -> Self::FieldPoint {
+        unimplemented!()
+    }
+
+    fn neg_divide(
+        &self,
+        _ctx: &mut Context<F>,
+        _a: &Self::FieldPoint,
+        _b: &Self::FieldPoint,
+    ) -> Self::FieldPoint {
+        unimplemented!()
+    }
 }
 
 mod bn254 {

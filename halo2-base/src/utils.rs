@@ -1,7 +1,6 @@
 #[cfg(feature = "halo2-pse")]
 use crate::halo2_proofs::arithmetic::CurveAffine;
 use crate::halo2_proofs::{arithmetic::FieldExt, circuit::Value};
-use core::hash::Hash;
 use num_bigint::BigInt;
 use num_bigint::BigUint;
 use num_bigint::Sign;

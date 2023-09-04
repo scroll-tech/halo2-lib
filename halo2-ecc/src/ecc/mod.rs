@@ -68,7 +68,7 @@ pub fn ec_add_unequal<F: PrimeField, FC: FieldChip<F>>(
 
     let dx = chip.sub_no_carry(ctx, &Q.x, &P.x);
     let dy = chip.sub_no_carry(ctx, &Q.y, &P.y);
-    let lambda = chip.divide(ctx, &dy, &dx);
+    let lambda = chip.divide_unsafe(ctx, &dy, &dx);
 
     //  x_3 = lambda^2 - x_1 - x_2 (mod p)
     let lambda_sq = chip.mul_no_carry(ctx, &lambda, &lambda);
@@ -111,7 +111,7 @@ pub fn ec_sub_unequal<F: PrimeField, FC: FieldChip<F>>(
     let dx = chip.sub_no_carry(ctx, &Q.x, &P.x);
     let dy = chip.add_no_carry(ctx, &Q.y, &P.y);
 
-    let lambda = chip.neg_divide(ctx, &dy, &dx);
+    let lambda = chip.neg_divide_unsafe(ctx, &dy, &dx);
 
     // (x_2 - x_1) * lambda + y_2 + y_1 = 0 (mod p)
     let lambda_dx = chip.mul_no_carry(ctx, &lambda, &dx);
@@ -154,7 +154,7 @@ pub fn ec_double<F: PrimeField, FC: FieldChip<F>>(
     let two_y = chip.scalar_mul_no_carry(ctx, &P.y, 2);
     let three_x = chip.scalar_mul_no_carry(ctx, &P.x, 3);
     let three_x_sq = chip.mul_no_carry(ctx, &three_x, &P.x);
-    let lambda = chip.divide(ctx, &three_x_sq, &two_y);
+    let lambda = chip.divide_unsafe(ctx, &three_x_sq, &two_y);
 
     // x_3 = lambda^2 - 2 x % p
     let lambda_sq = chip.mul_no_carry(ctx, &lambda, &lambda);

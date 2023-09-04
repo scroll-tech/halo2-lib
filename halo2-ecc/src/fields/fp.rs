@@ -141,6 +141,22 @@ impl<F: PrimeField, Fp: PrimeField> FpConfig<F, Fp> {
 
     pub fn enforce_less_than_p(&self, ctx: &mut Context<F>, a: &CRTInteger<F>) {
         // a < p iff a - p has underflow
+        let borrow = self.minus_p(ctx, a);
+        self.range.gate.assert_is_const(ctx, &borrow, F::one())
+    }
+
+    pub fn is_less_than_p(&self, ctx: &mut Context<F>, a: &CRTInteger<F>) -> AssignedValue<F> {
+        // a < p iff a - p has underflow
+        let borrow = self.minus_p(ctx, a);
+        let one = self.range.gate.load_constant(ctx, F::one());
+        self.range.gate.is_equal(ctx, Existing(borrow), Existing(one))
+    }
+
+    pub fn finalize(&self, ctx: &mut Context<F>) -> usize {
+        self.range.finalize(ctx)
+    }
+
+    fn minus_p(&self, ctx: &mut Context<F>, a: &CRTInteger<F>) -> AssignedValue<F> {
         let mut borrow: Option<AssignedValue<F>> = None;
         for (p_limb, a_limb) in self.p_limbs.iter().zip(a.truncation.limbs.iter()) {
             let lt = match borrow {
@@ -162,11 +178,7 @@ impl<F: PrimeField, Fp: PrimeField> FpConfig<F, Fp> {
             };
             borrow = Some(lt);
         }
-        self.range.gate.assert_is_const(ctx, &borrow.unwrap(), F::one())
-    }
-
-    pub fn finalize(&self, ctx: &mut Context<F>) -> usize {
-        self.range.finalize(ctx)
+        borrow.unwrap()
     }
 }
 
@@ -449,6 +461,28 @@ impl<F: PrimeField, Fp: PrimeField> FieldChip<F> for FpConfig<F, Fp> {
         for (limb_a, limb_b) in a.truncation.limbs.iter().zip(b.truncation.limbs.iter()) {
             self.range.gate.assert_equal(ctx, Existing(*limb_a), Existing(*limb_b));
         }
+    }
+
+    fn divide(
+        &self,
+        ctx: &mut Context<F>,
+        a: &Self::FieldPoint,
+        b: &Self::FieldPoint,
+    ) -> Self::FieldPoint {
+        let quotient = self.divide_unsafe(ctx, a, b);
+        let b_is_zero = self.is_zero(ctx, b);
+        self.select(ctx, b, &quotient, &b_is_zero)
+    }
+
+    fn neg_divide(
+        &self,
+        ctx: &mut Context<F>,
+        a: &Self::FieldPoint,
+        b: &Self::FieldPoint,
+    ) -> Self::FieldPoint {
+        let quotient = self.neg_divide_unsafe(ctx, a, b);
+        let b_is_zero = self.is_zero(ctx, b);
+        self.select(ctx, b, &quotient, &b_is_zero)
     }
 }
 
