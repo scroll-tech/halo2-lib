@@ -5,6 +5,7 @@ use crate::{
     ecc::get_naf,
     fields::{fp12::mul_no_carry_w6, FieldChip, FieldExtPoint},
 };
+use ff::Field;
 use halo2_base::{
     gates::GateInstructions,
     utils::{fe_to_biguint, modulus},

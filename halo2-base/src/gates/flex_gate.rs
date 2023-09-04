@@ -173,7 +173,7 @@ impl<F: ScalarField> FlexGateConfig<F> {
                     strategy,
                     gate_len: 4,
                     context_id,
-                    /// Warning: this needs to be updated if you create more advice columns after this `FlexGateConfig` is created
+                    // Warning: this needs to be updated if you create more advice columns after this `FlexGateConfig` is created
                     max_rows: (1 << circuit_degree) - meta.minimum_rows(),
                     pow_of_two,
                     field_element_cache,
