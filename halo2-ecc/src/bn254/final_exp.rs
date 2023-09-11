@@ -85,9 +85,12 @@ impl<F: PrimeField> Fp12Chip<F> {
             if z != 0 {
                 assert!(z == 1 || z == -1);
                 if is_started {
-                    res = if z == 1 { self.mul(ctx, &res, a) } else { 
-                        // todo: double check that 
-                        self.divide_unsafe(ctx, &res, a) };
+                    res = if z == 1 {
+                        self.mul(ctx, &res, a)
+                    } else {
+                        // todo: double check that
+                        self.divide_unsafe(ctx, &res, a)
+                    };
                 } else {
                     assert_eq!(z, 1);
                     is_started = true;
@@ -286,7 +289,11 @@ impl<F: PrimeField> Fp12Chip<F> {
                 assert!(z == 1 || z == -1);
                 if is_started {
                     let mut res = self.cyclotomic_decompress(ctx, compression);
-                    res = if z == 1 { self.mul(ctx, &res, &a) } else { self.divide_unsafe(ctx, &res, &a) };
+                    res = if z == 1 {
+                        self.mul(ctx, &res, &a)
+                    } else {
+                        self.divide_unsafe(ctx, &res, &a)
+                    };
                     // compression is free, so it doesn't hurt (except possibly witness generation runtime) to do it
                     // TODO: alternatively we go from small bits to large to avoid this compression
                     compression = self.cyclotomic_compress(&res);

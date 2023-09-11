@@ -1,5 +1,6 @@
 #![allow(non_snake_case)]
 use super::{ec_add_unequal, ec_select, ec_select_from_bits, EcPoint, EccChip};
+use crate::ecc::{ec_sub_unequal, load_random_point};
 use crate::fields::PrimeField;
 use crate::halo2_proofs::arithmetic::CurveAffine;
 use crate::{
@@ -154,7 +155,9 @@ where
 
     let cached_point_window_rev = cached_points.chunks(1usize << window_bits).rev();
     let bit_window_rev = bits.chunks(window_bits).rev();
-    let mut curr_point = None;
+
+    let random_point = load_random_point::<F, FC, C>(chip, ctx);
+    let mut curr_point = random_point.clone();
     // `is_started` is just a way to deal with if `curr_point` is actually identity
     let mut is_started = chip.gate().load_zero(ctx);
     for (cached_point_window, bit_window) in cached_point_window_rev.zip(bit_window_rev) {
@@ -162,12 +165,10 @@ where
         // are we just adding a window of all 0s? if so, skip
         let is_zero_window = chip.gate().is_zero(ctx, &bit_sum);
         let add_point = ec_select_from_bits::<F, _>(chip, ctx, cached_point_window, bit_window);
-        curr_point = if let Some(curr_point) = curr_point {
+        curr_point = {
             let sum = ec_add_unequal(chip, ctx, &curr_point, &add_point, false);
             let zero_sum = ec_select(chip, ctx, &curr_point, &sum, &is_zero_window);
-            Some(ec_select(chip, ctx, &zero_sum, &add_point, &is_started))
-        } else {
-            Some(add_point)
+            ec_select(chip, ctx, &zero_sum, &add_point, &is_started)
         };
         is_started = {
             // is_started || !is_zero_window
@@ -181,7 +182,7 @@ where
             )
         };
     }
-    curr_point.unwrap()
+    ec_sub_unequal(chip, ctx, &curr_point, &random_point, false)
 }
 
 // basically just adding up individual fixed_base::scalar_multiply except that we do all batched normalization of cached points at once to further save inversion time during witness generation
