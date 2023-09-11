@@ -159,27 +159,14 @@ where
     let random_point = load_random_point::<F, FC, C>(chip, ctx);
     let mut curr_point = random_point.clone();
     // `is_started` is just a way to deal with if `curr_point` is actually identity
-    let mut is_started = chip.gate().load_zero(ctx);
     for (cached_point_window, bit_window) in cached_point_window_rev.zip(bit_window_rev) {
         let bit_sum = chip.gate().sum(ctx, bit_window.iter().copied().map(Existing));
         // are we just adding a window of all 0s? if so, skip
         let is_zero_window = chip.gate().is_zero(ctx, &bit_sum);
-        let add_point = ec_select_from_bits::<F, _>(chip, ctx, cached_point_window, bit_window);
         curr_point = {
-            let sum = ec_add_unequal(chip, ctx, &curr_point, &add_point, false);
-            let zero_sum = ec_select(chip, ctx, &curr_point, &sum, &is_zero_window);
-            ec_select(chip, ctx, &zero_sum, &add_point, &is_started)
-        };
-        is_started = {
-            // is_started || !is_zero_window
-            // (a || !b) = (1-b) + a*b
-            let not_zero_window = chip.gate().not(ctx, Existing(is_zero_window));
-            chip.gate().mul_add(
-                ctx,
-                Existing(is_started),
-                Existing(is_zero_window),
-                Existing(not_zero_window),
-            )
+            let add_point = ec_select_from_bits(chip, ctx, cached_point_window, bit_window);
+            let sum = ec_add_unequal(chip, ctx, &curr_point, &add_point, true);
+            ec_select(chip, ctx, &curr_point, &sum, &is_zero_window)
         };
     }
     ec_sub_unequal(chip, ctx, &curr_point, &random_point, false)
