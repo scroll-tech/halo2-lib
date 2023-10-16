@@ -4,7 +4,7 @@ use crate::{
 };
 
 use getset::{CopyGetters, Getters};
-use poseidon_rs::poseidon::primitives::Spec as PoseidonSpec; // trait
+use poseidon_circuit::poseidon::primitives::Spec as PoseidonSpec; // trait
 use std::marker::PhantomData;
 
 // struct so we can use PoseidonSpec trait to generate round constants and MDS matrix
@@ -21,7 +21,7 @@ pub(crate) struct Poseidon128Pow5Gen<
 }
 
 impl<
-        F: PrimeField,
+        F: FromUniformBytes<64> + Ord,
         const T: usize,
         const RATE: usize,
         const R_F: usize,

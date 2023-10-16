@@ -10,7 +10,7 @@ use crate::{
     Context,
 };
 use itertools::Itertools;
-use pse_poseidon::Poseidon;
+use poseidon::Poseidon;
 use rand::Rng;
 
 #[derive(Clone)]
