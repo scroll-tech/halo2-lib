@@ -1,6 +1,12 @@
-#[cfg(feature = "halo2-pse")]
+use core::hash::Hash;
+
+#[cfg(not(feature = "halo2-axiom"))]
 use crate::halo2_proofs::arithmetic::CurveAffine;
-use crate::halo2_proofs::{arithmetic::FieldExt, circuit::Value};
+use crate::halo2_proofs::circuit::Value;
+#[cfg(feature = "halo2-axiom")]
+pub use crate::halo2_proofs::halo2curves::CurveAffineExt;
+use halo2_proofs::halo2curves::ff::{FromUniformBytes, PrimeField};
+
 use num_bigint::BigInt;
 use num_bigint::BigUint;
 use num_bigint::Sign;
@@ -47,11 +53,64 @@ where
     }
 }
 
-#[cfg(feature = "halo2-pse")]
-pub trait BigPrimeField = FieldExt<Repr = [u8; 32]>;
+/// Helper trait to represent a field element that can be converted into [u64] limbs.
+///
+/// Note: Since the number of bits necessary to represent a field element is larger than the number of bits in a u64, we decompose the integer representation of the field element into multiple [u64] values e.g. `limbs`.
+pub trait ScalarField: PrimeField + FromUniformBytes<64> + From<bool> + Hash + Ord {
+    /// Returns the base `2<sup>bit_len</sup>` little endian representation of the [ScalarField] element up to `num_limbs` number of limbs (truncates any extra limbs).
+    ///
+    /// Assumes `bit_len < 64`.
+    /// * `num_limbs`: number of limbs to return
+    /// * `bit_len`: number of bits in each limb
+    fn to_u64_limbs(self, num_limbs: usize, bit_len: usize) -> Vec<u64>;
 
+    /// Returns the little endian byte representation of the element.
+    fn to_bytes_le(&self) -> Vec<u8>;
+
+    /// Creates a field element from a little endian byte representation.
+    ///
+    /// The default implementation assumes that `PrimeField::from_repr` is implemented for little-endian.
+    /// It should be overriden if this is not the case.
+    fn from_bytes_le(bytes: &[u8]) -> Self {
+        let mut repr = Self::Repr::default();
+        repr.as_mut()[..bytes.len()].copy_from_slice(bytes);
+        Self::from_repr(repr).unwrap()
+    }
+
+    /// Gets the least significant 32 bits of the field element.
+    fn get_lower_32(&self) -> u32 {
+        let bytes = self.to_bytes_le();
+        let mut lower_32 = 0u32;
+        for (i, byte) in bytes.into_iter().enumerate().take(4) {
+            lower_32 |= (byte as u32) << (i * 8);
+        }
+        lower_32
+    }
+
+    /// Gets the least significant 64 bits of the field element.
+    fn get_lower_64(&self) -> u64 {
+        let bytes = self.to_bytes_le();
+        let mut lower_64 = 0u64;
+        for (i, byte) in bytes.into_iter().enumerate().take(8) {
+            lower_64 |= (byte as u64) << (i * 8);
+        }
+        lower_64
+    }
+
+    #[inline(always)]
+    fn zero() -> Self {
+        Self::ZERO
+    }
+
+    #[inline(always)]
+    fn one() -> Self {
+        Self::ONE
+    }
+}
+
+/// [ScalarField] that is ~256 bits long
 #[cfg(feature = "halo2-pse")]
-pub trait ScalarField = FieldExt;
+pub trait BigPrimeField = PrimeField<Repr = [u8; 32]> + ScalarField;
 
 #[inline(always)]
 pub(crate) fn decompose_u64_digits_to_limbs(
@@ -82,7 +141,7 @@ pub(crate) fn decompose_u64_digits_to_limbs(
             core::cmp::Ordering::Less => {
                 let mut limb = u64_digit;
                 u64_digit = e.next().unwrap_or(0);
-                limb |= (u64_digit & ((1 << (bit_len - rem)) - 1)) << rem;
+                limb |= (u64_digit & ((1u64 << (bit_len - rem)) - 1u64)) << rem;
                 u64_digit >>= bit_len - rem;
                 rem += 64 - bit_len;
                 limb
@@ -91,16 +150,16 @@ pub(crate) fn decompose_u64_digits_to_limbs(
         .collect()
 }
 
-pub fn bit_length(x: u64) -> usize {
+pub const fn bit_length(x: u64) -> usize {
     (u64::BITS - x.leading_zeros()) as usize
 }
 
 pub fn log2_ceil(x: u64) -> usize {
-    (u64::BITS - x.leading_zeros() - (x & (x - 1) == 0) as u32) as usize
+    (u64::BITS - x.leading_zeros()) as usize - usize::from(x.is_power_of_two())
 }
 
 pub fn modulus<F: BigPrimeField>() -> BigUint {
-    fe_to_biguint(&-F::one()) + 1u64
+    fe_to_biguint(&-F::ONE) + 1u64
 }
 
 pub fn power_of_two<F: BigPrimeField>(n: usize) -> F {
@@ -116,10 +175,8 @@ pub fn biguint_to_fe<F: BigPrimeField>(e: &BigUint) -> F {
 
     #[cfg(feature = "halo2-pse")]
     {
-        let mut repr = F::Repr::default();
         let bytes = e.to_bytes_le();
-        repr.as_mut()[..bytes.len()].copy_from_slice(&bytes);
-        F::from_repr(repr).unwrap()
+        F::from_bytes_le(&bytes)
     }
 }
 
@@ -137,9 +194,7 @@ pub fn bigint_to_fe<F: BigPrimeField>(e: &BigInt) -> F {
     #[cfg(feature = "halo2-pse")]
     {
         let (sign, bytes) = e.to_bytes_le();
-        let mut repr = F::Repr::default();
-        repr.as_mut()[..bytes.len()].copy_from_slice(&bytes);
-        let f_abs = F::from_repr(repr).unwrap();
+        let f_abs = F::from_bytes_le(&bytes);
         if sign == Sign::Minus {
             -f_abs
         } else {
@@ -148,8 +203,8 @@ pub fn bigint_to_fe<F: BigPrimeField>(e: &BigInt) -> F {
     }
 }
 
-pub fn fe_to_biguint<F: ff::PrimeField>(fe: &F) -> BigUint {
-    BigUint::from_bytes_le(fe.to_repr().as_ref())
+pub fn fe_to_biguint<F: ScalarField>(fe: &F) -> BigUint {
+    BigUint::from_bytes_le(fe.to_bytes_le().as_ref())
 }
 
 pub fn fe_to_bigint<F: BigPrimeField>(fe: &F) -> BigInt {
@@ -199,22 +254,22 @@ pub fn decompose_biguint<F: BigPrimeField>(
     let mut limb0 = e.next().unwrap_or(0) as u128;
     let mut rem = bit_len - 64;
     let mut u64_digit = e.next().unwrap_or(0);
-    limb0 |= ((u64_digit & ((1 << rem) - 1)) as u128) << 64;
+    limb0 |= ((u64_digit & ((1u64 << rem) - 1u64)) as u128) << 64u32;
     u64_digit >>= rem;
     rem = 64 - rem;
 
     core::iter::once(F::from_u128(limb0))
         .chain((1..num_limbs).map(|_| {
-            let mut limb: u128 = u64_digit.into();
+            let mut limb = u64_digit as u128;
             let mut bits = rem;
             u64_digit = e.next().unwrap_or(0);
-            if bit_len - bits >= 64 {
+            if bit_len >= 64 + bits {
                 limb |= (u64_digit as u128) << bits;
                 u64_digit = e.next().unwrap_or(0);
                 bits += 64;
             }
             rem = bit_len - bits;
-            limb |= ((u64_digit & ((1 << rem) - 1)) as u128) << bits;
+            limb |= ((u64_digit & ((1u64 << rem) - 1u64)) as u128) << bits;
             u64_digit >>= rem;
             rem = 64 - rem;
             F::from_u128(limb)
@@ -275,6 +330,79 @@ pub trait CurveAffineExt: CurveAffine {
 }
 #[cfg(feature = "halo2-pse")]
 impl<C: CurveAffine> CurveAffineExt for C {}
+
+mod scalar_field_impls {
+    use super::{decompose_u64_digits_to_limbs, ScalarField};
+    #[cfg(feature = "halo2-pse")]
+    use crate::halo2_proofs::halo2curves::{
+        bn256::{Fq as bn254Fq, Fr as bn254Fr},
+        ff::PrimeField,
+        secp256k1::{Fp as secpFp, Fq as secpFq},
+    };
+
+    /// To ensure `ScalarField` is only implemented for `ff:Field` where `Repr` is little endian, we use the following macro
+    /// to implement the trait for each field.
+    #[cfg(feature = "halo2-axiom")]
+    #[macro_export]
+    macro_rules! impl_scalar_field {
+        ($field:ident) => {
+            impl ScalarField for $field {
+                #[inline(always)]
+                fn to_u64_limbs(self, num_limbs: usize, bit_len: usize) -> Vec<u64> {
+                    // Basically same as `to_repr` but does not go further into bytes
+                    let tmp: [u64; 4] = self.into();
+                    decompose_u64_digits_to_limbs(tmp, num_limbs, bit_len)
+                }
+
+                #[inline(always)]
+                fn to_bytes_le(&self) -> Vec<u8> {
+                    let tmp: [u64; 4] = (*self).into();
+                    tmp.iter().flat_map(|x| x.to_le_bytes()).collect()
+                }
+
+                #[inline(always)]
+                fn get_lower_32(&self) -> u32 {
+                    let tmp: [u64; 4] = (*self).into();
+                    tmp[0] as u32
+                }
+
+                #[inline(always)]
+                fn get_lower_64(&self) -> u64 {
+                    let tmp: [u64; 4] = (*self).into();
+                    tmp[0]
+                }
+            }
+        };
+    }
+
+    /// To ensure `ScalarField` is only implemented for `ff:Field` where `Repr` is little endian, we use the following macro
+    /// to implement the trait for each field.
+    #[cfg(feature = "halo2-pse")]
+    #[macro_export]
+    macro_rules! impl_scalar_field {
+        ($field:ident) => {
+            impl ScalarField for $field {
+                #[inline(always)]
+                fn to_u64_limbs(self, num_limbs: usize, bit_len: usize) -> Vec<u64> {
+                    let bytes = self.to_repr();
+                    let digits = (0..4)
+                        .map(|i| u64::from_le_bytes(bytes[i * 8..(i + 1) * 8].try_into().unwrap()));
+                    decompose_u64_digits_to_limbs(digits, num_limbs, bit_len)
+                }
+
+                #[inline(always)]
+                fn to_bytes_le(&self) -> Vec<u8> {
+                    self.to_repr().to_vec()
+                }
+            }
+        };
+    }
+
+    impl_scalar_field!(bn254Fr);
+    impl_scalar_field!(bn254Fq);
+    impl_scalar_field!(secpFp);
+    impl_scalar_field!(secpFq);
+}
 
 pub mod fs {
     use std::{
@@ -339,7 +467,10 @@ pub mod fs {
 mod tests {
     use crate::halo2_proofs::halo2curves::bn256::Fr;
     use num_bigint::RandomBits;
-    use rand::{rngs::OsRng, Rng};
+    use rand::{
+        rngs::{OsRng, StdRng},
+        Rng, SeedableRng,
+    };
     use std::ops::Shl;
 
     use super::*;
@@ -404,6 +535,30 @@ mod tests {
                     assert_eq!(limbs, limbs2);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn test_log2_ceil_zero() {
+        assert_eq!(log2_ceil(0), 0);
+    }
+
+    #[test]
+    fn test_get_lower_32() {
+        let mut rng = StdRng::seed_from_u64(0);
+        for _ in 0..10_000usize {
+            let e: u32 = rng.gen_range(0..u32::MAX);
+            assert_eq!(Fr::from(e as u64).get_lower_32(), e);
+        }
+        assert_eq!(Fr::from((1u64 << 32_i32) + 1).get_lower_32(), 1);
+    }
+
+    #[test]
+    fn test_get_lower_64() {
+        let mut rng = StdRng::seed_from_u64(0);
+        for _ in 0..10_000usize {
+            let e: u64 = rng.gen_range(0..u64::MAX);
+            assert_eq!(Fr::from(e).get_lower_64(), e);
         }
     }
 }

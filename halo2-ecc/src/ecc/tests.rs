@@ -3,13 +3,13 @@ use super::*;
 use crate::fields::fp::{FpConfig, FpStrategy};
 use crate::fields::fp2::Fp2Chip;
 use crate::fields::PrimeField;
+use crate::group::Group;
 use crate::halo2_proofs::{
     circuit::*,
     dev::MockProver,
     halo2curves::bn256::{Fq, Fr, G1Affine, G2Affine, G1, G2},
     plonk::*,
 };
-use group::Group;
 use halo2_base::utils::bigint_to_fe;
 use halo2_base::SKIP_FIRST_PASS;
 use halo2_base::{gates::range::RangeStrategy, utils::value_to_option, ContextParams};

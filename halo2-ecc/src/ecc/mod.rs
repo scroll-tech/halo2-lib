@@ -2,8 +2,8 @@
 use crate::bigint::CRTInteger;
 use crate::fields::PrimeField;
 use crate::fields::{fp::FpConfig, FieldChip, PrimeFieldChip, Selectable};
+use crate::group::{Curve, Group};
 use crate::halo2_proofs::{arithmetic::CurveAffine, circuit::Value};
-use group::{Curve, Group};
 use halo2_base::{
     gates::{GateInstructions, RangeInstructions},
     utils::{modulus, CurveAffineExt},
@@ -751,7 +751,7 @@ where
     ) -> EcPoint<F, FC::FieldPoint>
     where
         C: CurveAffineExt<Base = FC::FieldType>,
-        C::Base: ff::PrimeField,
+        FC: Selectable<F, Point = FC::FieldPoint>,
     {
         #[cfg(feature = "display")]
         println!("computing length {} MSM", P.len());

@@ -6,6 +6,8 @@
 #![feature(int_log)]
 #![feature(trait_alias)]
 
+use halo2_base::halo2_proofs::halo2curves::group;
+
 pub mod bigint;
 pub mod ecc;
 pub mod fields;
