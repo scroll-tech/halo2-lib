@@ -6,8 +6,8 @@ use crate::halo2_proofs::arithmetic::CurveAffine;
 use crate::{
     bigint::{CRTInteger, FixedCRTInteger},
     fields::{PrimeFieldChip, Selectable},
+    group::Curve,
 };
-use group::Curve;
 use halo2_base::{
     gates::{GateInstructions, RangeInstructions},
     utils::{fe_to_biguint, CurveAffineExt},

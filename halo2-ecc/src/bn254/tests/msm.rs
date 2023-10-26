@@ -1,6 +1,6 @@
 use std::{env::var, fs::File};
 
-use crate::halo2_proofs::arithmetic::FieldExt;
+use crate::group::Curve;
 use halo2_base::SKIP_FIRST_PASS;
 
 use super::*;

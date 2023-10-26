@@ -16,7 +16,6 @@ serde_json = "1.0"
 
 # arithmetic
 ff = "0.12"
-group = "0.12"
 
 halo2-base = { path = "../halo2-base", default-features = false }
 
