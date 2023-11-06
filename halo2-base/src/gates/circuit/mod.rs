@@ -137,6 +137,45 @@ impl<F: ScalarField> BaseConfig<F> {
     }
 }
 
+impl<F: ScalarField> BaseCircuitBuilder<F> {
+    /// Performs the actual computation on the circuit (e.g., witness generation), populating the lookup table and filling in all the advice values for a particular proof.
+    pub fn synthesize_ref_layouter(
+        &self,
+        config: BaseConfig<F>,
+        layouter: &mut impl Layouter<F>,
+    ) -> Result<(), Error> {
+        // only load lookup table if we are actually doing lookups
+        if let MaybeRangeConfig::WithRange(config) = &config.base {
+            config.load_lookup_table(layouter).expect("load lookup table should not fail");
+        }
+        // Only FirstPhase (phase 0)
+        layouter
+            .assign_region(
+                || "BaseCircuitBuilder generated circuit",
+                |mut region| {
+                    let usable_rows = config.gate().max_rows;
+                    self.core.phase_manager[0].assign_raw(
+                        &(config.gate().basic_gates[0].clone(), usable_rows),
+                        &mut region,
+                    );
+                    // Only assign cells to lookup if we're sure we're doing range lookups
+                    if let MaybeRangeConfig::WithRange(config) = &config.base {
+                        self.assign_lookups_in_phase(config, &mut region, 0);
+                    }
+                    // Impose equality constraints
+                    if !self.core.witness_gen_only() {
+                        self.core.copy_manager.assign_raw(config.constants(), &mut region);
+                    }
+                    Ok(())
+                },
+            )
+            .unwrap();
+
+        self.assign_instances(&config.instance, layouter.namespace(|| "expose"));
+        Ok(())
+    }
+}
+
 impl<F: ScalarField> Circuit<F> for BaseCircuitBuilder<F> {
     type Config = BaseConfig<F>;
     type FloorPlanner = SimpleFloorPlanner;
@@ -166,35 +205,7 @@ impl<F: ScalarField> Circuit<F> for BaseCircuitBuilder<F> {
         config: Self::Config,
         mut layouter: impl Layouter<F>,
     ) -> Result<(), Error> {
-        // only load lookup table if we are actually doing lookups
-        if let MaybeRangeConfig::WithRange(config) = &config.base {
-            config.load_lookup_table(&mut layouter).expect("load lookup table should not fail");
-        }
-        // Only FirstPhase (phase 0)
-        layouter
-            .assign_region(
-                || "BaseCircuitBuilder generated circuit",
-                |mut region| {
-                    let usable_rows = config.gate().max_rows;
-                    self.core.phase_manager[0].assign_raw(
-                        &(config.gate().basic_gates[0].clone(), usable_rows),
-                        &mut region,
-                    );
-                    // Only assign cells to lookup if we're sure we're doing range lookups
-                    if let MaybeRangeConfig::WithRange(config) = &config.base {
-                        self.assign_lookups_in_phase(config, &mut region, 0);
-                    }
-                    // Impose equality constraints
-                    if !self.core.witness_gen_only() {
-                        self.core.copy_manager.assign_raw(config.constants(), &mut region);
-                    }
-                    Ok(())
-                },
-            )
-            .unwrap();
-
-        self.assign_instances(&config.instance, layouter.namespace(|| "expose"));
-        Ok(())
+        self.synthesize_ref_layouter(config, &mut layouter)
     }
 }
 
