@@ -154,6 +154,7 @@ impl<F: ScalarField> MultiPhaseCoreManager<F> {
 }
 
 /// Basic statistics
+#[derive(Debug)]
 pub struct GateStatistics {
     /// Total advice cell count per phase
     pub total_advice_per_phase: Vec<usize>,

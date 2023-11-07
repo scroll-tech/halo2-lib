@@ -366,6 +366,7 @@ impl<F: ScalarField> BaseCircuitBuilder<F> {
 }
 
 /// Basic statistics
+#[derive(Debug)]
 pub struct RangeStatistics {
     /// Number of advice cells for the basic gate and total constants used
     pub gate: GateStatistics,
