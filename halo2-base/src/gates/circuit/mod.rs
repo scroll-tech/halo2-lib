@@ -158,14 +158,19 @@ impl<F: ScalarField> BaseCircuitBuilder<F> {
                         &(config.gate().basic_gates[0].clone(), usable_rows),
                         &mut region,
                     );
-                    self.core.phase_manager[1].assign_raw(
-                        &(config.gate().basic_gates[1].clone(), usable_rows),
-                        &mut region,
-                    );
+                    if self.core.phase_manager.len() > 1 {
+                        self.core.phase_manager[1].assign_raw(
+                            &(config.gate().basic_gates[1].clone(), usable_rows),
+                            &mut region,
+                        );
+                    }
+
                     // Only assign cells to lookup if we're sure we're doing range lookups
                     if let MaybeRangeConfig::WithRange(config) = &config.base {
                         self.assign_lookups_in_phase(config, &mut region, 0);
-                        self.assign_lookups_in_phase(config, &mut region, 1);
+                        if self.core.phase_manager.len() > 1 {
+                            self.assign_lookups_in_phase(config, &mut region, 1);
+                        }
                     }
                     // Impose equality constraints
                     if !self.core.witness_gen_only() {
