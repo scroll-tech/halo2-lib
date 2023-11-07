@@ -114,7 +114,7 @@ impl<F: FieldExt> KeccakRow<F> {
                 q_round_last: false,
                 q_padding: false,
                 q_padding_last: false,
-                round_cst: F::zero(),
+                round_cst: F::ZERO,
                 is_final: false,
                 cell_values: Vec::new(),
             })
@@ -154,7 +154,7 @@ impl<F: FieldExt> KeccakRegion<F> {
         }
         let row = &mut self.rows[offset];
         while column >= row.len() {
-            row.push(F::zero());
+            row.push(F::ZERO);
         }
         row[column] = value;
     }
@@ -448,7 +448,7 @@ mod decode {
     }
 
     pub(crate) fn value<F: FieldExt>(parts: Vec<PartValue<F>>) -> F {
-        parts.iter().rev().fold(F::zero(), |acc, part| {
+        parts.iter().rev().fold(F::ZERO, |acc, part| {
             acc * F::from(1u64 << (BIT_COUNT * part.num_bits)) + part.value
         })
     }
@@ -1611,7 +1611,7 @@ pub fn keccak_phase1<'v, F: Field>(
     let num_rows_per_round = get_num_rows_per_round();
 
     let mut byte_idx = 0;
-    let mut data_rlc = Value::known(F::zero());
+    let mut data_rlc = Value::known(F::ZERO);
 
     for _ in 0..num_chunks {
         for round in 0..NUM_ROUNDS + 1 {
@@ -1648,7 +1648,7 @@ pub fn keccak_phase0<F: Field>(
     bytes: &[u8],
 ) {
     let mut bits = into_bits(bytes);
-    let mut s = [[F::zero(); 5]; 5];
+    let mut s = [[F::ZERO; 5]; 5];
     let absorb_positions = get_absorb_positions();
     let num_bytes_in_last_block = bytes.len() % RATE;
     let num_rows_per_round = get_num_rows_per_round();
@@ -1666,7 +1666,7 @@ pub fn keccak_phase0<F: Field>(
 
     let mut cell_managers = Vec::with_capacity(NUM_ROUNDS + 1);
     let mut regions = Vec::with_capacity(NUM_ROUNDS + 1);
-    let mut hash_words = [F::zero(); NUM_WORDS_TO_SQUEEZE];
+    let mut hash_words = [F::ZERO; NUM_WORDS_TO_SQUEEZE];
 
     for (idx, chunk) in chunks.enumerate() {
         let is_final_block = idx == num_chunks - 1;
@@ -1771,7 +1771,7 @@ pub fn keccak_phase0<F: Field>(
                     bc.push(bc_norm);
                 }
                 cell_manager.start_region();
-                let mut os = [[F::zero(); 5]; 5];
+                let mut os = [[F::ZERO; 5]; 5];
                 for i in 0..5 {
                     let t = decode::value(bc[(i + 4) % 5].clone())
                         + decode::value(rotate(bc[(i + 1) % 5].clone(), 1, part_size));
@@ -1834,7 +1834,7 @@ pub fn keccak_phase0<F: Field>(
                 // Chi
                 let part_size_base = get_num_bits_per_base_chi_lookup();
                 let three_packed = pack::<F>(&vec![3u8; part_size_base]);
-                let mut os = [[F::zero(); 5]; 5];
+                let mut os = [[F::ZERO; 5]; 5];
                 for j in 0..5 {
                     for i in 0..5 {
                         let mut s_parts = Vec::new();
@@ -1974,7 +1974,7 @@ pub fn multi_keccak_phase1<'a, 'v, F: Field>(
     let num_rows_per_round = get_num_rows_per_round();
     for idx in 0..num_rows_per_round {
         [keccak_table.input_rlc, keccak_table.output_rlc]
-            .map(|column| assign_advice_custom(region, column, idx, Value::known(F::zero())));
+            .map(|column| assign_advice_custom(region, column, idx, Value::known(F::ZERO)));
     }
 
     let mut offset = num_rows_per_round;

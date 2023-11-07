@@ -63,7 +63,7 @@ pub fn ec_add_unequal<F: PrimeField, FC: FieldChip<F>>(
     if is_strict {
         // constrains that P.x != Q.x
         let x_is_equal = chip.is_equal_unenforced(ctx, &P.x, &Q.x);
-        chip.range().gate().assert_is_const(ctx, &x_is_equal, F::zero());
+        chip.range().gate().assert_is_const(ctx, &x_is_equal, F::ZERO);
     }
 
     let dx = chip.sub_no_carry(ctx, &Q.x, &P.x);
@@ -105,7 +105,7 @@ pub fn ec_sub_unequal<F: PrimeField, FC: FieldChip<F>>(
     if is_strict {
         // constrains that P.x != Q.x
         let x_is_equal = chip.is_equal_unenforced(ctx, &P.x, &Q.x);
-        chip.range().gate().assert_is_const(ctx, &x_is_equal, F::zero());
+        chip.range().gate().assert_is_const(ctx, &x_is_equal, F::ZERO);
     }
 
     let dx = chip.sub_no_carry(ctx, &Q.x, &P.x);

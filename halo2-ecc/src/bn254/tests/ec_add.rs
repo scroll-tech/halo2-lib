@@ -4,7 +4,7 @@ use std::{env::var, fs::File};
 
 use super::*;
 use crate::fields::FieldChip;
-use crate::halo2_proofs::halo2curves::{bn256::G2Affine, FieldExt};
+use crate::halo2_proofs::halo2curves::bn256::G2Affine;
 use group::cofactor::CofactorCurveAffine;
 use halo2_base::SKIP_FIRST_PASS;
 use rand_core::OsRng;

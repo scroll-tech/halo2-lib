@@ -178,10 +178,10 @@ impl<F: PrimeField> Fp12Chip<F> {
         g0.coeffs[0].truncation.limbs[0] = fp2_chip.range().gate.add(
             ctx,
             Existing(g0.coeffs[0].truncation.limbs[0]),
-            Constant(F::one()),
+            Constant(F::ONE),
         );
         g0.coeffs[0].native =
-            fp2_chip.range().gate.add(ctx, Existing(g0.coeffs[0].native), Constant(F::one()));
+            fp2_chip.range().gate.add(ctx, Existing(g0.coeffs[0].native), Constant(F::ONE));
         g0.coeffs[0].truncation.max_limb_bits += 1;
         g0.coeffs[0].value = g0.coeffs[0].value.as_ref().map(|v| v + 1usize);
 

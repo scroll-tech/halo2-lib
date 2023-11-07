@@ -101,7 +101,7 @@ impl<F: PrimeField, Fp: PrimeField> FpConfig<F, Fp> {
 
         let limb_base = biguint_to_fe::<F>(&(BigUint::one() << limb_bits));
         let mut limb_bases = Vec::with_capacity(num_limbs);
-        limb_bases.push(F::one());
+        limb_bases.push(F::ONE);
         while limb_bases.len() != num_limbs {
             limb_bases.push(limb_base * limb_bases.last().unwrap());
         }
@@ -142,13 +142,13 @@ impl<F: PrimeField, Fp: PrimeField> FpConfig<F, Fp> {
     pub fn enforce_less_than_p(&self, ctx: &mut Context<F>, a: &CRTInteger<F>) {
         // a < p iff a - p has underflow
         let borrow = self.minus_p(ctx, a);
-        self.range.gate.assert_is_const(ctx, &borrow, F::one())
+        self.range.gate.assert_is_const(ctx, &borrow, F::ONE)
     }
 
     pub fn is_less_than_p(&self, ctx: &mut Context<F>, a: &CRTInteger<F>) -> AssignedValue<F> {
         // a < p iff a - p has underflow
         let borrow = self.minus_p(ctx, a);
-        let one = self.range.gate.load_constant(ctx, F::one());
+        let one = self.range.gate.load_constant(ctx, F::ONE);
         self.range.gate.is_equal(ctx, Existing(borrow), Existing(one))
     }
 
@@ -313,7 +313,7 @@ impl<F: PrimeField, Fp: PrimeField> FieldChip<F> for FpConfig<F, Fp> {
         let (out_or_p, underflow) =
             sub::crt::<F>(self.range(), ctx, &p, a, self.limb_bits, self.limb_bases[1]);
         // constrain underflow to equal 0
-        self.range.gate.assert_is_const(ctx, &underflow, F::zero());
+        self.range.gate.assert_is_const(ctx, &underflow, F::ZERO);
 
         let a_is_zero = big_is_zero::assign::<F>(self.gate(), ctx, &a.truncation);
         select::crt::<F>(self.range.gate(), ctx, a, &out_or_p, &a_is_zero)

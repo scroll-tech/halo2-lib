@@ -149,10 +149,10 @@ pub fn crt<F: PrimeField>(
                     let mut assignments = range.gate().assign_region(
                         ctx,
                         [
-                            Constant(-F::one()),
+                            Constant(-F::ONE),
                             Existing(*a_limb),
                             Witness(temp1),
-                            Constant(F::one()),
+                            Constant(F::ONE),
                             Witness(out_v),
                             Witness(check_val),
                         ],
@@ -169,7 +169,7 @@ pub fn crt<F: PrimeField>(
                     let mut assignments = range.gate().assign_region(
                         ctx,
                         [Existing(*a_limb), Witness(out_v), Witness(check_val)],
-                        [(-1, Some([F::zero(), -F::one(), F::one()]))],
+                        [(-1, Some([F::ZERO, -F::ONE, F::ONE]))],
                     );
                     check_cell = assignments.pop().unwrap();
                     out_cell = assignments.pop().unwrap();
@@ -205,7 +205,7 @@ pub fn crt<F: PrimeField>(
             // | quot_cell | 2^n | 1 | quot_cell + 2^n |
             range.gate().assign_region_last(
                 ctx,
-                [Existing(*quot_cell), Constant(limb_base), Constant(F::one()), Witness(out_val)],
+                [Existing(*quot_cell), Constant(limb_base), Constant(F::ONE), Witness(out_val)],
                 [(0, None)],
             )
         };

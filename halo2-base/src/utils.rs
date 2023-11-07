@@ -1,20 +1,33 @@
-#[cfg(feature = "halo2-pse")]
+use core::hash::Hash;
+
+#[cfg(not(feature = "halo2-axiom"))]
 use crate::halo2_proofs::arithmetic::CurveAffine;
-use crate::halo2_proofs::{arithmetic::FieldExt, circuit::Value};
+use crate::halo2_proofs::circuit::Value;
+#[cfg(feature = "halo2-axiom")]
+pub use crate::halo2_proofs::halo2curves::CurveAffineExt;
+use ff::{FromUniformBytes, PrimeField};
+
 use num_bigint::BigInt;
 use num_bigint::BigUint;
 use num_bigint::Sign;
 use num_traits::Signed;
 use num_traits::{One, Zero};
 
+/// Helper trait to convert to and from a [BigPrimeField] by converting a list of [u64] digits
 #[cfg(feature = "halo2-axiom")]
 pub trait BigPrimeField: ScalarField {
+    /// Converts a slice of [u64] to [BigPrimeField]
+    /// * `val`: the slice of u64
+    ///
+    /// # Assumptions
+    /// * `val` has the correct length for the implementation
+    /// * The integer value of `val` is already less than the modulus of `Self`
     fn from_u64_digits(val: &[u64]) -> Self;
 }
 #[cfg(feature = "halo2-axiom")]
 impl<F> BigPrimeField for F
 where
-    F: FieldExt + Hash + Into<[u64; 4]> + From<[u64; 4]>,
+    F: ScalarField + From<[u64; 4]>, // Assume [u64; 4] is little-endian. We only implement ScalarField when this is true.
 {
     #[inline(always)]
     fn from_u64_digits(val: &[u64]) -> Self {
@@ -25,34 +38,64 @@ where
     }
 }
 
-#[cfg(feature = "halo2-axiom")]
-pub trait ScalarField: FieldExt + Hash {
-    /// Returns the base `2^bit_len` little endian representation of the prime field element
-    /// up to `num_limbs` number of limbs (truncates any extra limbs)
+/// Helper trait to represent a field element that can be converted into [u64] limbs.
+///
+/// Note: Since the number of bits necessary to represent a field element is larger than the number of bits in a u64, we decompose the integer representation of the field element into multiple [u64] values e.g. `limbs`.
+pub trait ScalarField: PrimeField + FromUniformBytes<64> + From<bool> + Hash + Ord {
+    /// Returns the base `2<sup>bit_len</sup>` little endian representation of the [ScalarField] element up to `num_limbs` number of limbs (truncates any extra limbs).
     ///
-    /// Basically same as `to_repr` but does not go further into bytes
-    ///
-    /// Undefined behavior if `bit_len > 64`
+    /// Assumes `bit_len < 64`.
+    /// * `num_limbs`: number of limbs to return
+    /// * `bit_len`: number of bits in each limb
     fn to_u64_limbs(self, num_limbs: usize, bit_len: usize) -> Vec<u64>;
-}
-#[cfg(feature = "halo2-axiom")]
-impl<F> ScalarField for F
-where
-    F: FieldExt + Hash + Into<[u64; 4]>,
-{
-    #[inline(always)]
-    fn to_u64_limbs(self, num_limbs: usize, bit_len: usize) -> Vec<u64> {
-        let tmp: [u64; 4] = self.into();
-        decompose_u64_digits_to_limbs(tmp, num_limbs, bit_len)
+
+    /// Returns the little endian byte representation of the element.
+    fn to_bytes_le(&self) -> Vec<u8>;
+
+    /// Creates a field element from a little endian byte representation.
+    ///
+    /// The default implementation assumes that `PrimeField::from_repr` is implemented for little-endian.
+    /// It should be overriden if this is not the case.
+    fn from_bytes_le(bytes: &[u8]) -> Self {
+        let mut repr = Self::Repr::default();
+        repr.as_mut()[..bytes.len()].copy_from_slice(bytes);
+        Self::from_repr(repr).unwrap()
+    }
+
+    /// Gets the least significant 32 bits of the field element.
+    fn get_lower_32(&self) -> u32 {
+        let bytes = self.to_bytes_le();
+        let mut lower_32 = 0u32;
+        for (i, byte) in bytes.into_iter().enumerate().take(4) {
+            lower_32 |= (byte as u32) << (i * 8);
+        }
+        lower_32
+    }
+
+    /// Gets the least significant 64 bits of the field element.
+    fn get_lower_64(&self) -> u64 {
+        let bytes = self.to_bytes_le();
+        let mut lower_64 = 0u64;
+        for (i, byte) in bytes.into_iter().enumerate().take(8) {
+            lower_64 |= (byte as u64) << (i * 8);
+        }
+        lower_64
     }
 }
+// See below for implementations
 
+// Later: will need to separate BigPrimeField from ScalarField when Goldilocks is introduced
+
+/// [ScalarField] that is ~256 bits long
 #[cfg(feature = "halo2-pse")]
-pub trait BigPrimeField = FieldExt<Repr = [u8; 32]>;
+pub trait BigPrimeField = PrimeField<Repr = [u8; 32]> + ScalarField;
 
-#[cfg(feature = "halo2-pse")]
-pub trait ScalarField = FieldExt;
-
+/// Converts an [Iterator] of u64 digits into `number_of_limbs` limbs of `bit_len` bits returned as a [Vec].
+///
+/// Assumes: `bit_len < 64`.
+/// * `e`: Iterator of [u64] digits
+/// * `number_of_limbs`: number of limbs to return
+/// * `bit_len`: number of bits in each limb
 #[inline(always)]
 pub(crate) fn decompose_u64_digits_to_limbs(
     e: impl IntoIterator<Item = u64>,
@@ -62,27 +105,36 @@ pub(crate) fn decompose_u64_digits_to_limbs(
     debug_assert!(bit_len < 64);
 
     let mut e = e.into_iter();
+    // Mask to extract the bits from each digit
     let mask: u64 = (1u64 << bit_len) - 1u64;
     let mut u64_digit = e.next().unwrap_or(0);
     let mut rem = 64;
+
+    // For each digit, we extract its individual limbs by repeatedly masking and shifting the digit based on how many bits we have left to extract.
     (0..number_of_limbs)
         .map(|_| match rem.cmp(&bit_len) {
+            // If `rem` > `bit_len`, we mask the bits from the `u64_digit` to return the first limb.
+            // We shift the digit to the right by `bit_len` bits and subtract `bit_len` from `rem`
             core::cmp::Ordering::Greater => {
                 let limb = u64_digit & mask;
                 u64_digit >>= bit_len;
                 rem -= bit_len;
                 limb
             }
+            // If `rem` == `bit_len`, then we mask the bits from the `u64_digit` to return the first limb
+            // We retrieve the next digit and reset `rem` to 64
             core::cmp::Ordering::Equal => {
                 let limb = u64_digit & mask;
                 u64_digit = e.next().unwrap_or(0);
                 rem = 64;
                 limb
             }
+            // If `rem` < `bit_len`, we retrieve the next digit, mask it, and shift left `rem` bits from the `u64_digit` to return the first limb.
+            // we shift the digit to the right by `bit_len` - `rem` bits to retrieve the start of the next limb and add 64 - bit_len to `rem` to get the remainder.
             core::cmp::Ordering::Less => {
                 let mut limb = u64_digit;
                 u64_digit = e.next().unwrap_or(0);
-                limb |= (u64_digit & ((1 << (bit_len - rem)) - 1)) << rem;
+                limb |= (u64_digit & ((1u64 << (bit_len - rem)) - 1u64)) << rem;
                 u64_digit >>= bit_len - rem;
                 rem += 64 - bit_len;
                 limb
@@ -91,23 +143,34 @@ pub(crate) fn decompose_u64_digits_to_limbs(
         .collect()
 }
 
-pub fn bit_length(x: u64) -> usize {
+/// Returns the number of bits needed to represent the value of `x`.
+pub const fn bit_length(x: u64) -> usize {
     (u64::BITS - x.leading_zeros()) as usize
 }
 
+/// Returns the ceiling of the base 2 logarithm of `x`.
+///
+/// `log2_ceil(0)` returns 0.
 pub fn log2_ceil(x: u64) -> usize {
-    (u64::BITS - x.leading_zeros() - (x & (x - 1) == 0) as u32) as usize
+    (u64::BITS - x.leading_zeros()) as usize - usize::from(x.is_power_of_two())
 }
 
+/// Returns the modulus of [BigPrimeField].
 pub fn modulus<F: BigPrimeField>() -> BigUint {
-    fe_to_biguint(&-F::one()) + 1u64
+    fe_to_biguint(&-F::ONE) + 1u64
 }
 
+/// Returns the [BigPrimeField] element of 2<sup>n</sup>.
+/// * `n`: the desired power of 2.
 pub fn power_of_two<F: BigPrimeField>(n: usize) -> F {
     biguint_to_fe(&(BigUint::one() << n))
 }
 
-/// assume `e` less than modulus of F
+/// Converts an immutable reference to [BigUint] to a [BigPrimeField].
+/// * `e`: immutable reference to [BigUint]
+///
+/// # Assumptions:
+/// * `e` is less than the modulus of `F`
 pub fn biguint_to_fe<F: BigPrimeField>(e: &BigUint) -> F {
     #[cfg(feature = "halo2-axiom")]
     {
@@ -116,14 +179,16 @@ pub fn biguint_to_fe<F: BigPrimeField>(e: &BigUint) -> F {
 
     #[cfg(feature = "halo2-pse")]
     {
-        let mut repr = F::Repr::default();
         let bytes = e.to_bytes_le();
-        repr.as_mut()[..bytes.len()].copy_from_slice(&bytes);
-        F::from_repr(repr).unwrap()
+        F::from_bytes_le(&bytes)
     }
 }
 
-/// assume `|e|` less than modulus of F
+/// Converts an immutable reference to [BigInt] to a [BigPrimeField].
+/// * `e`: immutable reference to [BigInt]
+///
+/// # Assumptions:
+/// * The absolute value of `e` is less than the modulus of `F`
 pub fn bigint_to_fe<F: BigPrimeField>(e: &BigInt) -> F {
     #[cfg(feature = "halo2-axiom")]
     {
@@ -137,9 +202,7 @@ pub fn bigint_to_fe<F: BigPrimeField>(e: &BigInt) -> F {
     #[cfg(feature = "halo2-pse")]
     {
         let (sign, bytes) = e.to_bytes_le();
-        let mut repr = F::Repr::default();
-        repr.as_mut()[..bytes.len()].copy_from_slice(&bytes);
-        let f_abs = F::from_repr(repr).unwrap();
+        let f_abs = F::from_bytes_le(&bytes);
         if sign == Sign::Minus {
             -f_abs
         } else {
@@ -148,10 +211,17 @@ pub fn bigint_to_fe<F: BigPrimeField>(e: &BigInt) -> F {
     }
 }
 
-pub fn fe_to_biguint<F: ff::PrimeField>(fe: &F) -> BigUint {
-    BigUint::from_bytes_le(fe.to_repr().as_ref())
+/// Converts an immutable reference to an PrimeField element into a [BigUint] element.
+/// * `fe`: immutable reference to PrimeField element to convert
+pub fn fe_to_biguint<F: ScalarField>(fe: &F) -> BigUint {
+    BigUint::from_bytes_le(fe.to_bytes_le().as_ref())
 }
 
+/// Converts a [BigPrimeField] element into a [BigInt] element by sending `fe` in `[0, F::modulus())` to
+/// ```ignore
+/// fe,                 if fe < F::modulus() / 2
+/// fe - F::modulus(),  otherwise
+/// ```
 pub fn fe_to_bigint<F: BigPrimeField>(fe: &F) -> BigInt {
     // TODO: `F` should just have modulus as lazy_static or something
     let modulus = modulus::<F>();
@@ -163,6 +233,12 @@ pub fn fe_to_bigint<F: BigPrimeField>(fe: &F) -> BigInt {
     }
 }
 
+/// Decomposes an immutable reference to a [BigPrimeField] element into `number_of_limbs` limbs of `bit_len` bits each and returns a [Vec] of [BigPrimeField] represented by those limbs.
+///
+/// Assumes `bit_len < 128`.
+/// * `e`: immutable reference to [BigPrimeField] element to decompose
+/// * `number_of_limbs`: number of limbs to decompose `e` into
+/// * `bit_len`: number of bits in each limb
 pub fn decompose<F: BigPrimeField>(e: &F, number_of_limbs: usize, bit_len: usize) -> Vec<F> {
     if bit_len > 64 {
         decompose_biguint(&fe_to_biguint(e), number_of_limbs, bit_len)
@@ -171,7 +247,12 @@ pub fn decompose<F: BigPrimeField>(e: &F, number_of_limbs: usize, bit_len: usize
     }
 }
 
-/// Assumes `bit_len` <= 64
+/// Decomposes an immutable reference to a [ScalarField] element into `number_of_limbs` limbs of `bit_len` bits each and returns a [Vec] of [u64] represented by those limbs.
+///
+/// Assumes `bit_len` < 64
+/// * `e`: immutable reference to [ScalarField] element to decompose
+/// * `number_of_limbs`: number of limbs to decompose `e` into
+/// * `bit_len`: number of bits in each limb
 pub fn decompose_fe_to_u64_limbs<F: ScalarField>(
     e: &F,
     number_of_limbs: usize,
@@ -188,33 +269,45 @@ pub fn decompose_fe_to_u64_limbs<F: ScalarField>(
     }
 }
 
+/// Decomposes an immutable reference to a [BigUint] into `num_limbs` limbs of `bit_len` bits each and returns a [Vec] of [BigPrimeField] represented by those limbs.
+///
+/// Assumes 64 <= `bit_len` < 128.
+/// * `e`: immutable reference to [BigInt] to decompose
+/// * `num_limbs`: number of limbs to decompose `e` into
+/// * `bit_len`: number of bits in each limb
+///
+/// Truncates to `num_limbs` limbs if `e` is too large.
 pub fn decompose_biguint<F: BigPrimeField>(
     e: &BigUint,
     num_limbs: usize,
     bit_len: usize,
 ) -> Vec<F> {
+    // bit_len must be between 64` and 128
     debug_assert!((64..128).contains(&bit_len));
     let mut e = e.iter_u64_digits();
 
+    // Grab first 128-bit limb from iterator
     let mut limb0 = e.next().unwrap_or(0) as u128;
     let mut rem = bit_len - 64;
     let mut u64_digit = e.next().unwrap_or(0);
-    limb0 |= ((u64_digit & ((1 << rem) - 1)) as u128) << 64;
+    // Extract second limb (bit length 64) from e
+    limb0 |= ((u64_digit & ((1u64 << rem) - 1u64)) as u128) << 64u32;
     u64_digit >>= rem;
     rem = 64 - rem;
 
+    // Convert `limb0` into field element `F` and create an iterator by chaining `limb0` with the computing the remaining limbs
     core::iter::once(F::from_u128(limb0))
         .chain((1..num_limbs).map(|_| {
-            let mut limb: u128 = u64_digit.into();
+            let mut limb = u64_digit as u128;
             let mut bits = rem;
             u64_digit = e.next().unwrap_or(0);
-            if bit_len - bits >= 64 {
+            if bit_len >= 64 + bits {
                 limb |= (u64_digit as u128) << bits;
                 u64_digit = e.next().unwrap_or(0);
                 bits += 64;
             }
             rem = bit_len - bits;
-            limb |= ((u64_digit & ((1 << rem) - 1)) as u128) << bits;
+            limb |= ((u64_digit & ((1u64 << rem) - 1u64)) as u128) << bits;
             u64_digit >>= rem;
             rem = 64 - rem;
             F::from_u128(limb)
@@ -222,6 +315,12 @@ pub fn decompose_biguint<F: BigPrimeField>(
         .collect()
 }
 
+/// Decomposes an immutable reference to a [BigInt] into `num_limbs` limbs of `bit_len` bits each and returns a [Vec] of [BigPrimeField] represented by those limbs.
+///
+/// Assumes `bit_len < 128`.
+/// * `e`: immutable reference to `BigInt` to decompose
+/// * `num_limbs`: number of limbs to decompose `e` into
+/// * `bit_len`: number of bits in each limb
 pub fn decompose_bigint<F: BigPrimeField>(e: &BigInt, num_limbs: usize, bit_len: usize) -> Vec<F> {
     if e.is_negative() {
         decompose_biguint::<F>(e.magnitude(), num_limbs, bit_len).into_iter().map(|x| -x).collect()
@@ -230,6 +329,12 @@ pub fn decompose_bigint<F: BigPrimeField>(e: &BigInt, num_limbs: usize, bit_len:
     }
 }
 
+/// Decomposes an immutable reference to a [BigInt] into `num_limbs` limbs of `bit_len` bits each and returns a [Vec] of [BigPrimeField] represented by those limbs wrapped in [Value].
+///
+/// Assumes `bit_len` < 128.
+/// * `e`: immutable reference to `BigInt` to decompose
+/// * `num_limbs`: number of limbs to decompose `e` into
+/// * `bit_len`: number of bits in each limb
 pub fn decompose_bigint_option<F: BigPrimeField>(
     value: Value<&BigInt>,
     number_of_limbs: usize,
@@ -238,6 +343,9 @@ pub fn decompose_bigint_option<F: BigPrimeField>(
     value.map(|e| decompose_bigint(e, number_of_limbs, bit_len)).transpose_vec(number_of_limbs)
 }
 
+/// Wraps the internal value of `value` in an [Option].
+/// If the value is [None], then the function returns [None].
+/// * `value`: Value to convert.
 pub fn value_to_option<V>(value: Value<V>) -> Option<V> {
     let mut v = None;
     value.map(|val| {
@@ -246,28 +354,19 @@ pub fn value_to_option<V>(value: Value<V>) -> Option<V> {
     v
 }
 
-/// Compute the represented value by a vector of values and a bit length.
+/// Computes the value of an integer by passing as `input` a [Vec] of its limb values and the `bit_len` (bit length) used.
 ///
-/// This function is used to compute the value of an integer
-/// passing as input its limb values and the bit length used.
-/// Returns the sum of all limbs scaled by 2^(bit_len * i)
+/// Returns the sum of all limbs scaled by 2<sup>(bit_len * i)</sup> where i is the index of the limb.
+/// * `input`: Limb values of the integer.
+/// * `bit_len`: Length of limb in bits
 pub fn compose(input: Vec<BigUint>, bit_len: usize) -> BigUint {
     input.iter().rev().fold(BigUint::zero(), |acc, val| (acc << bit_len) + val)
 }
 
-#[cfg(test)]
-#[test]
-fn test_signed_roundtrip() {
-    use crate::halo2_proofs::halo2curves::bn256::Fr;
-    assert_eq!(fe_to_bigint(&bigint_to_fe::<Fr>(&-BigInt::one())), -BigInt::one());
-}
-
-#[cfg(feature = "halo2-axiom")]
-pub use halo2_proofs_axiom::halo2curves::CurveAffineExt;
-
+/// Helper trait
 #[cfg(feature = "halo2-pse")]
 pub trait CurveAffineExt: CurveAffine {
-    /// Unlike the `Coordinates` trait, this just returns the raw affine coordinantes without checking `is_on_curve`
+    /// Returns the raw affine (X, Y) coordinantes
     fn into_coordinates(self) -> (Self::Base, Self::Base) {
         let coordinates = self.coordinates().unwrap();
         (*coordinates.x(), *coordinates.y())
@@ -276,6 +375,80 @@ pub trait CurveAffineExt: CurveAffine {
 #[cfg(feature = "halo2-pse")]
 impl<C: CurveAffine> CurveAffineExt for C {}
 
+mod scalar_field_impls {
+    use super::{decompose_u64_digits_to_limbs, ScalarField};
+    use crate::halo2_proofs::halo2curves::{
+        bn256::{Fq as bn254Fq, Fr as bn254Fr},
+        secp256k1::{Fp as secpFp, Fq as secpFq},
+    };
+    #[cfg(feature = "halo2-pse")]
+    use ff::PrimeField;
+
+    /// To ensure `ScalarField` is only implemented for `ff:Field` where `Repr` is little endian, we use the following macro
+    /// to implement the trait for each field.
+    #[cfg(feature = "halo2-axiom")]
+    #[macro_export]
+    macro_rules! impl_scalar_field {
+        ($field:ident) => {
+            impl ScalarField for $field {
+                #[inline(always)]
+                fn to_u64_limbs(self, num_limbs: usize, bit_len: usize) -> Vec<u64> {
+                    // Basically same as `to_repr` but does not go further into bytes
+                    let tmp: [u64; 4] = self.into();
+                    decompose_u64_digits_to_limbs(tmp, num_limbs, bit_len)
+                }
+
+                #[inline(always)]
+                fn to_bytes_le(&self) -> Vec<u8> {
+                    let tmp: [u64; 4] = (*self).into();
+                    tmp.iter().flat_map(|x| x.to_le_bytes()).collect()
+                }
+
+                #[inline(always)]
+                fn get_lower_32(&self) -> u32 {
+                    let tmp: [u64; 4] = (*self).into();
+                    tmp[0] as u32
+                }
+
+                #[inline(always)]
+                fn get_lower_64(&self) -> u64 {
+                    let tmp: [u64; 4] = (*self).into();
+                    tmp[0]
+                }
+            }
+        };
+    }
+
+    /// To ensure `ScalarField` is only implemented for `ff:Field` where `Repr` is little endian, we use the following macro
+    /// to implement the trait for each field.
+    #[cfg(feature = "halo2-pse")]
+    #[macro_export]
+    macro_rules! impl_scalar_field {
+        ($field:ident) => {
+            impl ScalarField for $field {
+                #[inline(always)]
+                fn to_u64_limbs(self, num_limbs: usize, bit_len: usize) -> Vec<u64> {
+                    let bytes = self.to_repr();
+                    let digits = (0..4)
+                        .map(|i| u64::from_le_bytes(bytes[i * 8..(i + 1) * 8].try_into().unwrap()));
+                    decompose_u64_digits_to_limbs(digits, num_limbs, bit_len)
+                }
+
+                #[inline(always)]
+                fn to_bytes_le(&self) -> Vec<u8> {
+                    self.to_repr().to_vec()
+                }
+            }
+        };
+    }
+
+    impl_scalar_field!(bn254Fr);
+    impl_scalar_field!(bn254Fq);
+    impl_scalar_field!(secpFp);
+    impl_scalar_field!(secpFq);
+}
+
+/// Module for reading parameters for Halo2 proving system from the file system.
 pub mod fs {
     use std::{
         env::var,
@@ -295,6 +468,8 @@ pub mod fs {
     };
     use rand_chacha::{rand_core::SeedableRng, ChaCha20Rng};
 
+    /// Reads the srs from a file found in `./params/kzg_bn254_{k}.srs` or `{dir}/kzg_bn254_{k}.srs` if `PARAMS_DIR` env var is specified.
+    /// * `k`: degree that expresses the size of circuit (i.e., 2^<sup>k</sup> is the number of rows in the circuit)
     pub fn read_params(k: u32) -> ParamsKZG<Bn256> {
         let dir = var("PARAMS_DIR").unwrap_or_else(|_| "./params".to_string());
         ParamsKZG::<Bn256>::read(&mut BufReader::new(
@@ -304,6 +479,9 @@ pub mod fs {
         .unwrap()
     }
 
+    /// Attempts to read the srs from a file found in `./params/kzg_bn254_{k}.srs` or `{dir}/kzg_bn254_{k}.srs` if `PARAMS_DIR` env var is specified, creates a file it if it does not exist.
+    /// * `k`: degree that expresses the size of circuit (i.e., 2^<sup>k</sup> is the number of rows in the circuit)
+    /// * `setup`: a function that creates the srs
     pub fn read_or_create_srs<'a, C: CurveAffine, P: ParamsProver<'a, C>>(
         k: u32,
         setup: impl Fn(u32) -> P,
@@ -328,6 +506,8 @@ pub mod fs {
         }
     }
 
+    /// Generates the SRS for the KZG scheme and writes it to a file found in "./params/kzg_bn2_{k}.srs` or `{dir}/kzg_bn254_{k}.srs` if `PARAMS_DIR` env var is specified, creates a file it if it does not exist"
+    /// * `k`: degree that expresses the size of circuit (i.e., 2^<sup>k</sup> is the number of rows in the circuit)
     pub fn gen_srs(k: u32) -> ParamsKZG<Bn256> {
         read_or_create_srs::<G1Affine, _>(k, |k| {
             ParamsKZG::<Bn256>::setup(k, ChaCha20Rng::from_seed(Default::default()))
@@ -339,7 +519,10 @@ pub mod fs {
 mod tests {
     use crate::halo2_proofs::halo2curves::bn256::Fr;
     use num_bigint::RandomBits;
-    use rand::{rngs::OsRng, Rng};
+    use rand::{
+        rngs::{OsRng, StdRng},
+        Rng, SeedableRng,
+    };
     use std::ops::Shl;
 
     use super::*;
@@ -404,6 +587,30 @@ mod tests {
                     assert_eq!(limbs, limbs2);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn test_log2_ceil_zero() {
+        assert_eq!(log2_ceil(0), 0);
+    }
+
+    #[test]
+    fn test_get_lower_32() {
+        let mut rng = StdRng::seed_from_u64(0);
+        for _ in 0..10_000usize {
+            let e: u32 = rng.gen_range(0..u32::MAX);
+            assert_eq!(Fr::from(e as u64).get_lower_32(), e);
+        }
+        assert_eq!(Fr::from((1u64 << 32_i32) + 1).get_lower_32(), 1);
+    }
+
+    #[test]
+    fn test_get_lower_64() {
+        let mut rng = StdRng::seed_from_u64(0);
+        for _ in 0..10_000usize {
+            let e: u64 = rng.gen_range(0..u64::MAX);
+            assert_eq!(Fr::from(e).get_lower_64(), e);
         }
     }
 }
