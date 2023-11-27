@@ -1,5 +1,9 @@
 [workspace]
-members = ["halo2-base", "halo2-ecc", "hashes/zkevm"]
+members = [
+    "halo2-base", 
+    "halo2-ecc", 
+    "hashes/zkevm"
+    ]
 resolver = "2"
 
 [profile.dev]

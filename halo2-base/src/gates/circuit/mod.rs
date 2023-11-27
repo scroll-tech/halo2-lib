@@ -139,7 +139,7 @@ impl<F: ScalarField> BaseConfig<F> {
 
 impl<F: ScalarField> BaseCircuitBuilder<F> {
     /// Performs the actual computation on the circuit (e.g., witness generation), populating the lookup table and filling in all the advice values for a particular proof.
-    pub fn synthesize_ref_layouter(
+    pub fn synthesize_ref_layouter_phase_0(
         &self,
         config: BaseConfig<F>,
         layouter: &mut impl Layouter<F>,
@@ -148,16 +148,45 @@ impl<F: ScalarField> BaseCircuitBuilder<F> {
         if let MaybeRangeConfig::WithRange(config) = &config.base {
             config.load_lookup_table(layouter).expect("load lookup table should not fail");
         }
-        // FirstPhase and SecondPhase (phase 0/1)
+        // FirstPhase (phase 0)
         layouter
             .assign_region(
-                || "BaseCircuitBuilder generated circuit",
+                || "base phase 0",
                 |mut region| {
                     let usable_rows = config.gate().max_rows;
+                    println!("region before phase 0: {:?}", region);
                     self.core.phase_manager[0].assign_raw(
                         &(config.gate().basic_gates[0].clone(), usable_rows),
                         &mut region,
                     );
+
+                    // Only assign cells to lookup if we're sure we're doing range lookups
+                    if let MaybeRangeConfig::WithRange(config) = &config.base {
+                        self.assign_lookups_in_phase(config, &mut region, 0);
+                    }
+                    println!("region after phase 0: {:?}", region);
+                    Ok(())
+                },
+            )
+            .unwrap();
+
+        Ok(())
+    }
+
+    /// Performs the actual computation on the circuit (e.g., witness generation), populating the lookup table and filling in all the advice values for a particular proof.
+    pub fn synthesize_ref_layouter_phase_1(
+        &self,
+        config: BaseConfig<F>,
+        layouter: &mut impl Layouter<F>,
+    ) -> Result<(), Error> {
+        // SecondPhase (phase 1)
+        layouter
+            .assign_region(
+                || "base phase 1",
+                |mut region| {
+                    let usable_rows = config.gate().max_rows;
+                    println!("region before phase 1: {:?}", region);
+                    println!("base gate len: {:?}", config.gate().basic_gates.len());
                     if self.core.phase_manager.len() > 1 {
                         self.core.phase_manager[1].assign_raw(
                             &(config.gate().basic_gates[1].clone(), usable_rows),
@@ -167,20 +196,57 @@ impl<F: ScalarField> BaseCircuitBuilder<F> {
 
                     // Only assign cells to lookup if we're sure we're doing range lookups
                     if let MaybeRangeConfig::WithRange(config) = &config.base {
-                        self.assign_lookups_in_phase(config, &mut region, 0);
-                        if self.core.phase_manager.len() > 1 {
-                            self.assign_lookups_in_phase(config, &mut region, 1);
-                        }
+                        // if self.core.phase_manager.len() > 1 {
+                        self.assign_lookups_in_phase(config, &mut region, 1);
+                        // }
                     }
-                    // Impose equality constraints
-                    if !self.core.witness_gen_only() {
-                        self.core.copy_manager.assign_raw(config.constants(), &mut region);
-                    }
+                    println!("region after phase 1: {:?}", region);
+
                     Ok(())
                 },
             )
             .unwrap();
-        self.assign_instances(&config.instance, layouter.namespace(|| "expose"));
+
+        Ok(())
+    }
+
+    /// Performs the actual computation on the circuit (e.g., witness generation), populating the lookup table and filling in all the advice values for a particular proof.
+    pub fn synthesize_ref_layouter_final(
+        &self,
+        config: BaseConfig<F>,
+        layouter: &mut impl Layouter<F>,
+    ) -> Result<(), Error> {
+        // finalize
+        layouter
+            .assign_region(
+                || "constants assignments + copy constraints",
+                |mut region| {
+                    println!("region before final phase: {:?}", region);
+
+                    // Impose equality constraints
+                    if !self.core.witness_gen_only() {
+                        self.core.copy_manager.assign_raw(config.constants(), &mut region);
+                    }
+
+                    println!("region after final phase: {:?}", region);
+                    Ok(())
+                },
+            )
+            .unwrap();
+
+        self.assign_instances(&config.instance, layouter.namespace(|| "expose instances"));
+        Ok(())
+    }
+
+    /// Performs the actual computation on the circuit (e.g., witness generation), populating the lookup table and filling in all the advice values for a particular proof.
+    pub fn synthesize_ref_layouter(
+        &self,
+        config: BaseConfig<F>,
+        layouter: &mut impl Layouter<F>,
+    ) -> Result<(), Error> {
+        self.synthesize_ref_layouter_phase_0(config.clone(), layouter)?;
+        // self.synthesize_ref_layouter_phase_1(config.clone(), layouter)?;
+        self.synthesize_ref_layouter_final(config, layouter)?;
         Ok(())
     }
 }
