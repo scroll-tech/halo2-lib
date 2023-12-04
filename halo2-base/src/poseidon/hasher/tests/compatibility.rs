@@ -6,7 +6,7 @@ use crate::{
     poseidon::hasher::PoseidonSponge,
     utils::ScalarField,
 };
-use pse_poseidon::Poseidon;
+use poseidon::Poseidon;
 use rand::Rng;
 
 // make interleaved calls to absorb and squeeze elements and

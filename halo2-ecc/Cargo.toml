@@ -32,7 +32,7 @@ test-log = "0.2.12"
 env_logger = "0.10.0"
 
 [features]
-default = ["jemallocator", "halo2-axiom", "display"]
+default = ["jemallocator", "halo2-pse", "display"]
 dev-graph = ["halo2-base/dev-graph"]
 display = ["halo2-base/display"]
 asm = ["halo2-base/asm"]
