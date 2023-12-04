@@ -114,7 +114,6 @@ impl<F: Field + Ord> Drop for CopyConstraintManager<F> {
         if !self.advice_equalities.is_empty() {
             dbg!("WARNING: advice_equalities not empty");
         }
-        println!("const equality: {:?}", self.constant_equalities);
         if !self.constant_equalities.is_empty() {
             dbg!("WARNING: constant_equalities not empty");
         }
