@@ -911,7 +911,7 @@ dependencies = [
  "criterion-macro",
  "ff 0.13.0",
  "halo2_proofs 0.2.0 (git+https://github.com/axiom-crypto/halo2.git?tag=v2023_01_17)",
- "halo2_proofs 0.2.0 (git+https://github.com/scroll-tech/halo2.git?branch=v1.0)",
+ "halo2_proofs 0.2.0 (git+https://github.com/scroll-tech/halo2.git?branch=v1.1)",
  "itertools",
  "jemallocator",
  "mimalloc",
@@ -968,7 +968,7 @@ dependencies = [
 [[package]]
 name = "halo2_proofs"
 version = "0.2.0"
-source = "git+https://github.com/scroll-tech/halo2.git?branch=v1.0#2f5ee1040e3cdef22e13d35865ecddce4a6130c7"
+source = "git+https://github.com/scroll-tech/halo2.git?branch=v1.1#84003a202d6b9185c952ec91ea793dbbd6c5b200"
 dependencies = [
  "ark-std",
  "blake2b_simd",
@@ -1614,7 +1614,7 @@ dependencies = [
 [[package]]
 name = "poseidon"
 version = "0.2.0"
-source = "git+https://github.com/scroll-tech/poseidon.git?branch=sync-ff-0.13#5787dd3d2ce7a9e9601a035c396ac0c03449b54d"
+source = "git+https://github.com/scroll-tech/poseidon.git?branch=main#5787dd3d2ce7a9e9601a035c396ac0c03449b54d"
 dependencies = [
  "halo2curves 0.1.0",
  "subtle",
