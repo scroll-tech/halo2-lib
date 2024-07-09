@@ -336,12 +336,24 @@ where
     FC: FieldChip<F>,
     C: CurveAffine<Base = FC::FieldType>,
 {
+    // calculate y^2
     let lhs = chip.mul_no_carry(ctx, &P.y, &P.y);
+    // calculate x^2
     let mut rhs = chip.mul(ctx, &P.x, &P.x);
+    // calculate x^3
     rhs = chip.mul_no_carry(ctx, &rhs, &P.x);
 
+    let a = FC::fe_to_constant(C::a());
     let b = FC::fe_to_constant(C::b());
+    // calculate x^3 + b
     rhs = chip.add_constant_no_carry(ctx, &rhs, b);
+    // calculate `a*x` part of the whole equation: `y^2= x^3 + a*x + b`, if a = 0 (for secp256k1),
+    // `a*x` is zero.
+    // add chip.mul_constant helper ?
+    let ax = chip.mul(ctx, &P.x, a.into());
+    // calculate x^3 + a*x  + b
+    rhs = chip.add_no_carry(ctx, &rhs, &ax);
+
     let diff = chip.sub_no_carry(ctx, &lhs, &rhs);
     chip.check_carry_mod_to_zero(ctx, &diff)
 }
