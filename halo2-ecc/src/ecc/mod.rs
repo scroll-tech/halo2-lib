@@ -627,8 +627,15 @@ impl<F: PrimeField, FC: FieldChip<F>> EccChip<F, FC> {
         let mut rhs = self.field_chip.mul(ctx, &P.x, &P.x);
         rhs = self.field_chip.mul_no_carry(ctx, &rhs, &P.x);
 
+        let a = FC::fe_to_constant(C::a());
         let b = FC::fe_to_constant(C::b());
         rhs = self.field_chip.add_constant_no_carry(ctx, &rhs, b);
+        // calculate `a*x` part of the whole equation: `y^2= x^3 + a*x + b`, if a = 0 (for secp256k1),
+        // `a*x` is zero.
+        // add chip.mul_constant helper ?
+        let ax = chip.mul(ctx, &P.x, a.into());
+        // calculate x^3 + a*x  + b
+        rhs = chip.add_no_carry(ctx, &rhs, &ax);
         let mut diff = self.field_chip.sub_no_carry(ctx, &lhs, &rhs);
         diff = self.field_chip.carry_mod(ctx, &diff);
 
