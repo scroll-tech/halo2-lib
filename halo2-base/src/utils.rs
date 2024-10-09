@@ -378,9 +378,10 @@ impl<C: CurveAffine> CurveAffineExt for C {}
 mod scalar_field_impls {
     use super::{decompose_u64_digits_to_limbs, ScalarField};
     use crate::halo2_proofs::halo2curves::{
-        bn256::{Fq as bn254Fq, Fr as bn254Fr},
-        secp256k1::{Fp as secpFp, Fq as secpFq},
         bls12_381::Scalar as blsScalar,
+        bn256::{Fq as bn254Fq, Fr as bn254Fr},
+        secp256k1::{Fp as secpk1Fp, Fq as secpk1Fq},
+        secp256r1::{Fp as secpr1Fp, Fq as secpr1Fq},
     };
     #[cfg(feature = "halo2-pse")]
     use ff::PrimeField;
@@ -445,8 +446,10 @@ mod scalar_field_impls {
 
     impl_scalar_field!(bn254Fr);
     impl_scalar_field!(bn254Fq);
-    impl_scalar_field!(secpFp);
-    impl_scalar_field!(secpFq);
+    impl_scalar_field!(secpk1Fp);
+    impl_scalar_field!(secpk1Fq);
+    impl_scalar_field!(secpr1Fp);
+    impl_scalar_field!(secpr1Fq);
     impl_scalar_field!(blsScalar);
 }
 
