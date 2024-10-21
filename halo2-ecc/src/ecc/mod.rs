@@ -138,24 +138,31 @@ pub fn ec_sub_unequal<F: PrimeField, FC: FieldChip<F>>(
 // formula from https://crypto.stanford.edu/pbc/notes/elliptic/explicit.html
 // assume y != 0 (otherwise 2P = O)
 
-// lamb =  3x^2 / (2 y) % p
+// lamb =  3x^2 + a / (2 y) % p
 // x_3 = out[0] = lambda^2 - 2 x % p
 // y_3 = out[1] = lambda (x - x_3) - y % p
 
 // we precompute lambda and constrain (2y) * lambda = 3 x^2 (mod p)
 // then we compute x_3 = lambda^2 - 2 x (mod p)
 //                 y_3 = lambda (x - x_3) - y (mod p)
-pub fn ec_double<F: PrimeField, FC: FieldChip<F>>(
+pub fn ec_double<F: PrimeField, FC: FieldChip<F>, C>(
     chip: &FC,
     ctx: &mut Context<F>,
     P: &EcPoint<F, FC::FieldPoint>,
-) -> EcPoint<F, FC::FieldPoint> {
+) -> EcPoint<F, FC::FieldPoint>
+ where C : CurveAffine<Base = FC::FieldType>, 
+ {
     // removed optimization that computes `2 * lambda` while assigning witness to `lambda` simultaneously, in favor of readability. The difference is just copying `lambda` once
     let two_y = chip.scalar_mul_no_carry(ctx, &P.y, 2);
     let three_x = chip.scalar_mul_no_carry(ctx, &P.x, 3);
     let three_x_sq = chip.mul_no_carry(ctx, &three_x, &P.x);
-    let lambda = chip.divide_unsafe(ctx, &three_x_sq, &two_y);
-
+    
+    // add a, for secp256k1 a = 0, for secp256r1, a > 0
+    let a_const = FC::fe_to_constant(C::a());
+    let three_x_plus_a = chip.add_constant_no_carry(ctx, &three_x_sq, a_const);
+    
+    let lambda = chip.divide_unsafe(ctx, &three_x_plus_a, &two_y);
+    
     // x_3 = lambda^2 - 2 x % p
     let lambda_sq = chip.mul_no_carry(ctx, &lambda, &lambda);
     let two_x = chip.scalar_mul_no_carry(ctx, &P.x, 2);
@@ -292,7 +299,7 @@ where
     cached_points.push(P.clone());
     for idx in 2..cache_size {
         if idx == 2 {
-            let double = ec_double(chip, ctx, P /*, b*/);
+            let double = ec_double::<F, FC, C>(chip, ctx, P /*, b*/);
             cached_points.push(double.clone());
         } else {
             let new_point = ec_add_unequal(chip, ctx, &cached_points[idx - 1], P, false);
@@ -311,7 +318,7 @@ where
     for idx in 1..num_windows {
         let mut mult_point = curr_point.clone();
         for _ in 0..window_bits {
-            mult_point = ec_double(chip, ctx, &mult_point);
+            mult_point = ec_double::<F, FC, C>(chip, ctx, &mult_point);
         }
         let add_point = ec_select_from_bits::<F, FC>(
             chip,
@@ -430,7 +437,7 @@ where
     let mut rand_start_vec = Vec::with_capacity(k + window_bits);
     rand_start_vec.push(base);
     for idx in 1..(k + window_bits) {
-        let base_mult = ec_double(chip, ctx, &rand_start_vec[idx - 1]);
+        let base_mult = ec_double::<F, FC, C>(chip, ctx, &rand_start_vec[idx - 1]);
         rand_start_vec.push(base_mult);
     }
     assert!(rand_start_vec.len() >= k + window_bits);
@@ -481,7 +488,7 @@ where
     // compute \sum_i x_i P_i + (2^{k + 1} - 1) * A
     for idx in 0..num_windows {
         for _ in 0..window_bits {
-            curr_point = ec_double(chip, ctx, &curr_point);
+            curr_point = ec_double::<F, FC, C>(chip, ctx, &curr_point);
         }
         for (cached_points, rounded_bits) in
             cached_points.chunks(cache_size).zip(rounded_bits.chunks(rounded_bitlen))
@@ -692,7 +699,7 @@ impl<F: PrimeField, FC: FieldChip<F>> EccChip<F, FC> {
         ctx: &mut Context<F>,
         P: &EcPoint<F, FC::FieldPoint>,
     ) -> EcPoint<F, FC::FieldPoint> {
-        ec_double(&self.field_chip, ctx, P)
+        ec_double::<F, FC, C>(&self.field_chip, ctx, P)
     }
 
     pub fn is_equal(
