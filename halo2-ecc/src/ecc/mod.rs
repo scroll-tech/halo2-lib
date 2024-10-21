@@ -150,19 +150,20 @@ pub fn ec_double<F: PrimeField, FC: FieldChip<F>, C>(
     ctx: &mut Context<F>,
     P: &EcPoint<F, FC::FieldPoint>,
 ) -> EcPoint<F, FC::FieldPoint>
- where C : CurveAffine<Base = FC::FieldType>, 
- {
+where
+    C: CurveAffine<Base = FC::FieldType>,
+{
     // removed optimization that computes `2 * lambda` while assigning witness to `lambda` simultaneously, in favor of readability. The difference is just copying `lambda` once
     let two_y = chip.scalar_mul_no_carry(ctx, &P.y, 2);
     let three_x = chip.scalar_mul_no_carry(ctx, &P.x, 3);
     let three_x_sq = chip.mul_no_carry(ctx, &three_x, &P.x);
-    
+
     // add a, for secp256k1 a = 0, for secp256r1, a > 0
     let a_const = FC::fe_to_constant(C::a());
     let three_x_plus_a = chip.add_constant_no_carry(ctx, &three_x_sq, a_const);
-    
+
     let lambda = chip.divide_unsafe(ctx, &three_x_plus_a, &two_y);
-    
+
     // x_3 = lambda^2 - 2 x % p
     let lambda_sq = chip.mul_no_carry(ctx, &lambda, &lambda);
     let two_x = chip.scalar_mul_no_carry(ctx, &P.x, 2);
@@ -700,8 +701,9 @@ impl<F: PrimeField, FC: FieldChip<F>> EccChip<F, FC> {
         ctx: &mut Context<F>,
         P: &EcPoint<F, FC::FieldPoint>,
     ) -> EcPoint<F, FC::FieldPoint>
-    where C: CurveAffine<Base = FC::FieldType>
-     {
+    where
+        C: CurveAffine<Base = FC::FieldType>,
+    {
         ec_double::<F, FC, C>(&self.field_chip, ctx, P)
     }
 
@@ -769,8 +771,9 @@ where
         max_bits: usize,
         window_bits: usize,
     ) -> EcPoint<F, FC::FieldPoint>
-    where C: CurveAffine<Base = FC::FieldType>
-     {
+    where
+        C: CurveAffine<Base = FC::FieldType>,
+    {
         scalar_multiply::<F, FC, C>(&self.field_chip, ctx, P, scalar, max_bits, window_bits)
     }
 

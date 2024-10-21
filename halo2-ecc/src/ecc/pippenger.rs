@@ -12,7 +12,7 @@ use halo2_base::{gates::GateInstructions, utils::CurveAffineExt, AssignedValue, 
 // Output:
 // * new_points: length `points.len() * radix`
 // * new_bool_scalars: 2d array `ceil(scalar_bits / radix)` by `points.len() * radix`
-pub fn decompose<F, FC,C>(
+pub fn decompose<F, FC, C>(
     chip: &FC,
     ctx: &mut Context<F>,
     points: &[EcPoint<F, FC::FieldPoint>],
@@ -23,7 +23,7 @@ pub fn decompose<F, FC,C>(
 where
     F: PrimeField,
     FC: FieldChip<F>,
-    C: CurveAffineExt<Base = FC::FieldType>, 
+    C: CurveAffineExt<Base = FC::FieldType>,
 {
     assert_eq!(points.len(), scalars.len());
     let scalar_bits = max_scalar_bits_per_cell * scalars[0].len();
@@ -39,7 +39,7 @@ where
         new_points.push(g);
         for _ in 1..radix {
             // if radix > 1, this does not work if `points` contains identity point
-            g = ec_double::<F,FC, C>(chip, ctx, new_points.last().unwrap());
+            g = ec_double::<F, FC, C>(chip, ctx, new_points.last().unwrap());
             new_points.push(g);
         }
         let mut bits = Vec::with_capacity(scalar_bits);
