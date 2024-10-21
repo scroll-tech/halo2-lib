@@ -6,6 +6,7 @@ use crate::halo2_proofs::{
     halo2curves::bn256::{self, G1Affine, G2Affine, SIX_U_PLUS_2_NAF},
     halo2curves::bn256::{Fq, Fq2, FROBENIUS_COEFF_FQ12_C1},
     plonk::ConstraintSystem,
+    arithmetic::CurveAffine,
 };
 use crate::{
     ecc::{EcPoint, EccChip},
@@ -215,13 +216,15 @@ pub fn fp12_multiply_with_line_equal<F: PrimeField>(
 //  - `0 <= loop_count < r` and `loop_count < p` (to avoid [loop_count]Q' = Frob_p(Q'))
 //  - x^3 + b = 0 has no solution in Fp2, i.e., the y-coordinate of Q cannot be 0.
 
-pub fn miller_loop_BN<F: PrimeField>(
+pub fn miller_loop_BN<F: PrimeField, C>(
     ecc_chip: &EccChip<F, Fp2Chip<F>>,
     ctx: &mut Context<F>,
     Q: &EcPoint<F, FqPoint<F>>,
     P: &EcPoint<F, FpPoint<F>>,
     pseudo_binary_encoding: &[i8],
-) -> FqPoint<F> {
+) -> FqPoint<F> 
+ where C: CurveAffine<Base = Fp2Chip<F>>,
+{
     let mut i = pseudo_binary_encoding.len() - 1;
     while pseudo_binary_encoding[i] == 0 {
         i -= 1;
@@ -262,7 +265,7 @@ pub fn miller_loop_BN<F: PrimeField>(
             let f_sq = fp12_chip.mul(ctx, &f, &f);
             f = fp12_multiply_with_line_equal::<F>(ecc_chip.field_chip(), ctx, &f_sq, &R, P);
         }
-        R = ecc_chip.double(ctx, &R);
+        R = ecc_chip.double::<C>(ctx, &R);
 
         assert!(pseudo_binary_encoding[i] <= 1 && pseudo_binary_encoding[i] >= -1);
         if pseudo_binary_encoding[i] != 0 {

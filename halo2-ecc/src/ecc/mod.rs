@@ -236,7 +236,7 @@ where
 // - `scalar_i < 2^{max_bits} for all i` (constrained by num_to_bits)
 // - `max_bits <= modulus::<F>.bits()`
 //   * P has order given by the scalar field modulus
-pub fn scalar_multiply<F: PrimeField, FC>(
+pub fn scalar_multiply<F: PrimeField, FC, C>(
     chip: &FC,
     ctx: &mut Context<F>,
     P: &EcPoint<F, FC::FieldPoint>,
@@ -246,6 +246,7 @@ pub fn scalar_multiply<F: PrimeField, FC>(
 ) -> EcPoint<F, FC::FieldPoint>
 where
     FC: FieldChip<F> + Selectable<F, Point = FC::FieldPoint>,
+    C: CurveAffineExt<Base = FC::FieldType>,
 {
     assert!(!scalar.is_empty());
     assert!((max_bits as u64) <= modulus::<F>().bits());
@@ -694,11 +695,13 @@ impl<F: PrimeField, FC: FieldChip<F>> EccChip<F, FC> {
         ec_sub_unequal(&self.field_chip, ctx, P, Q, is_strict)
     }
 
-    pub fn double(
+    pub fn double<C>(
         &self,
         ctx: &mut Context<F>,
         P: &EcPoint<F, FC::FieldPoint>,
-    ) -> EcPoint<F, FC::FieldPoint> {
+    ) -> EcPoint<F, FC::FieldPoint>
+    where C: CurveAffine<Base = FC::FieldType>
+     {
         ec_double::<F, FC, C>(&self.field_chip, ctx, P)
     }
 
@@ -758,15 +761,17 @@ where
         ec_select(&self.field_chip, ctx, P, Q, condition)
     }
 
-    pub fn scalar_mult(
+    pub fn scalar_mult<C>(
         &self,
         ctx: &mut Context<F>,
         P: &EcPoint<F, FC::FieldPoint>,
         scalar: &Vec<AssignedValue<F>>,
         max_bits: usize,
         window_bits: usize,
-    ) -> EcPoint<F, FC::FieldPoint> {
-        scalar_multiply::<F, FC>(&self.field_chip, ctx, P, scalar, max_bits, window_bits)
+    ) -> EcPoint<F, FC::FieldPoint>
+    where C: CurveAffine<Base = FC::FieldType>
+     {
+        scalar_multiply::<F, FC, C>(&self.field_chip, ctx, P, scalar, max_bits, window_bits)
     }
 
     // TODO: put a check in place that scalar is < modulus of C::Scalar

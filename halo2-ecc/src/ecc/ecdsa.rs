@@ -56,7 +56,7 @@ where
         base_chip.limb_bits,
         fixed_window_bits,
     );
-    let u2_mul = scalar_multiply::<F, _>(
+    let u2_mul = scalar_multiply::<F, _, GA>(
         base_chip,
         ctx,
         pubkey,
