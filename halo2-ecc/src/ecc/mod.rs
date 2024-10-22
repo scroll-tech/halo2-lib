@@ -142,7 +142,7 @@ pub fn ec_sub_unequal<F: PrimeField, FC: FieldChip<F>>(
 // x_3 = out[0] = lambda^2 - 2 x % p
 // y_3 = out[1] = lambda (x - x_3) - y % p
 
-// we precompute lambda and constrain (2y) * lambda = 3 x^2 (mod p)
+// we precompute lambda and constrain (2y) * lambda = 3 x^2 + a(mod p)
 // then we compute x_3 = lambda^2 - 2 x (mod p)
 //                 y_3 = lambda (x - x_3) - y (mod p)
 pub fn ec_double<F: PrimeField, FC: FieldChip<F>, C>(
