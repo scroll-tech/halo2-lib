@@ -1,6 +1,6 @@
-use std::{env::var, fs::File};
-
+use ff::Field;
 use halo2_base::SKIP_FIRST_PASS;
+use std::{env::var, fs::File};
 
 use super::*;
 

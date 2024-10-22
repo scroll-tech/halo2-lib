@@ -10,6 +10,7 @@ mod fp {
         halo2curves::bn256::{Fq, Fr},
         plonk::*,
     };
+    use ff::Field;
     use halo2_base::{
         utils::{fe_to_biguint, modulus},
         SKIP_FIRST_PASS,
@@ -141,6 +142,7 @@ mod fp12 {
         halo2curves::bn256::{Fq, Fq12, Fr},
         plonk::*,
     };
+    use ff::Field;
     use halo2_base::utils::modulus;
     use halo2_base::SKIP_FIRST_PASS;
     use std::marker::PhantomData;

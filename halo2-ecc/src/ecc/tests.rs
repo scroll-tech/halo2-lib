@@ -110,7 +110,7 @@ impl<F: PrimeField> Circuit<F> for MyCircuit<F> {
 
                 // test double
                 {
-                    let doub = chip.double(ctx, &P_assigned);
+                    let doub = chip.double::<G1Affine>(ctx, &P_assigned);
                     assert_eq!(
                         value_to_option(doub.x.truncation.to_bigint(config.limb_bits)),
                         value_to_option(doub.x.value.clone())

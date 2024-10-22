@@ -2,11 +2,11 @@
 use super::{Fp12Chip, Fp2Chip, FpChip, FpPoint, FqPoint};
 use crate::fields::PrimeField;
 use crate::halo2_proofs::{
+    arithmetic::CurveAffine,
     circuit::Value,
     halo2curves::bn256::{self, G1Affine, G2Affine, SIX_U_PLUS_2_NAF},
     halo2curves::bn256::{Fq, Fq2, FROBENIUS_COEFF_FQ12_C1},
     plonk::ConstraintSystem,
-    arithmetic::CurveAffine,
 };
 use crate::{
     ecc::{EcPoint, EccChip},
@@ -222,8 +222,9 @@ pub fn miller_loop_BN<F: PrimeField, C>(
     Q: &EcPoint<F, FqPoint<F>>,
     P: &EcPoint<F, FpPoint<F>>,
     pseudo_binary_encoding: &[i8],
-) -> FqPoint<F> 
- where C: CurveAffine<Base = Fp2Chip<F>>,
+) -> FqPoint<F>
+where
+    C: CurveAffine<Base = Fq2>,
 {
     let mut i = pseudo_binary_encoding.len() - 1;
     while pseudo_binary_encoding[i] == 0 {
@@ -303,12 +304,15 @@ pub fn miller_loop_BN<F: PrimeField, C>(
 
 // let pairs = [(a_i, b_i)], a_i in G_1, b_i in G_2
 // output is Prod_i e'(a_i, b_i), where e'(a_i, b_i) is the output of `miller_loop_BN(b_i, a_i)`
-pub fn multi_miller_loop_BN<F: PrimeField>(
+pub fn multi_miller_loop_BN<F: PrimeField, C>(
     ecc_chip: &EccChip<F, Fp2Chip<F>>,
     ctx: &mut Context<F>,
     pairs: Vec<(&EcPoint<F, FpPoint<F>>, &EcPoint<F, FqPoint<F>>)>,
     pseudo_binary_encoding: &[i8],
-) -> FqPoint<F> {
+) -> FqPoint<F>
+where
+    C: CurveAffine<Base = Fq2>,
+{
     let mut i = pseudo_binary_encoding.len() - 1;
     while pseudo_binary_encoding[i] == 0 {
         i -= 1;
@@ -357,7 +361,7 @@ pub fn multi_miller_loop_BN<F: PrimeField>(
             }
         }
         for r in r.iter_mut() {
-            *r = ecc_chip.double(ctx, &r);
+            *r = ecc_chip.double::<C>(ctx, &r);
         }
 
         assert!(pseudo_binary_encoding[i] <= 1 && pseudo_binary_encoding[i] >= -1);
@@ -520,7 +524,7 @@ impl<F: PrimeField> PairingChip<F> {
     ) -> FqPoint<F> {
         let fp2_chip = Fp2Chip::<F>::construct(self.fp_chip.clone());
         let g2_chip = EccChip::construct(fp2_chip);
-        miller_loop_BN::<F>(
+        miller_loop_BN::<F, G2Affine>(
             &g2_chip,
             ctx,
             Q,
@@ -536,7 +540,7 @@ impl<F: PrimeField> PairingChip<F> {
     ) -> FqPoint<F> {
         let fp2_chip = Fp2Chip::<F>::construct(self.fp_chip.clone());
         let g2_chip = EccChip::construct(fp2_chip);
-        multi_miller_loop_BN::<F>(
+        multi_miller_loop_BN::<F, G2Affine>(
             &g2_chip,
             ctx,
             pairs,
