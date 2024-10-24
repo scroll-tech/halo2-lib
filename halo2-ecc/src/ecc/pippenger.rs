@@ -12,7 +12,7 @@ use halo2_base::{gates::GateInstructions, utils::CurveAffineExt, AssignedValue, 
 // Output:
 // * new_points: length `points.len() * radix`
 // * new_bool_scalars: 2d array `ceil(scalar_bits / radix)` by `points.len() * radix`
-pub fn decompose<F, FC>(
+pub fn decompose<F, FC, C>(
     chip: &FC,
     ctx: &mut Context<F>,
     points: &[EcPoint<F, FC::FieldPoint>],
@@ -23,6 +23,7 @@ pub fn decompose<F, FC>(
 where
     F: PrimeField,
     FC: FieldChip<F>,
+    C: CurveAffineExt<Base = FC::FieldType>,
 {
     assert_eq!(points.len(), scalars.len());
     let scalar_bits = max_scalar_bits_per_cell * scalars[0].len();
@@ -38,7 +39,7 @@ where
         new_points.push(g);
         for _ in 1..radix {
             // if radix > 1, this does not work if `points` contains identity point
-            g = ec_double(chip, ctx, new_points.last().unwrap());
+            g = ec_double::<F, FC, C>(chip, ctx, new_points.last().unwrap());
             new_points.push(g);
         }
         let mut bits = Vec::with_capacity(scalar_bits);
@@ -88,7 +89,7 @@ where
         // for later addition collision-prevension, we need a different random point per round
         // we take 2^round * rand_base
         if round > 0 {
-            rand_point = ec_double(chip, ctx, &rand_point);
+            rand_point = ec_double::<F, FC, C>(chip, ctx, &rand_point);
         }
         // stores { rand_point, rand_point + points[0], rand_point + points[1], rand_point + points[0] + points[1] , ... }
         // since rand_point is random, we can always use add_unequal (with strict constraint checking that the points are indeed unequal and not negative of each other)
@@ -129,7 +130,7 @@ where
     }
 
     // we have acc[j] = G'[j] + (2^num_rounds - 1) * rand_base
-    rand_point = ec_double(chip, ctx, &rand_point);
+    rand_point = ec_double::<F, FC, C>(chip, ctx, &rand_point);
     rand_point = ec_sub_unequal(chip, ctx, &rand_point, &rand_base, false);
 
     (acc, rand_point)
@@ -149,7 +150,7 @@ where
     C: CurveAffineExt<Base = FC::FieldType>,
 {
     let (points, bool_scalars) =
-        decompose::<F, _>(chip, ctx, points, scalars, max_scalar_bits_per_cell, radix);
+        decompose::<F, _, C>(chip, ctx, points, scalars, max_scalar_bits_per_cell, radix);
 
     /*
     let t = bool_scalars.len();
@@ -179,8 +180,8 @@ where
     let mut rand_sum = rand_point.clone();
     for g in agg.iter().rev() {
         for _ in 0..radix {
-            sum = ec_double(chip, ctx, &sum);
-            rand_sum = ec_double(chip, ctx, &rand_sum);
+            sum = ec_double::<F, FC, C>(chip, ctx, &sum);
+            rand_sum = ec_double::<F, FC, C>(chip, ctx, &rand_sum);
         }
         sum = ec_add_unequal(chip, ctx, &sum, g, true);
         chip.enforce_less_than(ctx, sum.x());
@@ -192,7 +193,7 @@ where
     }
 
     if radix == 1 {
-        rand_sum = ec_double(chip, ctx, &rand_sum);
+        rand_sum = ec_double::<F, FC, C>(chip, ctx, &rand_sum);
         // assume 2^t != +-1 mod modulus::<F>()
         rand_sum = ec_sub_unequal(chip, ctx, &rand_sum, &rand_point, false);
     }
